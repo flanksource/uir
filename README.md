@@ -2,7 +2,7 @@
 
 A language-agnostic model for describing code: modules, packages, types, methods, records, relational tables, endpoints and the statements inside method bodies. Extractors emit UIR; generators and analysers consume it.
 
-The Go types in the root `uir` package are the canonical model. `UIR.md` is the model reference; `uir-api.md` covers the broader architecture; `schema/uir.schema.json` is the JSON Schema for the serialized form.
+The Go types in the root `uir` package are the canonical model. `UIR.md` is the model reference; `uir-api.md` covers the broader architecture; `schema/uir.schema.json` is the JSON Schema for the serialized form, generated from those Go types by `make schema` — see [Schema](#schema).
 
 ```go
 import "github.com/flanksource/uir"
@@ -15,8 +15,18 @@ import "github.com/flanksource/uir"
 | `.` (`package uir`) | The model: node and statement types, enums, identifiers, fluent builders, pretty printers, semantic hashing, polymorphic JSON, and tree traversal. |
 | `diff/` | Structural diffing. `DiffNode` compares two nodes; `DiffTree` compares whole documents and classifies renames and moves. |
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
+| `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
+| `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
 | `python/` | A parallel Python port of the model (pure stdlib). |
 | `java/` | A parallel Java port of the model (Jackson-based, source only — no build file is checked in). |
+
+## Schema
+
+`schema/uir.schema.json` is generated, never hand-edited. Run `make schema` after changing a model type, an enum constant or a doc comment; `TestSchemaIsUpToDate` fails the build when the checked-in file no longer matches the Go types.
+
+The generator (`internal/schemagen`, driven by `cmd/genschema`) reflects over the same fields `encoding/json` marshals, and reads the package source for the two things reflection cannot see: doc comments, which become `description`, and the values of typed string constants, which become `enum` — most `StatementType` values are concatenations of other constants rather than literals, so they only resolve under a type check.
+
+The document root is `oneOf` a `UIR` object and the flat array of nodes that `uir.UnmarshalJSON` reads. `#/$defs/Node` and `#/$defs/Statement` are the polymorphic unions, driven by the `uir.Nodes` and `uir.Statements` registries: registering a type is all it takes to describe it. Each member pins its own discriminator (`node_type`, `statement_type`) with `const`, so a validator can name the kind it failed on.
 
 ## Building a document
 

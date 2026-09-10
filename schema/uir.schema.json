@@ -1,38 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "UIR",
-  "type": "object",
-  "description": "Universal Intermediate Representation for code analysis",
+  "description": "UIR is the root structure containing all top-level modules, packages, types, records, and functions Nodes in the UIR are placed at their lowest level, i.e a MethodNode will be inside a TypedNode, which is inside a PackageNode, which is inside a ModuleNode. It serves as the entry point for representing code structure in a language-agnostic way.",
   "oneOf": [
     {
-      "$ref": "#/$defs/PackageNode"
+      "$ref": "#/$defs/UIR"
     },
     {
-      "$ref": "#/$defs/TypedNode"
-    },
-    {
-      "$ref": "#/$defs/MethodNode"
-    },
-    {
-      "$ref": "#/$defs/ASTRecord"
-    },
-    {
-      "$ref": "#/$defs/ASTEndpoint"
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Node"
+      }
     }
   ],
   "$defs": {
     "ASTEndpoint": {
       "type": "object",
       "properties": {
-        "content": {
-          "type": "string"
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
         },
         "endpointType": {
-          "type": "string"
+          "$ref": "#/$defs/EndpointType"
         },
         "errors": {
-          "type": "array",
           "description": "Errors represents a list of errors that can be returned by an endpoint",
+          "type": "array",
           "items": {
             "$ref": "#/$defs/ASTError"
           }
@@ -43,27 +45,49 @@
             "type": "string"
           }
         },
-        "id": {
+        "field": {
           "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
         },
         "input": {
           "$ref": "#/$defs/ASTRecord"
         },
-        "language": {
+        "method": {
+          "description": "HTTP Method e.g. \"GET\", \"POST\" or \"PUT\"",
+          "$ref": "#/$defs/EndpointPointMethod"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
-        },
-        "name": {
-          "type": "string"
+        "node_type": {
+          "type": "string",
+          "const": "endpoint"
         },
         "output": {
           "$ref": "#/$defs/ASTRecord"
         },
-        "urn": {
-          "type": "string",
-          "description": "URN is the endpoint type specific unique resource name, e.g. http://example.com/api/v1 or kafka://topic-name"
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -75,33 +99,26 @@
           "description": "Numeric Code e.g. HTTP status code or other protocol specific code",
           "$ref": "#/$defs/TypedValue"
         },
-        "content": {
-          "type": "string"
-        },
         "description": {
           "type": "string"
         },
         "errorType": {
-          "type": "string"
+          "$ref": "#/$defs/ASTErrorType"
         },
         "id": {
           "type": "string"
         },
-        "language": {
-          "type": "string"
-        },
-        "location": {
-          "$ref": "#/$defs/Location"
-        },
         "name": {
           "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
         }
       },
       "additionalProperties": false
     },
     "ASTErrorType": {
       "type": "string",
-      "description": "Type of error",
       "enum": [
         "syntax",
         "validation",
@@ -129,9 +146,6 @@
             "$ref": "#/$defs/Comment"
           }
         },
-        "content": {
-          "type": "string"
-        },
         "description": {
           "type": "string"
         },
@@ -142,11 +156,14 @@
           }
         },
         "extends": {
-          "type": "array",
           "description": "Extends a record by including all the fields and references from the referenced record When there are conflicts the final record takes precedence, followed by the first record in the extends list etc. This allows for reusing and composing records in a flexible way",
+          "type": "array",
           "items": {
             "$ref": "#/$defs/ASTRecord"
           }
+        },
+        "field": {
+          "type": "string"
         },
         "fields": {
           "type": "array",
@@ -155,32 +172,48 @@
           }
         },
         "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
           "type": "string"
         },
-        "language": {
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
+        "node_type": {
+          "type": "string",
+          "const": "record"
         },
-        "name": {
+        "package": {
+          "description": "The package or database scheme the node belongs to",
           "type": "string"
         },
         "properties": {
           "type": "object",
-          "description": "Language specific properties",
-          "items": {
-            "type": "object"
-          }
+          "additionalProperties": {}
         },
         "recordType": {
-          "type": "string"
+          "$ref": "#/$defs/RecordType"
         },
         "references": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/RecordReference"
           }
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
         },
         "validation": {
           "$ref": "#/$defs/RecordValidation"
@@ -191,24 +224,42 @@
     "Annotation": {
       "type": "object",
       "properties": {
-        "module": {
+        "field": {
+          "type": "string"
+        },
+        "id": {
           "type": "string",
-          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
         },
         "package": {
-          "type": "string",
-          "description": "Name of the package e.g. \"models\""
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
         },
         "type": {
-          "type": "string",
-          "description": "Type or Class name"
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
         },
         "value": {
           "$ref": "#/$defs/TypedValue"
         },
         "values": {
           "type": "object",
-          "items": {
+          "additionalProperties": {
             "$ref": "#/$defs/TypedValue"
           }
         }
@@ -217,7 +268,6 @@
     },
     "AssignmentOp": {
       "type": "string",
-      "description": "Assignment operator",
       "enum": [
         "=",
         "+=",
@@ -225,21 +275,70 @@
         "*=",
         "/=",
         "%=",
-        "\u0026=",
-        "|="
+        "&=",
+        "|=",
+        "**=",
+        "??=",
+        "&&=",
+        "||=",
+        "append"
       ]
     },
     "AssignmentStmt": {
       "type": "object",
       "properties": {
-        "op": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "isDeclaration": {
+          "description": "IsDeclaration marks this assignment as the first introduction of the binding in its scope. Language emitters render it as a declaration (`let X = expr;` in TypeScript, `var X := expr` in Go-ish, etc.) instead of a plain assignment. Op stays as AssignmentOpAssign.",
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "op": {
+          "$ref": "#/$defs/AssignmentOp"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment"
         },
         "target": {
-          "$ref": "#/$defs/PackageVariableRef"
-        },
-        "type": {
-          "type": "string"
+          "$ref": "#/$defs/ScopedVariableRef"
         },
         "value": {
           "$ref": "#/$defs/ExprStmt"
@@ -249,16 +348,15 @@
     },
     "BinaryOp": {
       "type": "string",
-      "description": "Binary operator for comparisons and arithmetic",
       "enum": [
-        "\u0026\u0026",
+        "&&",
         "||",
         "==",
         "!=",
-        "\u003c",
-        "\u003c=",
-        "\u003e",
-        "\u003e=",
+        "<",
+        "<=",
+        ">",
+        ">=",
         "+",
         "-",
         "*",
@@ -269,23 +367,76 @@
         "regex",
         "startsWith",
         "endsWith",
-        "contains"
+        "contains",
+        "??",
+        "?.",
+        "in",
+        "instanceof",
+        "**",
+        "&",
+        "|",
+        "^",
+        "<<",
+        ">>",
+        ">>>",
+        "===",
+        "!=="
       ]
     },
     "BinaryStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
         "left": {
           "$ref": "#/$defs/ExprStmt"
         },
         "op": {
+          "$ref": "#/$defs/BinaryOp"
+        },
+        "path": {
           "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
         },
         "right": {
           "$ref": "#/$defs/ExprStmt"
         },
-        "type": {
-          "type": "string"
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:binary"
         }
       },
       "additionalProperties": false
@@ -293,18 +444,58 @@
     "BlockStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "children": {
           "type": "array",
           "items": {
-            "type": "object"
+            "$ref": "#/$defs/Statement"
           }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
         },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:block"
+        },
         "variables": {
-          "type": "array",
           "description": "Defines the variable declared in the block's scope",
+          "type": "array",
           "items": {
             "$ref": "#/$defs/RecordField"
           }
@@ -315,8 +506,48 @@
     "BreakStmt": {
       "type": "object",
       "properties": {
-        "type": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:break"
         }
       },
       "additionalProperties": false
@@ -324,24 +555,74 @@
     "CastStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
         "expr": {
           "$ref": "#/$defs/ExprStmt"
         },
-        "targetType": {
+        "language": {
           "type": "string"
         },
-        "type": {
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:cast"
+        },
+        "targetType": {
           "type": "string"
         }
       },
       "additionalProperties": false
     },
     "Comment": {
-      "type": "object",
       "description": "Comment represents a comment in the code",
+      "type": "object",
       "properties": {
+        "column": {
+          "type": "integer"
+        },
+        "context": {
+          "type": "string"
+        },
         "end_line": {
           "type": "integer"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
         },
         "path": {
           "type": "string"
@@ -353,14 +634,24 @@
           "type": "string"
         },
         "type": {
-          "type": "string"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommentType"
+            },
+            {
+              "type": "string",
+              "enum": [
+                ""
+              ]
+            }
+          ]
         }
       },
       "additionalProperties": false
     },
     "CommentType": {
+      "description": "CommentType represents the type of comment",
       "type": "string",
-      "description": "Type of comment",
       "enum": [
         "single_line",
         "multi_line",
@@ -370,11 +661,77 @@
     "ConditionStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
         "expr": {
           "$ref": "#/$defs/ExprStmt"
         },
-        "type": {
+        "language": {
           "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:condition"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConditionalFieldValidation": {
+      "description": "ConditionalFieldValidation applies Validation only when Condition holds. It is a pair rather than a map entry because Expression is a struct: encoding/json refuses struct map keys, so a keyed shape made the enclosing UIR unmarshalable.",
+      "type": "object",
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/Expression"
+        },
+        "validation": {
+          "$ref": "#/$defs/FieldValidation"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConditionalRecordValidation": {
+      "description": "ConditionalRecordValidation is the record-level counterpart of ConditionalFieldValidation.",
+      "type": "object",
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/Expression"
+        },
+        "validation": {
+          "$ref": "#/$defs/RecordValidation"
         }
       },
       "additionalProperties": false
@@ -382,8 +739,115 @@
     "ConstDeclStmt": {
       "type": "object",
       "properties": {
-        "type": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "defaultValue": {
+          "$ref": "#/$defs/TypedValue"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "field": {
+          "type": "string"
+        },
+        "fieldType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordFieldType"
+            },
+            {
+              "type": "string",
+              "enum": [
+                ""
+              ]
+            }
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "label": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:const"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "validation": {
+          "$ref": "#/$defs/FieldValidation"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        },
+        "writeOnly": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -391,15 +855,236 @@
     "ContinueStmt": {
       "type": "object",
       "properties": {
-        "type": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:continue"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DestructureBinding": {
+      "type": "object",
+      "properties": {
+        "alias": {
+          "description": "Alias if renamed (e.g. {name: alias})",
+          "type": "string"
+        },
+        "default": {
+          "description": "Default value if property is undefined",
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "name": {
+          "description": "The property name being extracted",
+          "type": "string"
+        },
+        "nested": {
+          "description": "Nested destructuring pattern",
+          "$ref": "#/$defs/DestructuringStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DestructuringStmt": {
+      "description": "DestructuringStmt represents destructuring assignment patterns e.g. const {a, b} = obj; const [x, y] = arr; const {a, ...rest} = obj",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "bindings": {
+          "description": "The destructured bindings (name → alias/default pairs)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DestructureBinding"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "declare": {
+          "description": "Declare selects the binding form. \"\" (the default) declares with `const`; DestructureDeclareLet declares a mutable binding; and DestructureDeclareNone assigns onto bindings that already exist in the enclosing scope, which is the only form that can target a name another statement also writes.",
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "isArray": {
+          "description": "Whether this is an object ({}) or array ([]) destructuring",
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "rest": {
+          "description": "The rest element (...rest)",
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:destructure"
+        },
+        "value": {
+          "description": "The source expression being destructured",
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DocStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocStmt"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "doc_type": {
+          "$ref": "#/$defs/DocType"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "doc"
+        },
+        "style": {
           "type": "string"
         }
       },
       "additionalProperties": false
     },
+    "DocType": {
+      "type": "string",
+      "enum": [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "comment",
+        "paragraph",
+        "document",
+        "blockquote",
+        "snippet",
+        "list",
+        "list_item",
+        "code_block"
+      ]
+    },
     "EndpointCallStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "arguments": {
           "type": "array",
           "items": {
@@ -415,15 +1100,63 @@
             "additionalProperties": false
           }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/Node"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call:api"
         }
       },
       "additionalProperties": false
     },
+    "EndpointPointMethod": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS",
+        "HEAD"
+      ]
+    },
     "EndpointType": {
       "type": "string",
-      "description": "Type of endpoint",
       "enum": [
         "soap",
         "jms",
@@ -434,18 +1167,64 @@
         "graphql"
       ]
     },
-    "ExprStmt": {
+    "ExportSpec": {
       "type": "object",
-      "description": "ExprStmt represents a value e.g. a literal, variable reference, method call, etc.",
       "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExprStmt": {
+      "description": "ExprStmt represents a value e.g. a literal, variable reference, result of a method call, etc.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "binary": {
           "$ref": "#/$defs/BinaryStmt"
         },
         "cast": {
           "$ref": "#/$defs/CastStmt"
         },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
         "endpoint_call": {
           "$ref": "#/$defs/EndpointCallStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
         },
         "literal": {
           "$ref": "#/$defs/LiteralStmt"
@@ -453,20 +1232,35 @@
         "method_call": {
           "$ref": "#/$defs/MethodCallStmt"
         },
+        "object_literal": {
+          "$ref": "#/$defs/ObjectLiteralStmt"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
         "record_read": {
           "$ref": "#/$defs/RecordReadStmt"
         },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:expression"
+        },
         "tuple": {
           "$ref": "#/$defs/TupleStmt"
-        },
-        "type": {
-          "type": "string"
         },
         "unary": {
           "$ref": "#/$defs/UnaryStmt"
         },
         "variable": {
-          "$ref": "#/$defs/PackageVariableRef"
+          "$ref": "#/$defs/ScopedVariableRef"
         }
       },
       "additionalProperties": false
@@ -474,8 +1268,14 @@
     "Expression": {
       "type": "object",
       "properties": {
+        "column": {
+          "type": "integer"
+        },
         "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
         },
         "expression": {
           "type": "string"
@@ -483,18 +1283,24 @@
         "language": {
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
         },
         "type": {
-          "type": "string"
+          "$ref": "#/$defs/ExpressionType"
         }
       },
       "additionalProperties": false
     },
     "ExpressionType": {
       "type": "string",
-      "description": "Type of expression",
       "enum": [
         "sql",
         "xpath",
@@ -512,70 +1318,77 @@
       "type": "object",
       "properties": {
         "conditions": {
-          "type": "object",
-          "description": "ConditionalValidation map to specific validation rules that apply when the condition is met",
+          "description": "Conditions carry validation rules that apply only when their condition is met, in the order they should be evaluated.",
+          "type": "array",
           "items": {
-            "$ref": "#/$defs/FieldValidation"
+            "$ref": "#/$defs/ConditionalFieldValidation"
           }
         },
         "enum": {
-          "type": "array",
           "description": "Applies to strings or arrays and indicates the allowed pattern",
+          "type": "array",
           "items": {
             "type": "string"
           }
         },
         "expressions": {
-          "type": "array",
           "description": "Expressions are custom validation rules that return true or false",
+          "type": "array",
           "items": {
             "$ref": "#/$defs/Expression"
+          }
+        },
+        "hints": {
+          "description": "Hints allows language/framework-specific generation hints to be attached without overloading metadata properties.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GeneratorHint"
           }
         },
         "max": {
           "type": "number"
         },
         "maxDate": {
-          "type": "string",
-          "description": "Date validation, with support for timestamps and date math"
+          "description": "Date validation, with support for timestamps and date math",
+          "type": "string"
         },
         "maxExclusive": {
           "type": "number"
         },
         "maxItems": {
-          "type": "integer",
-          "description": "Applies to arrays and indicates the maximum number of items"
+          "description": "Applies to arrays and indicates the maximum number of items",
+          "type": "integer"
         },
         "maxLength": {
-          "type": "integer",
-          "description": "Applies to strings and indicates the maximum length"
+          "description": "Applies to strings and indicates the maximum length",
+          "type": "integer"
         },
         "maxProperties": {
-          "type": "integer",
-          "description": "Applies to objects and indicates the maximum number of properties"
+          "description": "Applies to objects and indicates the maximum number of properties",
+          "type": "integer"
         },
         "min": {
-          "type": "number",
-          "description": "Applies to numeric types and indicates the minimum value"
+          "description": "Applies to numeric types and indicates the minimum value",
+          "type": "number"
         },
         "minDate": {
-          "type": "string",
-          "description": "Date validation, with support for timestamps and date math"
+          "description": "Date validation, with support for timestamps and date math",
+          "type": "string"
         },
         "minExclusive": {
           "type": "number"
         },
         "minItems": {
-          "type": "integer",
-          "description": "Applies to arrays and indicates the minimum number of items"
+          "description": "Applies to arrays and indicates the minimum number of items",
+          "type": "integer"
         },
         "minLength": {
-          "type": "integer",
-          "description": "Applies to strings and indicates the minimum length"
+          "description": "Applies to strings and indicates the minimum length",
+          "type": "integer"
         },
         "minProperties": {
-          "type": "integer",
-          "description": "Applies to objects and indicates the minimum number of properties"
+          "description": "Applies to objects and indicates the minimum number of properties",
+          "type": "integer"
         },
         "nonEmpty": {
           "type": "boolean"
@@ -586,23 +1399,88 @@
         "required": {
           "type": "boolean"
         },
+        "rules": {
+          "description": "Rules preserves provider-specific validation directives such as class-validator decorators without losing portability of the generic fields.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationRule"
+          }
+        },
         "sortedItems": {
-          "type": "boolean",
-          "description": "Applies to arrays and indicates whether the items need to be sorted"
+          "description": "Applies to arrays and indicates whether the items need to be sorted",
+          "type": "boolean"
         },
         "unique": {
           "type": "boolean"
         },
         "uniqueItems": {
-          "type": "boolean",
-          "description": "Applies to arrays and indicates whether the items need to be unique"
+          "description": "Applies to arrays and indicates whether the items need to be unique",
+          "type": "boolean"
         },
         "unitTypes": {
-          "type": "array",
           "description": "UnitTypes is a list of allowed unit types for the field",
+          "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/UnitType"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ForEachStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "iterable": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:loop:foreach"
+        },
+        "variable": {
+          "$ref": "#/$defs/AssignmentStmt"
         }
       },
       "additionalProperties": false
@@ -610,17 +1488,57 @@
     "ForStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "body": {
           "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
         },
         "cond": {
           "$ref": "#/$defs/ConditionStmt"
         },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
         "init": {
           "$ref": "#/$defs/AssignmentStmt"
         },
-        "type": {
+        "language": {
           "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:loop:for"
         },
         "update": {
           "$ref": "#/$defs/ExprStmt"
@@ -631,35 +1549,334 @@
     "FunctionDeclStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTError"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "isAsync": {
+          "type": "boolean"
+        },
+        "isGenerator": {
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "returnType": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "returns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:func"
+        },
         "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeParam"
+          }
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GeneratorHint": {
+      "type": "object",
+      "properties": {
+        "framework": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ValidationValue"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HierarchyAttachment": {
+      "type": "object",
+      "properties": {
+        "placementName": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "symbolRef": {
+          "$ref": "#/$defs/UIRSymbolRef"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HierarchyEdge": {
+      "type": "object",
+      "properties": {
+        "edgeKind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "targetId": {
           "type": "string"
         }
       },
       "additionalProperties": false
     },
-    "FunctionType": {
-      "type": "string",
-      "description": "Type of function",
-      "enum": [
-        "static",
-        "anonymous",
-        "instance"
-      ]
+    "HierarchyGraph": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HierarchyNode"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HierarchyNode": {
+      "type": "object",
+      "properties": {
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HierarchyAttachment"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HierarchyEdge"
+          }
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExportSpec"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "imports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ImportSpec"
+          }
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/TypedValue"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "IfStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
         "condition": {
           "$ref": "#/$defs/ConditionStmt"
+        },
+        "content": {
+          "type": "string"
         },
         "else": {
           "$ref": "#/$defs/BlockStmt"
         },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:if"
+        },
         "then": {
           "$ref": "#/$defs/BlockStmt"
-        },
-        "type": {
+        }
+      },
+      "additionalProperties": false
+    },
+    "ImportNamedSpec": {
+      "type": "object",
+      "properties": {
+        "alias": {
           "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ImportSpec": {
+      "type": "object",
+      "properties": {
+        "defaultName": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "named": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ImportNamedSpec"
+          }
+        },
+        "namespaceName": {
+          "type": "string"
+        },
+        "typeOnly": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -667,11 +1884,51 @@
     "LiteralStmt": {
       "type": "object",
       "properties": {
-        "fieldType": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
         },
-        "type": {
+        "end_line": {
+          "type": "integer"
+        },
+        "fieldType": {
+          "$ref": "#/$defs/RecordFieldType"
+        },
+        "language": {
           "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:literal"
         },
         "value": {
           "type": "string"
@@ -679,25 +1936,25 @@
       },
       "additionalProperties": false
     },
-    "Location": {
-      "type": "object",
-      "description": "Location represents a file location with line range",
-      "properties": {
-        "end_line": {
-          "type": "integer"
-        },
-        "path": {
-          "type": "string"
-        },
-        "start_line": {
-          "type": "integer"
-        }
-      },
-      "additionalProperties": false
-    },
     "MethodCallStmt": {
       "type": "object",
       "properties": {
+        "Method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Node"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "arguments": {
           "type": "array",
           "items": {
@@ -713,8 +1970,50 @@
             "additionalProperties": false
           }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "is_constructor": {
+          "description": "IsConstructor signals the language emitter that this call should be rendered as a constructor invocation (e.g. `new X(...)` in TS). When false (default), the call is a free function or method invocation. Language emitters that lack a `new` concept ignore this flag.",
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "receiver": {
+          "description": "nil if function call",
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call"
         }
       },
       "additionalProperties": false
@@ -737,32 +2036,40 @@
             "$ref": "#/$defs/Comment"
           }
         },
-        "content": {
-          "type": "string"
-        },
         "errors": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/ASTError"
           }
         },
-        "language": {
+        "field": {
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "isAsync": {
+          "type": "boolean"
+        },
+        "isGenerator": {
+          "type": "boolean"
         },
         "method": {
-          "type": "string",
-          "description": "Method name if applicable"
+          "description": "The method  the node belongs to",
+          "type": "string"
         },
         "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
           "type": "string",
-          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+          "const": "method"
         },
         "package": {
-          "type": "string",
-          "description": "Name of the package e.g. \"models\""
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
         },
         "params": {
           "type": "array",
@@ -772,10 +2079,10 @@
         },
         "properties": {
           "type": "object",
-          "description": "Language specific properties",
-          "items": {
-            "type": "object"
-          }
+          "additionalProperties": {}
+        },
+        "returnType": {
+          "$ref": "#/$defs/TypeReference"
         },
         "returns": {
           "type": "array",
@@ -783,12 +2090,221 @@
             "$ref": "#/$defs/RecordField"
           }
         },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
         "type": {
-          "type": "string",
-          "description": "Type or Class name"
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeParam"
+          }
         },
         "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModuleNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "field": {
           "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string",
+          "const": "module"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PackageNode"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Node": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModuleNode"
+        },
+        {
+          "$ref": "#/$defs/PackageNode"
+        },
+        {
+          "$ref": "#/$defs/TypedNode"
+        },
+        {
+          "$ref": "#/$defs/MethodNode"
+        },
+        {
+          "$ref": "#/$defs/ASTRecord"
+        },
+        {
+          "$ref": "#/$defs/ASTEndpoint"
+        },
+        {
+          "$ref": "#/$defs/RecordField"
+        },
+        {
+          "$ref": "#/$defs/RecordTable"
+        },
+        {
+          "$ref": "#/$defs/RecordColumn"
+        },
+        {
+          "$ref": "#/$defs/RecordIndex"
+        },
+        {
+          "$ref": "#/$defs/RecordForeignKey"
+        }
+      ]
+    },
+    "NodeType": {
+      "description": "NodeType is an alias for backward compatibility",
+      "type": "string",
+      "enum": [
+        "package",
+        "class",
+        "method",
+        "module",
+        "record",
+        "endpoint",
+        "function",
+        "record_field",
+        "table",
+        "column",
+        "index",
+        "foreign_key",
+        "dependency",
+        "interface",
+        "constructor",
+        "function_variable",
+        "package_variable",
+        "import",
+        "annotation",
+        "comment",
+        "",
+        "statement"
+      ]
+    },
+    "ObjectLiteralEntry": {
+      "description": "ObjectLiteralEntry is one key/value pair of an ObjectLiteralStmt.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ObjectLiteralStmt": {
+      "description": "ObjectLiteralStmt is an inline object literal expression, e.g. the TS `{ \"service.id\": ServiceID, Country: Country }`. Entries preserve insertion order; keys are quoted by the target emitter only when they are not bare identifiers. Distinct from TupleStmt (array literal) and from a sanitized variable reference — see ExprStmt.ObjectLiteral.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectLiteralEntry"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:object"
         }
       },
       "additionalProperties": false
@@ -808,14 +2324,14 @@
             "$ref": "#/$defs/Comment"
           }
         },
-        "content": {
-          "type": "string"
-        },
         "endpoints": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/ASTEndpoint"
           }
+        },
+        "field": {
+          "type": "string"
         },
         "functions": {
           "type": "array",
@@ -823,38 +2339,58 @@
             "$ref": "#/$defs/MethodNode"
           }
         },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
         "initFunctions": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/MethodNode"
           }
         },
-        "language": {
+        "method": {
+          "description": "The method  the node belongs to",
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
-        },
         "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
           "type": "string",
-          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+          "const": "package"
         },
         "package": {
-          "type": "string",
-          "description": "Name of the package e.g. \"models\""
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
         },
         "properties": {
           "type": "object",
-          "description": "Language specific properties",
-          "items": {
-            "type": "object"
-          }
+          "additionalProperties": {}
         },
         "records": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/ASTRecord"
           }
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordTable"
+          }
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
         },
         "types": {
           "type": "array",
@@ -871,24 +2407,174 @@
       },
       "additionalProperties": false
     },
-    "PackageVariableRef": {
+    "RawFile": {
+      "description": "RawFile is a verbatim file emitted into the output directory alongside generated code (e.g. package.json, tsconfig.json, eslint.config.mjs).",
       "type": "object",
       "properties": {
+        "content": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawStmt": {
+      "description": "RawStmt preserves unparseable source code verbatim for lossless round-tripping. Use this when the UIR type system cannot represent a language-specific construct.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "description": "The language this raw source is from",
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "source": {
+          "description": "The raw source code text",
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "raw"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordColumn": {
+      "description": "RecordColumn is one column of a RecordTable. SQLType and FieldType both survive on purpose: FieldType is the portable mapping a TypeScript or JSON-schema emitter wants, SQLType is the dialect's own spelling that a CONVERT() or a DDL round-trip needs. Identifier.Field holds the column name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "autoIncrement": {
+          "type": "boolean"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
         "defaultValue": {
-          "description": "Optional default value if the variable is null in the block",
           "$ref": "#/$defs/TypedValue"
         },
-        "module": {
-          "type": "string",
-          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+        "enum": {
+          "description": "Enum is the closed value set when the dialect declares one.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
-        "name": {
+        "field": {
+          "type": "string"
+        },
+        "fieldType": {
+          "description": "FieldType is the portable mapping of SQLType.",
+          "$ref": "#/$defs/RecordFieldType"
+        },
+        "id": {
           "type": "string",
-          "description": "The name or path of a variable in the current scope"
+          "format": "uuid"
+        },
+        "label": {
+          "type": "string"
+        },
+        "maxLength": {
+          "description": "MaxLength is the character width; -1 means unbounded (\"max\"/text).",
+          "type": "integer"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string",
+          "const": "column"
+        },
+        "nullable": {
+          "type": "boolean"
+        },
+        "ordinal": {
+          "description": "Ordinal is the 1-based position in the table, as the catalogue reports it.",
+          "type": "integer"
         },
         "package": {
-          "type": "string",
-          "description": "Name of the package e.g. \"models\""
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "precision": {
+          "type": "integer"
+        },
+        "primaryKey": {
+          "type": "boolean"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "scale": {
+          "type": "integer"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "sqlType": {
+          "description": "SQLType is the dialect type verbatim, e.g. \"uniqueidentifier\", \"nvarchar\", \"datetime2\".",
+          "type": "string"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -908,42 +2594,74 @@
             "$ref": "#/$defs/Comment"
           }
         },
-        "content": {
-          "type": "string"
-        },
         "defaultValue": {
           "$ref": "#/$defs/TypedValue"
         },
-        "fieldType": {
+        "field": {
           "type": "string"
+        },
+        "fieldType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordFieldType"
+            },
+            {
+              "type": "string",
+              "enum": [
+                ""
+              ]
+            }
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
         },
         "label": {
           "type": "string"
         },
-        "language": {
+        "method": {
+          "description": "The method  the node belongs to",
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
         },
-        "name": {
+        "node_type": {
+          "type": "string",
+          "const": "record_field"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
           "type": "string"
         },
         "properties": {
           "type": "object",
-          "description": "Language specific properties",
-          "items": {
-            "type": "object"
-          }
+          "additionalProperties": {}
         },
         "readOnly": {
           "type": "boolean"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeReference"
         },
         "validation": {
           "$ref": "#/$defs/FieldValidation"
         },
         "visibility": {
-          "type": "string"
+          "$ref": "#/$defs/Visibility"
         },
         "writeOnly": {
           "type": "boolean"
@@ -953,7 +2671,6 @@
     },
     "RecordFieldType": {
       "type": "string",
-      "description": "Type of record field",
       "enum": [
         "string",
         "number",
@@ -980,9 +2697,194 @@
         "map"
       ]
     },
+    "RecordForeignKey": {
+      "description": "RecordForeignKey is a foreign-key constraint on a RecordTable, kept as structure rather than a formatted string so a consumer can follow it. Identifier.Field holds the constraint name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "columns": {
+          "description": "Columns and ReferencedColumns are positionally paired.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string",
+          "const": "foreign_key"
+        },
+        "onDelete": {
+          "type": "string"
+        },
+        "onUpdate": {
+          "type": "string"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "referencedColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "referencedSchema": {
+          "type": "string"
+        },
+        "referencedTable": {
+          "type": "string"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordIndex": {
+      "description": "RecordIndex is an index on a RecordTable. Identifier.Field holds the index name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "clustered": {
+          "type": "boolean"
+        },
+        "columns": {
+          "description": "Columns are the key columns in index order — the order is what makes an index usable for a given predicate, so it is not sorted.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "condition": {
+          "description": "Condition is the filter predicate of a partial/filtered index.",
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "included": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "indexType": {
+          "description": "IndexType is the dialect's own kind, e.g. \"BTREE\", \"CLUSTERED\".",
+          "type": "string"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string",
+          "const": "index"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "primary": {
+          "type": "boolean"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "RecordReadStmt": {
       "type": "object",
       "properties": {
+        "Record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Node"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "arguments": {
           "type": "array",
           "items": {
@@ -998,8 +2900,48 @@
             "additionalProperties": false
           }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call:read:record"
+        },
+        "type": {
+          "$ref": "#/$defs/ExpressionType"
         }
       },
       "additionalProperties": false
@@ -1014,29 +2956,128 @@
           "type": "string"
         },
         "recordReferenceType": {
-          "type": "string"
+          "$ref": "#/$defs/RecordReferenceType"
         }
       },
       "additionalProperties": false
     },
     "RecordReferenceType": {
       "type": "string",
-      "description": "Type of record reference",
       "enum": [
         "foreignKey",
         "softKey"
       ]
     },
+    "RecordTable": {
+      "description": "RecordTable is a database table or view. It exists because ASTRecord cannot carry what a relational schema actually knows. A generic record has fields; a table has columns with a dialect type, an ordinal position and a nullability, an ordered primary key, indexes, and foreign keys pointing at other tables. Squeezing that into RecordField meant dropping most of it — the raw SQL type collapsed into a portable one, the primary key merged with auto-increment into ReadOnly, and indexes smuggled through a Properties map — so every consumer that needed the real thing went back to the database catalogue itself. Identity follows ASTRecord: Identifier.Package is the schema, Identifier.Type is the table name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordColumn"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "extends": {
+          "description": "Triggers and other rules defined against the table.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "foreignKeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordForeignKey"
+          }
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordIndex"
+          }
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string",
+          "const": "table"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "primaryKey": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "recordType": {
+          "description": "RecordTypeTable or RecordTypeView.",
+          "$ref": "#/$defs/RecordType"
+        },
+        "rowCount": {
+          "description": "RowCount is the catalogue's estimate, nil when it was not asked for.",
+          "type": "integer"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "RecordType": {
       "type": "string",
-      "description": "Type of record",
       "enum": [
         "input",
         "output",
         "sql:table",
         "sql:view",
+        "sql:index",
         "sql:stored_proc",
         "sql:function",
+        "sql:trigger",
         "cache",
         "file:yaml",
         "file:json",
@@ -1061,26 +3102,33 @@
           }
         },
         "conditions": {
-          "type": "object",
-          "description": "Conditions map to specific validation rules that apply when the condition is met",
+          "description": "Conditions carry validation rules that apply only when their condition is met, in the order they should be evaluated.",
+          "type": "array",
           "items": {
-            "$ref": "#/$defs/RecordValidation"
+            "$ref": "#/$defs/ConditionalRecordValidation"
           }
         },
         "expressions": {
-          "type": "array",
           "description": "Expressions are custom validation rules that return true or false",
+          "type": "array",
           "items": {
             "$ref": "#/$defs/Expression"
           }
         },
+        "hints": {
+          "description": "Hints provides record-level generator defaults that fields can override.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GeneratorHint"
+          }
+        },
         "maxRecords": {
-          "type": "integer",
-          "description": "Indicates total number of records allowed"
+          "description": "Indicates total number of records allowed",
+          "type": "integer"
         },
         "minRecords": {
-          "type": "integer",
-          "description": "Indicates total number of records allowed"
+          "description": "Indicates total number of records allowed",
+          "type": "integer"
         },
         "noneOf": {
           "type": "array",
@@ -1106,6 +3154,22 @@
     "RecordWriteStmt": {
       "type": "object",
       "properties": {
+        "Record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Node"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "arguments": {
           "type": "array",
           "items": {
@@ -1121,8 +3185,48 @@
             "additionalProperties": false
           }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call:write:record"
+        },
+        "type": {
+          "$ref": "#/$defs/ExpressionType"
         }
       },
       "additionalProperties": false
@@ -1130,8 +3234,48 @@
     "ReturnStmt": {
       "type": "object",
       "properties": {
-        "type": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:return"
         },
         "value": {
           "$ref": "#/$defs/ExprStmt"
@@ -1139,8 +3283,80 @@
       },
       "additionalProperties": false
     },
+    "ScopedVariableRef": {
+      "type": "object",
+      "properties": {
+        "defaultValue": {
+          "description": "Optional default value if the variable is null in the block",
+          "$ref": "#/$defs/TypedValue"
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "name": {
+          "description": "The name or path of a variable in the current scope",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SourceCode": {
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": "integer"
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
     "Statement": {
-      "oneOf": [
+      "anyOf": [
         {
           "$ref": "#/$defs/AssignmentStmt"
         },
@@ -1173,6 +3389,9 @@
         },
         {
           "$ref": "#/$defs/ForStmt"
+        },
+        {
+          "$ref": "#/$defs/ForEachStmt"
         },
         {
           "$ref": "#/$defs/FunctionDeclStmt"
@@ -1208,6 +3427,9 @@
           "$ref": "#/$defs/TupleStmt"
         },
         {
+          "$ref": "#/$defs/ObjectLiteralStmt"
+        },
+        {
           "$ref": "#/$defs/TypeDeclStmt"
         },
         {
@@ -1221,12 +3443,98 @@
         },
         {
           "$ref": "#/$defs/WhileStmt"
+        },
+        {
+          "$ref": "#/$defs/DocStmt"
+        },
+        {
+          "$ref": "#/$defs/TestStmt"
+        },
+        {
+          "$ref": "#/$defs/RawStmt"
+        },
+        {
+          "$ref": "#/$defs/DestructuringStmt"
+        },
+        {
+          "$ref": "#/$defs/TemplateLiteralStmt"
         }
+      ]
+    },
+    "StatementType": {
+      "type": "string",
+      "enum": [
+        "call",
+        "decl",
+        "call:package",
+        "call:read",
+        "call:write",
+        "call:read:record",
+        "call:write:record",
+        "decl:import",
+        "decl:var",
+        "decl:const",
+        "decl:func",
+        "decl:type",
+        "decl:export",
+        "ref",
+        "ref:var",
+        "ref:package",
+        "ref:endpoint",
+        "ref:record",
+        "call:read:kafka",
+        "call:write:kafka",
+        "call:read:jms",
+        "call:write:jms",
+        "call:read:file",
+        "call:write:file",
+        "call:api",
+        "call:api:http",
+        "call:api:soap",
+        "call:api:grpc",
+        "call:api:graphql",
+        "call:api:tcp",
+        "other",
+        "control:if",
+        "control:loop",
+        "control:loop:for",
+        "control:loop:foreach",
+        "control:loop:while",
+        "control:switch",
+        "control:throw",
+        "control:try",
+        "control:block",
+        "control:condition",
+        "control:return",
+        "control:break",
+        "control:continue",
+        "assignment:expression",
+        "assignment",
+        "assignment:literal",
+        "assignment:tuple",
+        "assignment:object",
+        "assignment:variable",
+        "assignment:array",
+        "assignment:binary",
+        "assignment:unary",
+        "assignment:cast",
+        "doc",
+        "test",
+        "assignment:destructure",
+        "raw",
+        "assignment:template",
+        "foreign_key"
       ]
     },
     "SwitchStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "cases": {
           "type": "array",
           "items": {
@@ -1242,8 +3550,42 @@
             "additionalProperties": false
           }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:switch"
         },
         "value": {
           "$ref": "#/$defs/ExprStmt"
@@ -1251,33 +3593,248 @@
       },
       "additionalProperties": false
     },
-    "ThrowStmt": {
+    "TemplateLiteralStmt": {
+      "description": "TemplateLiteralStmt represents template literals with embedded expressions e.g. `Hello ${name}, you have ${count} items`",
       "type": "object",
       "properties": {
-        "exception": {
-          "$ref": "#/$defs/ExprStmt"
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expressions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExprStmt"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:template"
+        },
+        "strings": {
+          "description": "Alternating string parts and expression parts Strings[0] + Expressions[0] + Strings[1] + Expressions[1] + ... + Strings[n]",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tag": {
+          "description": "Tag function for tagged templates (e.g. html`...`)",
+          "$ref": "#/$defs/ExprStmt"
         }
       },
       "additionalProperties": false
     },
-    "Time": {
+    "TestStmt": {
       "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Statement"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "test"
+        },
+        "variables": {
+          "description": "Defines the variable declared in the block's scope",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ThrowStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "exception": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:throw"
+        }
+      },
       "additionalProperties": false
     },
     "TryStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "body": {
           "$ref": "#/$defs/BlockStmt"
         },
         "catch": {
           "$ref": "#/$defs/BlockStmt"
         },
-        "type": {
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:try"
         }
       },
       "additionalProperties": false
@@ -1285,14 +3842,54 @@
     "TupleStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
         "elements": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/ExprStmt"
           }
         },
-        "type": {
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
           "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:tuple"
         }
       },
       "additionalProperties": false
@@ -1300,11 +3897,140 @@
     "TypeDeclStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
         "name": {
           "type": "string"
         },
-        "type": {
+        "path": {
           "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:type"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypeParam": {
+      "description": "TypeParam represents a generic type parameter declaration (e.g. T extends Comparable)",
+      "type": "object",
+      "properties": {
+        "constraint": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "default": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypeReference": {
+      "description": "TypeReference represents a type in a language-agnostic way, supporting generics, unions, intersections, and other composite type constructs needed for bidirectional TypeScript mapping.",
+      "type": "object",
+      "properties": {
+        "fieldType": {
+          "description": "For primitive/simple types, maps to RecordFieldType",
+          "$ref": "#/$defs/RecordFieldType"
+        },
+        "functionParams": {
+          "description": "For function types (e.g. (x: number) => string)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
+        },
+        "functionReturns": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "intersection": {
+          "description": "Intersection members (e.g. A & B → Intersection: [{Name: \"A\"}, {Name: \"B\"}])",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
+        },
+        "isArray": {
+          "description": "For array/tuple types",
+          "type": "boolean"
+        },
+        "literalValue": {
+          "description": "For literal types (e.g. type X = \"hello\" | 42)",
+          "type": "string"
+        },
+        "name": {
+          "description": "Base type name (e.g. \"Array\", \"Map\", \"Promise\", \"string\")",
+          "type": "string"
+        },
+        "optional": {
+          "description": "Whether this type is nullable (e.g. string | null, or ?: optional)",
+          "type": "boolean"
+        },
+        "package": {
+          "description": "Package qualifying the type for import resolution. When set, the TS generator emits `import { Name } from \"Package\";` and renders the bare Name.",
+          "type": "string"
+        },
+        "rawType": {
+          "description": "For mapped/conditional types, store the raw expression",
+          "type": "string"
+        },
+        "tupleElements": {
+          "description": "For tuple types with positional elements",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
+        },
+        "typeArgs": {
+          "description": "Generic type arguments (e.g. Array<string> → TypeArgs: [{Name: \"string\"}])",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
+        },
+        "union": {
+          "description": "Union members (e.g. string | number → Union: [{Name: \"string\"}, {Name: \"number\"}])",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
         }
       },
       "additionalProperties": false
@@ -1327,17 +4053,31 @@
         "constructor": {
           "$ref": "#/$defs/MethodNode"
         },
-        "content": {
-          "type": "string"
-        },
         "destructor": {
           "$ref": "#/$defs/MethodNode"
         },
-        "language": {
+        "extends": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "field": {
           "type": "string"
         },
-        "location": {
-          "$ref": "#/$defs/Location"
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "implements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
+        },
+        "isAbstract": {
+          "type": "boolean"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
         },
         "methods": {
           "type": "array",
@@ -1346,27 +4086,41 @@
           }
         },
         "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
           "type": "string",
-          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+          "const": "class"
         },
         "package": {
-          "type": "string",
-          "description": "Name of the package e.g. \"models\""
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
         },
         "properties": {
           "type": "object",
-          "description": "Language specific properties",
-          "items": {
-            "type": "object"
-          }
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
         },
         "type": {
-          "type": "string",
-          "description": "Type or Class name"
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeParam"
+          }
         },
         "types": {
-          "type": "array",
           "description": "Defines any inner types or classes",
+          "type": "array",
           "items": {
             "$ref": "#/$defs/TypedNode"
           }
@@ -1378,7 +4132,7 @@
           }
         },
         "visibility": {
-          "type": "string"
+          "$ref": "#/$defs/Visibility"
         }
       },
       "additionalProperties": false
@@ -1390,7 +4144,8 @@
           "type": "boolean"
         },
         "date": {
-          "$ref": "#/$defs/Time"
+          "type": "string",
+          "format": "date-time"
         },
         "float": {
           "type": "number"
@@ -1407,9 +4162,90 @@
       },
       "additionalProperties": false
     },
+    "UIR": {
+      "description": "UIR is the root structure containing all top-level modules, packages, types, records, and functions Nodes in the UIR are placed at their lowest level, i.e a MethodNode will be inside a TypedNode, which is inside a PackageNode, which is inside a ModuleNode. It serves as the entry point for representing code structure in a language-agnostic way.",
+      "type": "object",
+      "properties": {
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTEndpoint"
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "hierarchy": {
+          "$ref": "#/$defs/HierarchyGraph"
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModuleNode"
+          }
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PackageNode"
+          }
+        },
+        "rawFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RawFile"
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordTable"
+          }
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypedNode"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "UIRSymbolRef": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "symbolKind": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "UnaryOp": {
       "type": "string",
-      "description": "Unary operator for negation, increment, decrement, and pointer operations",
       "enum": [
         "!",
         "-",
@@ -1417,20 +4253,69 @@
         "++",
         "--",
         "*",
-        "\u0026"
+        "&",
+        "typeof",
+        "void",
+        "delete",
+        "await",
+        "yield",
+        "...",
+        "~",
+        "keyof",
+        "readonly"
       ]
     },
     "UnaryStmt": {
       "type": "object",
       "properties": {
-        "op": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "op": {
+          "$ref": "#/$defs/UnaryOp"
         },
         "operand": {
           "$ref": "#/$defs/ExprStmt"
         },
-        "type": {
+        "path": {
           "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:unary"
         }
       },
       "additionalProperties": false
@@ -1439,11 +4324,104 @@
       "type": "object",
       "properties": {
         "type": {
-          "type": "string"
+          "$ref": "#/$defs/UnitType"
         },
         "value": {
-          "type": "string",
-          "description": "Optional modifier for e.g. Currency Code for currency, Timezone for dates, etc.."
+          "description": "Optional modifier for e.g. Currency Code for currency, Timezone for dates, etc..",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "UnitType": {
+      "type": "string",
+      "enum": [
+        "metric",
+        "imperial",
+        "si",
+        "percentage",
+        "bytes",
+        "seconds",
+        "milliseconds",
+        "nanoseconds",
+        "epoch",
+        "currency"
+      ]
+    },
+    "ValidationRule": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationValue"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ValidationRuleOptions"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ValidationRuleOptions": {
+      "type": "object",
+      "properties": {
+        "always": {
+          "type": "boolean"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ValidationValue"
+          }
+        },
+        "each": {
+          "type": "boolean"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ValidationValue": {
+      "type": "object",
+      "properties": {
+        "arrayValue": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationValue"
+          }
+        },
+        "boolValue": {
+          "type": "boolean"
+        },
+        "code": {
+          "type": "string"
+        },
+        "numberValue": {
+          "type": "number"
+        },
+        "objectValue": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ValidationValue"
+          }
+        },
+        "stringValue": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -1451,8 +4429,115 @@
     "VariableDeclStmt": {
       "type": "object",
       "properties": {
-        "type": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
           "type": "string"
+        },
+        "defaultValue": {
+          "$ref": "#/$defs/TypedValue"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "field": {
+          "type": "string"
+        },
+        "fieldType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordFieldType"
+            },
+            {
+              "type": "string",
+              "enum": [
+                ""
+              ]
+            }
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "label": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:var"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "validation": {
+          "$ref": "#/$defs/FieldValidation"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        },
+        "writeOnly": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -1460,18 +4545,57 @@
     "VariableStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
         "name": {
           "type": "string"
         },
-        "type": {
+        "path": {
           "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:variable"
         }
       },
       "additionalProperties": false
     },
     "Visibility": {
       "type": "string",
-      "description": "Visibility modifier",
       "enum": [
         "public",
         "private",
@@ -1484,18 +4608,57 @@
     "WhileStmt": {
       "type": "object",
       "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
         "body": {
           "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
         },
         "condition": {
           "$ref": "#/$defs/ConditionStmt"
         },
-        "type": {
+        "content": {
           "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:loop:while"
         }
       },
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  }
 }

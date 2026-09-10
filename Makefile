@@ -17,6 +17,10 @@ help: ## Show available targets
 build: ## Compile every package
 	go build ./...
 
+.PHONY: schema
+schema: ## Regenerate schema/uir.schema.json from the Go model
+	go run ./cmd/genschema
+
 .PHONY: test
 test: ## Run the Go test suite
 	go test ./...
