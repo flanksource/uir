@@ -1,0 +1,1501 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UIR",
+  "type": "object",
+  "description": "Universal Intermediate Representation for code analysis",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/PackageNode"
+    },
+    {
+      "$ref": "#/$defs/TypedNode"
+    },
+    {
+      "$ref": "#/$defs/MethodNode"
+    },
+    {
+      "$ref": "#/$defs/ASTRecord"
+    },
+    {
+      "$ref": "#/$defs/ASTEndpoint"
+    }
+  ],
+  "$defs": {
+    "ASTEndpoint": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "endpointType": {
+          "type": "string"
+        },
+        "errors": {
+          "type": "array",
+          "description": "Errors represents a list of errors that can be returned by an endpoint",
+          "items": {
+            "$ref": "#/$defs/ASTError"
+          }
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/ASTRecord"
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/ASTRecord"
+        },
+        "urn": {
+          "type": "string",
+          "description": "URN is the endpoint type specific unique resource name, e.g. http://example.com/api/v1 or kafka://topic-name"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ASTError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Numeric Code e.g. HTTP status code or other protocol specific code",
+          "$ref": "#/$defs/TypedValue"
+        },
+        "content": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "errorType": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ASTErrorType": {
+      "type": "string",
+      "description": "Type of error",
+      "enum": [
+        "syntax",
+        "validation",
+        "compilation",
+        "runtime",
+        "configuration",
+        "network",
+        "auth",
+        "authz",
+        "timeout"
+      ]
+    },
+    "ASTRecord": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extends": {
+          "type": "array",
+          "description": "Extends a record by including all the fields and references from the referenced record When there are conflicts the final record takes precedence, followed by the first record in the extends list etc. This allows for reusing and composing records in a flexible way",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "name": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Language specific properties",
+          "items": {
+            "type": "object"
+          }
+        },
+        "recordType": {
+          "type": "string"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordReference"
+          }
+        },
+        "validation": {
+          "$ref": "#/$defs/RecordValidation"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Annotation": {
+      "type": "object",
+      "properties": {
+        "module": {
+          "type": "string",
+          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+        },
+        "package": {
+          "type": "string",
+          "description": "Name of the package e.g. \"models\""
+        },
+        "type": {
+          "type": "string",
+          "description": "Type or Class name"
+        },
+        "value": {
+          "$ref": "#/$defs/TypedValue"
+        },
+        "values": {
+          "type": "object",
+          "items": {
+            "$ref": "#/$defs/TypedValue"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AssignmentOp": {
+      "type": "string",
+      "description": "Assignment operator",
+      "enum": [
+        "=",
+        "+=",
+        "-=",
+        "*=",
+        "/=",
+        "%=",
+        "\u0026=",
+        "|="
+      ]
+    },
+    "AssignmentStmt": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/PackageVariableRef"
+        },
+        "type": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BinaryOp": {
+      "type": "string",
+      "description": "Binary operator for comparisons and arithmetic",
+      "enum": [
+        "\u0026\u0026",
+        "||",
+        "==",
+        "!=",
+        "\u003c",
+        "\u003c=",
+        "\u003e",
+        "\u003e=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "like",
+        "ilike",
+        "regex",
+        "startsWith",
+        "endsWith",
+        "contains"
+      ]
+    },
+    "BinaryStmt": {
+      "type": "object",
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "op": {
+          "type": "string"
+        },
+        "right": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BlockStmt": {
+      "type": "object",
+      "properties": {
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "type": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "array",
+          "description": "Defines the variable declared in the block's scope",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "BreakStmt": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CastStmt": {
+      "type": "object",
+      "properties": {
+        "expr": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "targetType": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Comment": {
+      "type": "object",
+      "description": "Comment represents a comment in the code",
+      "properties": {
+        "end_line": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CommentType": {
+      "type": "string",
+      "description": "Type of comment",
+      "enum": [
+        "single_line",
+        "multi_line",
+        "documentation"
+      ]
+    },
+    "ConditionStmt": {
+      "type": "object",
+      "properties": {
+        "expr": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConstDeclStmt": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContinueStmt": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EndpointCallStmt": {
+      "type": "object",
+      "properties": {
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EndpointType": {
+      "type": "string",
+      "description": "Type of endpoint",
+      "enum": [
+        "soap",
+        "jms",
+        "kafka",
+        "tcp",
+        "http",
+        "grpc",
+        "graphql"
+      ]
+    },
+    "ExprStmt": {
+      "type": "object",
+      "description": "ExprStmt represents a value e.g. a literal, variable reference, method call, etc.",
+      "properties": {
+        "binary": {
+          "$ref": "#/$defs/BinaryStmt"
+        },
+        "cast": {
+          "$ref": "#/$defs/CastStmt"
+        },
+        "endpoint_call": {
+          "$ref": "#/$defs/EndpointCallStmt"
+        },
+        "literal": {
+          "$ref": "#/$defs/LiteralStmt"
+        },
+        "method_call": {
+          "$ref": "#/$defs/MethodCallStmt"
+        },
+        "record_read": {
+          "$ref": "#/$defs/RecordReadStmt"
+        },
+        "tuple": {
+          "$ref": "#/$defs/TupleStmt"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unary": {
+          "$ref": "#/$defs/UnaryStmt"
+        },
+        "variable": {
+          "$ref": "#/$defs/PackageVariableRef"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Expression": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExpressionType": {
+      "type": "string",
+      "description": "Type of expression",
+      "enum": [
+        "sql",
+        "xpath",
+        "jsonpath",
+        "regex",
+        "jq",
+        "yq",
+        "jmespath",
+        "cel",
+        "SpEL",
+        "ognl"
+      ]
+    },
+    "FieldValidation": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "object",
+          "description": "ConditionalValidation map to specific validation rules that apply when the condition is met",
+          "items": {
+            "$ref": "#/$defs/FieldValidation"
+          }
+        },
+        "enum": {
+          "type": "array",
+          "description": "Applies to strings or arrays and indicates the allowed pattern",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expressions": {
+          "type": "array",
+          "description": "Expressions are custom validation rules that return true or false",
+          "items": {
+            "$ref": "#/$defs/Expression"
+          }
+        },
+        "max": {
+          "type": "number"
+        },
+        "maxDate": {
+          "type": "string",
+          "description": "Date validation, with support for timestamps and date math"
+        },
+        "maxExclusive": {
+          "type": "number"
+        },
+        "maxItems": {
+          "type": "integer",
+          "description": "Applies to arrays and indicates the maximum number of items"
+        },
+        "maxLength": {
+          "type": "integer",
+          "description": "Applies to strings and indicates the maximum length"
+        },
+        "maxProperties": {
+          "type": "integer",
+          "description": "Applies to objects and indicates the maximum number of properties"
+        },
+        "min": {
+          "type": "number",
+          "description": "Applies to numeric types and indicates the minimum value"
+        },
+        "minDate": {
+          "type": "string",
+          "description": "Date validation, with support for timestamps and date math"
+        },
+        "minExclusive": {
+          "type": "number"
+        },
+        "minItems": {
+          "type": "integer",
+          "description": "Applies to arrays and indicates the minimum number of items"
+        },
+        "minLength": {
+          "type": "integer",
+          "description": "Applies to strings and indicates the minimum length"
+        },
+        "minProperties": {
+          "type": "integer",
+          "description": "Applies to objects and indicates the minimum number of properties"
+        },
+        "nonEmpty": {
+          "type": "boolean"
+        },
+        "regex": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "sortedItems": {
+          "type": "boolean",
+          "description": "Applies to arrays and indicates whether the items need to be sorted"
+        },
+        "unique": {
+          "type": "boolean"
+        },
+        "uniqueItems": {
+          "type": "boolean",
+          "description": "Applies to arrays and indicates whether the items need to be unique"
+        },
+        "unitTypes": {
+          "type": "array",
+          "description": "UnitTypes is a list of allowed unit types for the field",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ForStmt": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "cond": {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        "init": {
+          "$ref": "#/$defs/AssignmentStmt"
+        },
+        "type": {
+          "type": "string"
+        },
+        "update": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FunctionDeclStmt": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FunctionType": {
+      "type": "string",
+      "description": "Type of function",
+      "enum": [
+        "static",
+        "anonymous",
+        "instance"
+      ]
+    },
+    "IfStmt": {
+      "type": "object",
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        "else": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "then": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LiteralStmt": {
+      "type": "object",
+      "properties": {
+        "fieldType": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Location": {
+      "type": "object",
+      "description": "Location represents a file location with line range",
+      "properties": {
+        "end_line": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "MethodCallStmt": {
+      "type": "object",
+      "properties": {
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "MethodNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTError"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "method": {
+          "type": "string",
+          "description": "Method name if applicable"
+        },
+        "module": {
+          "type": "string",
+          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+        },
+        "package": {
+          "type": "string",
+          "description": "Name of the package e.g. \"models\""
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "description": "Language specific properties",
+          "items": {
+            "type": "object"
+          }
+        },
+        "returns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "type": {
+          "type": "string",
+          "description": "Type or Class name"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackageNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTEndpoint"
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "initFunctions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "module": {
+          "type": "string",
+          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+        },
+        "package": {
+          "type": "string",
+          "description": "Name of the package e.g. \"models\""
+        },
+        "properties": {
+          "type": "object",
+          "description": "Language specific properties",
+          "items": {
+            "type": "object"
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypedNode"
+          }
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackageVariableRef": {
+      "type": "object",
+      "properties": {
+        "defaultValue": {
+          "description": "Optional default value if the variable is null in the block",
+          "$ref": "#/$defs/TypedValue"
+        },
+        "module": {
+          "type": "string",
+          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+        },
+        "name": {
+          "type": "string",
+          "description": "The name or path of a variable in the current scope"
+        },
+        "package": {
+          "type": "string",
+          "description": "Name of the package e.g. \"models\""
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordField": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "defaultValue": {
+          "$ref": "#/$defs/TypedValue"
+        },
+        "fieldType": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "name": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "description": "Language specific properties",
+          "items": {
+            "type": "object"
+          }
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "validation": {
+          "$ref": "#/$defs/FieldValidation"
+        },
+        "visibility": {
+          "type": "string"
+        },
+        "writeOnly": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordFieldType": {
+      "type": "string",
+      "description": "Type of record field",
+      "enum": [
+        "string",
+        "number",
+        "boolean",
+        "array",
+        "object",
+        "enum",
+        "date",
+        "float",
+        "int",
+        "ip",
+        "cidr",
+        "url",
+        "email",
+        "uuid",
+        "json",
+        "jsonb",
+        "yaml",
+        "xml",
+        "csv",
+        "phone",
+        "text",
+        "secret",
+        "map"
+      ]
+    },
+    "RecordReadStmt": {
+      "type": "object",
+      "properties": {
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordReference": {
+      "type": "object",
+      "properties": {
+        "mapping": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recordReferenceType": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordReferenceType": {
+      "type": "string",
+      "description": "Type of record reference",
+      "enum": [
+        "foreignKey",
+        "softKey"
+      ]
+    },
+    "RecordType": {
+      "type": "string",
+      "description": "Type of record",
+      "enum": [
+        "input",
+        "output",
+        "sql:table",
+        "sql:view",
+        "sql:stored_proc",
+        "sql:function",
+        "cache",
+        "file:yaml",
+        "file:json",
+        "file:xml",
+        "file:csv",
+        "other"
+      ]
+    },
+    "RecordValidation": {
+      "type": "object",
+      "properties": {
+        "allOf": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "anyOf": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "conditions": {
+          "type": "object",
+          "description": "Conditions map to specific validation rules that apply when the condition is met",
+          "items": {
+            "$ref": "#/$defs/RecordValidation"
+          }
+        },
+        "expressions": {
+          "type": "array",
+          "description": "Expressions are custom validation rules that return true or false",
+          "items": {
+            "$ref": "#/$defs/Expression"
+          }
+        },
+        "maxRecords": {
+          "type": "integer",
+          "description": "Indicates total number of records allowed"
+        },
+        "minRecords": {
+          "type": "integer",
+          "description": "Indicates total number of records allowed"
+        },
+        "noneOf": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "oneOf": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "uniqueFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecordWriteStmt": {
+      "type": "object",
+      "properties": {
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReturnStmt": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Statement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AssignmentStmt"
+        },
+        {
+          "$ref": "#/$defs/BinaryStmt"
+        },
+        {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        {
+          "$ref": "#/$defs/BreakStmt"
+        },
+        {
+          "$ref": "#/$defs/CastStmt"
+        },
+        {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        {
+          "$ref": "#/$defs/ConstDeclStmt"
+        },
+        {
+          "$ref": "#/$defs/ContinueStmt"
+        },
+        {
+          "$ref": "#/$defs/EndpointCallStmt"
+        },
+        {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        {
+          "$ref": "#/$defs/ForStmt"
+        },
+        {
+          "$ref": "#/$defs/FunctionDeclStmt"
+        },
+        {
+          "$ref": "#/$defs/IfStmt"
+        },
+        {
+          "$ref": "#/$defs/LiteralStmt"
+        },
+        {
+          "$ref": "#/$defs/MethodCallStmt"
+        },
+        {
+          "$ref": "#/$defs/RecordReadStmt"
+        },
+        {
+          "$ref": "#/$defs/RecordWriteStmt"
+        },
+        {
+          "$ref": "#/$defs/ReturnStmt"
+        },
+        {
+          "$ref": "#/$defs/SwitchStmt"
+        },
+        {
+          "$ref": "#/$defs/ThrowStmt"
+        },
+        {
+          "$ref": "#/$defs/TryStmt"
+        },
+        {
+          "$ref": "#/$defs/TupleStmt"
+        },
+        {
+          "$ref": "#/$defs/TypeDeclStmt"
+        },
+        {
+          "$ref": "#/$defs/UnaryStmt"
+        },
+        {
+          "$ref": "#/$defs/VariableDeclStmt"
+        },
+        {
+          "$ref": "#/$defs/VariableStmt"
+        },
+        {
+          "$ref": "#/$defs/WhileStmt"
+        }
+      ]
+    },
+    "SwitchStmt": {
+      "type": "object",
+      "properties": {
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "body": {
+                "$ref": "#/$defs/BlockStmt"
+              },
+              "condition": {
+                "$ref": "#/$defs/ConditionStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "type": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ThrowStmt": {
+      "type": "object",
+      "properties": {
+        "exception": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Time": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "TryStmt": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "catch": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TupleStmt": {
+      "type": "object",
+      "properties": {
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExprStmt"
+          }
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypeDeclStmt": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypedNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "constructor": {
+          "$ref": "#/$defs/MethodNode"
+        },
+        "content": {
+          "type": "string"
+        },
+        "destructor": {
+          "$ref": "#/$defs/MethodNode"
+        },
+        "language": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "module": {
+          "type": "string",
+          "description": "Name of code module e.g. \"github.com/flanksource/arch-unit\""
+        },
+        "package": {
+          "type": "string",
+          "description": "Name of the package e.g. \"models\""
+        },
+        "properties": {
+          "type": "object",
+          "description": "Language specific properties",
+          "items": {
+            "type": "object"
+          }
+        },
+        "type": {
+          "type": "string",
+          "description": "Type or Class name"
+        },
+        "types": {
+          "type": "array",
+          "description": "Defines any inner types or classes",
+          "items": {
+            "$ref": "#/$defs/TypedNode"
+          }
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypedValue": {
+      "type": "object",
+      "properties": {
+        "bool": {
+          "type": "boolean"
+        },
+        "date": {
+          "$ref": "#/$defs/Time"
+        },
+        "float": {
+          "type": "number"
+        },
+        "int": {
+          "type": "integer"
+        },
+        "string": {
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "additionalProperties": false
+    },
+    "UnaryOp": {
+      "type": "string",
+      "description": "Unary operator for negation, increment, decrement, and pointer operations",
+      "enum": [
+        "!",
+        "-",
+        "+",
+        "++",
+        "--",
+        "*",
+        "\u0026"
+      ]
+    },
+    "UnaryStmt": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string"
+        },
+        "operand": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Unit": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "description": "Optional modifier for e.g. Currency Code for currency, Timezone for dates, etc.."
+        }
+      },
+      "additionalProperties": false
+    },
+    "VariableDeclStmt": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "VariableStmt": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Visibility": {
+      "type": "string",
+      "description": "Visibility modifier",
+      "enum": [
+        "public",
+        "private",
+        "protected",
+        "internal",
+        "package",
+        ""
+      ]
+    },
+    "WhileStmt": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "condition": {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
