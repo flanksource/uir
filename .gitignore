@@ -1,0 +1,20 @@
+.tmp/
+.bin/
+hack/
+coverage.out
+coverage.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Java (sources only; no build system is checked in)
+target/
+.gradle/
+*.class
+
+.DS_Store
