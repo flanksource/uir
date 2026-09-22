@@ -1,5 +1,7 @@
 .tmp/
 .bin/
+.facet/
+node_modules
 hack/
 coverage.out
 coverage.html
@@ -18,3 +20,4 @@ target/
 *.class
 
 .DS_Store
+docs/uir-gorm-erd.html
