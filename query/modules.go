@@ -12,6 +12,11 @@ import (
 	"github.com/flanksource/uir/storage"
 )
 
+const (
+	defaultLimit = 100
+	maximumLimit = 1000
+)
+
 type ModuleScopeOptions struct {
 	RootKey    string
 	Location   string
@@ -44,16 +49,28 @@ type moduleScope struct {
 
 type projectedNode struct {
 	Identifier uir.Identifier
+	ParentIdentity string
+	ChildSlot string
+	Ordinal int
+	Payload json.RawMessage
+	SemanticHash string
 	StartLine  *int
+	EndLine *int
 	Column     *int
+	Field json.RawMessage
 }
 
 type projectedCall struct {
 	FromIdentity string
 	ToIdentifier uir.Identifier
+	ToRootKey *string
+	LocalRoot bool
 	Resolvable   bool
+	StatementPath string
 	StartLine    *int
+	EndLine *int
 	Column       *int
+	Text string
 }
 
 type sourceProjection struct {

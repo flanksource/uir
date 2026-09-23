@@ -1,4 +1,4 @@
-// Command uir exposes database-backed UIR projects, queries, and indexing.
+// Command uir exposes database-backed module roots, queries, and indexing.
 package main
 
 import (
@@ -15,6 +15,9 @@ import (
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
+
+// version is set at link time by `make binary VERSION=...`.
+var version = "dev"
 
 type runtimeContextKey struct{}
 
@@ -49,10 +52,10 @@ func run(ctx context.Context, args []string) (returnErr error) {
 }
 
 func newRootCommand(runtime *commandRuntime) *cobra.Command {
-	registerEntities()
 	root := &cobra.Command{
 		Use:          "uir",
-		Short:        "Query and incrementally index Universal Intermediate Representation projects",
+		Short:        "Query and incrementally index Universal Intermediate Representation modules",
+		Version:      version,
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path")

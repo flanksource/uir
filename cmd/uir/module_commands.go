@@ -105,6 +105,7 @@ func (row moduleQueryRow) Row() map[string]any {
 }
 
 func registerModuleCommands(root *cobra.Command) {
+	registerModuleBrowseCommands(root)
 	var add *cobra.Command
 	add = clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) ([]indexer.ModuleResult, error) {
 		path := options.Path

@@ -4,7 +4,6 @@ package query
 import (
 	"errors"
 
-	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
 )
 
@@ -34,30 +33,10 @@ type Query struct {
 	Predicates []Predicate `json:"predicates,omitempty"`
 }
 
-// ScopeOptions selects the project snapshot, optional root, and result bound.
-type ScopeOptions struct {
-	ProjectKey string
-	SnapshotID string
-	RootKey    string
-	Limit      int
-}
-
 // ResolutionStage records one successful, externally visible pipeline decision.
 type ResolutionStage struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
-}
-
-// Result contains the resolved scope and the operation-specific records.
-type Result struct {
-	Operation     Operation              `json:"operation"`
-	ProjectKey    string                 `json:"project_key"`
-	SnapshotID    string                 `json:"snapshot_id"`
-	RootKey       string                 `json:"root_key,omitempty"`
-	Target        *storage.Node          `json:"target,omitempty"`
-	Nodes         []storage.Node         `json:"nodes,omitempty"`
-	Relationships []storage.Relationship `json:"relationships,omitempty"`
-	Stages        []ResolutionStage      `json:"stages"`
 }
 
 // Pipeline resolves parsed queries against relational UIR storage.
