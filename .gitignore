@@ -21,3 +21,5 @@ target/
 
 .DS_Store
 docs/uir-gorm-erd.html
+go.work
+go.work.sum
