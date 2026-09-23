@@ -3,6 +3,8 @@ ARCH = $(shell uname -m | sed 's/x86_64/amd64/')
 
 LOCALBIN ?= $(shell pwd)/.bin
 export PATH := $(LOCALBIN):$(PATH)
+GOWORK ?= off
+export GOWORK
 
 GOLANGCI_LINT_VERSION ?= v2.6.2
 
@@ -16,6 +18,10 @@ help: ## Show available targets
 .PHONY: build
 build: web-build ## Build the browser and compile every package
 	go build ./...
+
+.PHONY: install
+install: web-build ## Install the UIR CLI with embedded browser assets
+	go install ./cmd/uir
 
 .PHONY: web-build
 web-build: ## Build embedded browser assets

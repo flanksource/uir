@@ -1,5 +1,7 @@
 # Incremental Go indexing
 
+The root-level module workflow uses stable `go.mod` module roots, per-checkout heads, and physical source deltas. See [module-root indexing and queries](module-indexing.md) for the new commands, storage hierarchy, branch/worktree behavior, and limits. The `uir project ...` workflow documented below is the earlier full-snapshot path still used by the browser.
+
 `uir project reindex` discovers Go sources, extracts syntax with the standard library `go/ast`, and publishes an immutable relational snapshot. The operation runs inside one context-bound Clicky task, so cancellation and task output follow the same lifecycle as the rest of the CLI.
 
 ```sh

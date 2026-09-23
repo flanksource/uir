@@ -4,6 +4,7 @@ import { DataTable, type DataTableColumn } from "@flanksource/clicky-ui/data";
 import { getRow, getSourceContent, listProjects, listRows, runQuery, runReindex, type BrowseRow, type NodeDetails, type Page, type Project, type QueryRow, type SourceContent } from "./api";
 import { readRoute, routeURL, type Route } from "./route";
 import { repositoryURL } from "./repository";
+import { Card, CodeBlock, Detail, DetailGrid, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
 
 type Load<T> = { data?: T; error?: string; loading: boolean };
 
@@ -27,7 +28,7 @@ function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T> {
 }
 
 function ErrorMessage({ error }: { error?: string }) {
-  return error ? <div role="alert" className="uir-error">{error}</div> : null;
+  return error ? <div role="alert" className="whitespace-pre-wrap rounded-md border border-destructive p-3 text-destructive">{error}</div> : null;
 }
 
 function DataList({ rows, loading, error, columns, onClick, page, onPage }: {
@@ -41,7 +42,7 @@ function DataList({ rows, loading, error, columns, onClick, page, onPage }: {
 }) {
   return <>
     <ErrorMessage error={error} />
-    <DataTable className="uir-table" data={rows} columns={columns} loading={loading} getRowId={(row) => row.id} onRowClick={onClick}
+    <DataTable className="min-h-40 max-h-[28rem]" data={rows} columns={columns} loading={loading} getRowId={(row) => row.id} onRowClick={onClick}
       emptyMessage="No saved records match this view"
       pagination={page && onPage ? { page: Math.floor(page.offset / page.limit), pageSize: page.limit, total: page.total,
         onPageChange: (next) => onPage(next * page.limit), onPageSizeChange: () => onPage(0), pageSizeOptions: [100] } : undefined} />
@@ -95,53 +96,75 @@ function ReindexForm({ project, defaultPath, onSuccess }: { project: string; def
     finally { setPending(false); }
   }
 
-  return <form className="uir-card uir-section" onSubmit={submit}>
+  return <PanelForm onSubmit={submit}>
     <h2>Reindex a workspace</h2>
-    <p className="uir-muted">Publish an updated snapshot from a local checkout. The selected snapshot changes when indexing succeeds.</p>
-    <div className="uir-row">
-      <label className="uir-field">Project key<input required value={projectKey} onChange={(event) => setProjectKey(event.target.value)} /></label>
-      <label className="uir-field">Local path<input required value={path} onChange={(event) => setPath(event.target.value)} /></label>
-    </div>
-    <div className="uir-row">
-      <label className="uir-field">Root key (optional)<input value={root} onChange={(event) => setRoot(event.target.value)} /></label>
-      <label className="uir-field">Project name (optional)<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-    </div>
-    <div className="uir-row">
-      <label className="uir-check"><input type="checkbox" checked={includeTests} onChange={(event) => setIncludeTests(event.target.checked)} />Include Go tests</label>
-      <label className="uir-check"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Force reparse</label>
+    <Muted>Publish an updated snapshot from a local checkout. The selected snapshot changes when indexing succeeds.</Muted>
+    <Row>
+      <Field label="Project key"><TextInput required value={projectKey} onChange={(event) => setProjectKey(event.target.value)} /></Field>
+      <Field label="Local path"><TextInput required value={path} onChange={(event) => setPath(event.target.value)} /></Field>
+    </Row>
+    <Row>
+      <Field label="Root key (optional)"><TextInput value={root} onChange={(event) => setRoot(event.target.value)} /></Field>
+      <Field label="Project name (optional)"><TextInput value={name} onChange={(event) => setName(event.target.value)} /></Field>
+    </Row>
+    <Row>
+      <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={includeTests} onChange={(event) => setIncludeTests(event.target.checked)} />Include Go tests</label>
+      <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Force reparse</label>
       <Button type="submit" loading={pending}>Reindex</Button>
-    </div>
+    </Row>
     <ErrorMessage error={error} />
-  </form>;
+  </PanelForm>;
 }
 
 function SourceView({ source }: { source: string }) {
   const content = useLoad<SourceContent>(source ? () => getSourceContent(source) : null, source);
-  if (!source) return <div className="uir-muted">Select a source to view its saved reference.</div>;
-  if (content.loading) return <div className="uir-muted">Loading source…</div>;
+  if (!source) return <Muted>Select a source to view its saved reference.</Muted>;
+  if (content.loading) return <Muted>Loading source…</Muted>;
   if (content.error) return <ErrorMessage error={content.error} />;
   if (!content.data) return null;
   const item = content.data;
-  return <div className="uir-card uir-section">
+  return <Card>
     <strong>{item.path}</strong>
-    <span className="uir-muted">{item.origin === "git" ? `Git revision ${item.revision}` : item.origin === "local" ? "Current local file; no hash verification" : "Remote Git source"}</span>
-    {item.origin === "remote" ? <div className="uir-detail">
+    <div><Muted>{item.origin === "git" ? `Git revision ${item.revision}` : item.origin === "local" ? "Current local file; no hash verification" : "Remote Git source"}</Muted></div>
+    {item.origin === "remote" ? <div className="break-all">
       <p>Source content is unavailable locally. Open the repository to inspect this revision.</p>
-      {item.repository && repositoryURL(item.repository) ? <a className="uir-link" href={repositoryURL(item.repository)!} target="_blank" rel="noreferrer">{item.repository}</a> : <span>{item.repository}</span>}
+      {item.repository && repositoryURL(item.repository) ? <a className="break-all text-primary underline" href={repositoryURL(item.repository)!} target="_blank" rel="noreferrer">{item.repository}</a> : <span>{item.repository}</span>}
       <p>Revision: {item.revision}</p>
-    </div> : <pre className="uir-code">{item.content}</pre>}
-  </div>;
+    </div> : <CodeBlock>{item.content}</CodeBlock>}
+  </Card>;
 }
 
-function NodeView({ node }: { node: string }) {
+function NodeView({ node, onSource }: { node: string; onSource: (source: string) => void }) {
   const details = useLoad<NodeDetails>(node ? () => getRow("node", node) as Promise<NodeDetails> : null, node);
-  if (!node) return <div className="uir-muted">Select a node for fields, locations, and relationships.</div>;
-  if (details.loading) return <div className="uir-muted">Loading node…</div>;
+  const [tab, setTab] = useState("overview");
+  if (!node) return <Muted>Select a node for fields, locations, and relationships.</Muted>;
+  if (details.loading) return <Muted>Loading node…</Muted>;
   if (details.error) return <ErrorMessage error={details.error} />;
-  return <div className="uir-card uir-section">
-    <strong>Node {node.slice(0, 12)}</strong>
-    {details.data && <pre className="uir-code">{JSON.stringify(details.data, null, 2)}</pre>}
-  </div>;
+  if (!details.data) return null;
+  const { node: record, fields, locations, relationships } = details.data;
+  return <Card>
+    <strong>{String(record.SymbolKey || record.IdentityKey || node)}</strong>
+    <Tabs value={tab} onChange={setTab} tabs={[
+      { id: "overview", label: "Overview" }, { id: "fields", label: "Fields", count: fields.length },
+      { id: "relationships", label: "Relationships", count: relationships.length }, { id: "raw", label: "Raw" },
+    ]} />
+    {tab === "overview" && <>
+      <DetailGrid>
+        <Detail label="Kind">{String(record.NodeType || "")}</Detail>
+        <Detail label="Language">{String(record.Language || "")}</Detail>
+        <Detail label="Package">{String(record.Package || "")}</Detail>
+        <Detail label="Signature">{String(record.Signature || "")}</Detail>
+      </DetailGrid>
+      <h3>Locations</h3>
+      {locations.length ? <ul>{locations.map((location, index) => <li key={String(location.ID || index)}>
+        <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-primary underline" onClick={() => onSource(String(location.SourceID))}>Source {String(location.SourceID).slice(0, 8)}</button>
+        {location.StartLine ? `:${String(location.StartLine)}` : ""}{location.EndLine && location.EndLine !== location.StartLine ? `–${String(location.EndLine)}` : ""}
+      </li>)}</ul> : <Muted>No source locations</Muted>}
+    </>}
+    {tab === "fields" && (fields.length ? <CodeBlock>{JSON.stringify(fields, null, 2)}</CodeBlock> : <Muted>No fields</Muted>)}
+    {tab === "relationships" && (relationships.length ? <CodeBlock>{JSON.stringify(relationships, null, 2)}</CodeBlock> : <Muted>No relationships</Muted>)}
+    {tab === "raw" && <CodeBlock>{JSON.stringify(details.data, null, 2)}</CodeBlock>}
+  </Card>;
 }
 
 export function App() {
@@ -183,52 +206,52 @@ export function App() {
 
   return <AppShell brand={<strong>UIR</strong>} contentWidth="full"
     navSections={[{ label: "Snapshot browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
-    sidebarHeader={<label className="uir-field">Project<Select aria-label="Project" value={route.project} onChange={(event) => {
+    sidebarHeader={<Field label="Project"><Select aria-label="Project" value={route.project} onChange={(event) => {
       const next = projects.data?.find((item) => item.key === event.target.value);
       setRoute({ project: event.target.value, snapshot: next?.snapshot_id ?? "", root: "", source: "", node: "", offset: 0 });
-    }} options={(projects.data ?? []).map((item) => ({ value: item.key, label: item.name || item.key }))} /></label>}
-    bodyHeader={<span>{project?.name || route.project || "Projects"} {snapshot && <span className="uir-muted">/ {snapshot.slice(0, 12)}</span>}</span>}
+    }} options={(projects.data ?? []).map((item) => ({ value: item.key, label: item.name || item.key }))} /></Field>}
+    bodyHeader={<span>{project?.name || route.project || "Projects"} {snapshot && <Muted>/ {snapshot.slice(0, 12)}</Muted>}</span>}
     bodyActions={<Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button>}>
-    <div className="uir-page">
-      {projects.loading && <div className="uir-muted">Loading projects…</div>}
+    <PageLayout>
+      {projects.loading && <Muted>Loading projects…</Muted>}
       <ErrorMessage error={projects.error} />
       {route.view === "overview" && <>
-        <section className="uir-section"><h1 className="uir-heading">Saved projects</h1><p className="uir-muted">Browse immutable UIR snapshots and their indexed code.</p>
-          <div className="uir-grid">{(projects.data ?? []).map((item) => <div key={item.key} className="uir-card"><strong>{item.name || item.key}</strong><p className="uir-muted">{item.key}</p><div className="uir-stat">{item.nodes}</div><span className="uir-muted">nodes · {item.sources} sources · {item.roots} roots</span></div>)}</div>
+        <Section><Heading>Saved projects</Heading><Muted>Browse immutable UIR snapshots and their indexed code.</Muted>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(projects.data ?? []).map((item) => <Card key={item.key}><strong>{item.name || item.key}</strong><div><Muted>{item.key}</Muted></div><div className="text-2xl font-bold">{item.nodes}</div><Muted>nodes · {item.sources} sources · {item.roots} roots</Muted></Card>)}</div>
           {projects.data?.length === 0 && <p>No projects are indexed yet. Use the form below to create the first snapshot.</p>}
-        </section>
-        {route.project && <section className="uir-section"><h2>Snapshots</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
-          onClick={(row) => setRoute({ snapshot: row.id, root: "", source: "", node: "", offset: 0 })} page={snapshots.data?.page} onPage={(offset) => setRoute({ offset })} /></section>}
+        </Section>
+        {route.project && <Section><h2>Snapshots</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
+          onClick={(row) => setRoute({ snapshot: row.id, root: "", source: "", node: "", offset: 0 })} page={snapshots.data?.page} onPage={(offset) => setRoute({ offset })} /></Section>}
         <ReindexForm project={route.project} defaultPath={selectedRoot?.local_path ?? ""} onSuccess={(nextSnapshot, nextProject) => { setRoute({ project: nextProject, snapshot: nextSnapshot, root: "", source: "", node: "", offset: 0 }); setRefresh((current) => current + 1); }} />
       </>}
-      {route.view !== "overview" && !snapshot && <div className="uir-card">Select or create a project snapshot on the Overview page.</div>}
+      {route.view !== "overview" && !snapshot && <Card>Select or create a project snapshot on the Overview page.</Card>}
       {route.view === "explorer" && snapshot && <>
-        <h1 className="uir-heading">Source explorer</h1>
-        <section className="uir-section"><h2>Roots</h2><DataList rows={roots.data?.data ?? []} loading={roots.loading} error={roots.error} columns={rootColumns} onClick={(row) => setRoute({ root: row.id, source: "", offset: 0 })} /></section>
-        <div className="uir-row"><label className="uir-field">Root<Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, source: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></label>
-          <label className="uir-field">Path search<input value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></label></div>
-        <section className="uir-section"><h2>Sources</h2><DataList rows={sources.data?.data ?? []} loading={sources.loading} error={sources.error} columns={sourceColumns} onClick={(row) => setRoute({ source: row.id })} page={sources.data?.page} onPage={(offset) => setRoute({ offset })} /></section>
+        <Heading>Source explorer</Heading>
+        <Section><h2>Roots</h2><DataList rows={roots.data?.data ?? []} loading={roots.loading} error={roots.error} columns={rootColumns} onClick={(row) => setRoute({ root: row.id, source: "", offset: 0 })} /></Section>
+        <Row><Field label="Root"><Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, source: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></Field>
+          <Field label="Path search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
+        <Section><h2>Sources</h2><DataList rows={sources.data?.data ?? []} loading={sources.loading} error={sources.error} columns={sourceColumns} onClick={(row) => setRoute({ source: row.id })} page={sources.data?.page} onPage={(offset) => setRoute({ offset })} /></Section>
         <SourceView source={route.source} />
       </>}
       {route.view === "nodes" && snapshot && <>
-        <h1 className="uir-heading">Nodes</h1>
-        <div className="uir-row"><label className="uir-field">Root<Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, node: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></label>
-          <label className="uir-field">Symbol search<input value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></label></div>
+        <Heading>Nodes</Heading>
+        <Row><Field label="Root"><Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, node: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></Field>
+          <Field label="Symbol search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
         {route.source && <Button variant="outline" onClick={() => setRoute({ source: "" })}>Clear source filter</Button>}
         <DataList rows={nodes.data?.data ?? []} loading={nodes.loading} error={nodes.error} columns={nodeColumns} onClick={(row) => setRoute({ node: row.id })} page={nodes.data?.page} onPage={(offset) => setRoute({ offset })} />
-        <NodeView node={route.node} />
+        <NodeView node={route.node} onSource={(source) => setRoute({ view: "explorer", source, offset: 0 })} />
       </>}
       {route.view === "query" && snapshot && <>
-        <h1 className="uir-heading">PEG query</h1><p className="uir-muted">Run a symbol or call query against the selected snapshot.</p>
-        <form className="uir-card uir-row" onSubmit={(event) => { event.preventDefault(); setRoute({ expression: queryDraft.trim() }); }}>
-          <label className="uir-field">Expression<input required value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} /></label>
+        <Heading>PEG query</Heading><Muted>Run a symbol or call query against the selected snapshot.</Muted>
+        <PanelForm layout="row" onSubmit={(event) => { event.preventDefault(); setRoute({ expression: queryDraft.trim() }); }}>
+          <Field label="Expression"><TextInput required value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} /></Field>
           <Button type="submit">Run query</Button>
-        </form>
-        <Tabs tabs={[{ id: "results", label: "Results", count: query.data?.length ?? 0 }]} value="results" onChange={() => {}} />
+        </PanelForm>
+        <h2>Results {query.data ? `(${query.data.length})` : ""}</h2>
         <ErrorMessage error={query.error} />
-        <DataTable className="uir-table" data={query.data ?? []} loading={query.loading} getRowId={(row) => row.id} emptyMessage={route.expression ? "No matches" : "Enter a PEG expression"}
+        <DataTable className="min-h-40 max-h-[28rem]" data={query.data ?? []} loading={query.loading} getRowId={(row) => row.id} emptyMessage={route.expression ? "No matches" : "Enter a PEG expression"}
           columns={[{ key: "operation", label: "Operation" }, { key: "symbol", label: "Symbol", grow: true }, { key: "node_type", label: "Kind" }, { key: "root", label: "Root" }, { key: "location", label: "Location", grow: true }]} />
       </>}
-    </div>
+    </PageLayout>
   </AppShell>;
 }

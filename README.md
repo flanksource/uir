@@ -108,10 +108,10 @@ The Java port under `java/com/flanksource/uir/` is source only; no `pom.xml` or 
 `uir serve` opens the saved UIR database in a local web browser. It lists projects and snapshots, explores roots, sources and nodes, runs PEG queries against the selected snapshot, and reindexes local workspaces.
 
 ```sh
-uir --dsn ./uir.db serve --host localhost --port 8080
+go run ./cmd/uir --dsn "$UIR_DSN" serve --host localhost --port 8080
 ```
 
-Open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `uir --dsn ./uir.db serve --dev`. See [serve documentation](docs/serve.md) for source behavior and API routes.
+Set `UIR_DSN` to a PostgreSQL DSN and open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `go run ./cmd/uir --dsn "$UIR_DSN" serve --dev`. See [serve documentation](docs/serve.md) for source behavior, API routes, and the current SQLite dependency limit.
 
 ## Development
 
