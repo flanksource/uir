@@ -129,6 +129,8 @@ The database also enforces snapshot states, unique root mount paths, unique root
 
 Higher-level publication remains an application transaction: create a `building` snapshot, write and validate its complete root graph, transition it to `ready`, then compare-and-swap `ProjectHead.Version`. Writers must never mutate a published snapshot in place. Failed or abandoned builds remain isolated because readers follow only `ProjectHead`.
 
+The `indexer` package implements this lifecycle for Go syntax. It hashes root-relative sources, reconstructs unchanged file projections into a new snapshot, reparses changed files, omits deleted files, resolves only unambiguous same-snapshot calls, and advances the head with a version compare-and-swap. An entirely unchanged input returns the existing head without writing another snapshot. See [`../docs/indexing.md`](../docs/indexing.md) for root discovery and syntax-only resolution limits.
+
 ## Operational limits
 
 SQLite is the local option, not a multi-writer service database. WAL and the busy timeout reduce incidental contention but do not change the single-process ownership contract. PostgreSQL is the target for concurrent writers, shared services, non-default schemas, role management, SQL migration phases, views, and other server-side objects.

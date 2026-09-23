@@ -1,6 +1,7 @@
 package uir
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/flanksource/clicky"
@@ -77,6 +78,29 @@ func (id Identifier) SymbolKey() string {
 	nodeType := id.GetNodeType()
 	parts := []string{strings.ToLower(string(nodeType)), id.String()}
 	return strings.Join(parts, ":")
+}
+
+// IdentityKey returns the canonical, lossless persistence key for an identifier.
+func (id Identifier) IdentityKey() string {
+	components := [7]string{
+		strings.ToLower(string(id.GetNodeType())),
+		id.Module,
+		id.Package,
+		id.Type,
+		id.Method,
+		id.Field,
+		id.Signature,
+	}
+	var key strings.Builder
+	key.WriteString("v1:[")
+	for index, component := range components {
+		if index > 0 {
+			key.WriteByte(',')
+		}
+		key.WriteString(strconv.Quote(component))
+	}
+	key.WriteByte(']')
+	return key.String()
 }
 
 func (id Identifier) AsRef() Node {
