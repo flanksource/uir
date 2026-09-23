@@ -7,6 +7,7 @@ GOWORK ?= off
 export GOWORK
 
 GOLANGCI_LINT_VERSION ?= v2.6.2
+VERSION ?= dev
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -16,8 +17,12 @@ help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_:-]+:.*## /{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: build
-build: web-build ## Build the browser and compile every package
+build: web-build binary ## Build the browser, compile every package, and link the UIR CLI
 	go build ./...
+
+.PHONY: binary
+binary: | $(LOCALBIN) ## Link the UIR CLI into .bin/uir (requires built web/dist)
+	CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION)" -o $(LOCALBIN)/uir ./cmd/uir
 
 .PHONY: install
 install: web-build ## Install the UIR CLI with embedded browser assets
@@ -50,11 +55,15 @@ fmt: ## Format and tidy
 	go fmt ./...
 	go mod tidy
 
+.PHONY: wasm-check
+wasm-check: ## Compile the model package for js/wasm (browser-side consumers)
+	GOOS=js GOARCH=wasm go build -o /dev/null .
+
 .PHONY: vet
 vet: ## Run go vet
 	go vet ./...
 
-$(LOCALBIN)/golangci-lint: $(LOCALBIN)
+$(LOCALBIN)/golangci-lint: | $(LOCALBIN)
 	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: lint

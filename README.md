@@ -15,14 +15,14 @@ import "github.com/flanksource/uir"
 | `.` (`package uir`) | The model: node and statement types, enums, identifiers, fluent builders, pretty printers, semantic hashing, polymorphic JSON, and tree traversal. |
 | `diff/` | Structural diffing. `DiffNode` compares two nodes; `DiffTree` compares whole documents and classifies renames and moves. |
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
-| `indexer/` | Incremental Go AST indexing into immutable, root-aware relational snapshots, exposed as a context-bound Clicky task. |
-| `query/` | PEG query grammar plus the project, snapshot, root, symbol, and call resolution pipeline. |
+| `indexer/` | Incremental Go AST indexing into immutable module-root snapshots, exposed as a context-bound Clicky task. |
+| `query/` | PEG query grammar plus module, checkout, snapshot, symbol, and call resolution. |
 | `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
-| [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and in-memory or relational call queries. |
+| [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and call projection queries. |
 | [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
 | [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
-| `cmd/uir` | Clicky entity CLI for listing projects, querying snapshots, and incrementally reindexing Go workspaces. |
+| `cmd/uir` | CLI for adding module directories, querying snapshots, and incrementally reindexing Go workspaces. |
 | `web/` | Vite and Clicky UI browser for saved snapshots, embedded in `uir serve`. |
 | `python/` | A parallel Python port of the model (pure stdlib). |
 | `java/` | A parallel Java port of the model (Jackson-based, source only — no build file is checked in). |
@@ -105,13 +105,13 @@ The Java port under `java/com/flanksource/uir/` is source only; no `pom.xml` or 
 
 ## Snapshot browser
 
-`uir serve` opens the saved UIR database in a local web browser. It lists projects and snapshots, explores roots, sources and nodes, runs PEG queries against the selected snapshot, and reindexes local workspaces.
+`uir serve` opens the saved UIR database in a local web browser. It lists Go module roots, their checkout locations and snapshots, explores sources and nodes, runs PEG queries, and adds or reindexes local directories.
 
 ```sh
 go run ./cmd/uir --dsn "$UIR_DSN" serve --host localhost --port 8080
 ```
 
-Set `UIR_DSN` to a PostgreSQL DSN and open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `go run ./cmd/uir --dsn "$UIR_DSN" serve --dev`. See [serve documentation](docs/serve.md) for source behavior, API routes, and the current SQLite dependency limit.
+Set `UIR_DSN` to a PostgreSQL DSN or SQLite `.db` path and open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `go run ./cmd/uir --dsn "$UIR_DSN" serve --dev`. See [serve documentation](docs/serve.md) for source behavior and API routes. Opening an older database discards legacy project snapshots; back it up first if that history matters.
 
 ## Development
 

@@ -1,0 +1,75 @@
+name: Release binaries
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Binary (${{ matrix.os }}/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, runner: ubuntu-latest }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm }
+          - { os: darwin, arch: amd64, runner: macos-15-intel }
+          - { os: darwin, arch: arm64, runner: macos-15 }
+    env:
+      GOWORK: "off"
+      VERSION: ${{ inputs.version }}
+      ARCHIVE: uir_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.22.0"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install browser dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Build
+        run: make build VERSION="$VERSION"
+
+      - name: Smoke test binary
+        run: |
+          ./.bin/uir --help
+          test "$(./.bin/uir --version)" = "uir version $VERSION"
+
+      - name: Archive binary
+        run: |
+          mkdir -p dist
+          tar -C .bin -czf "dist/$ARCHIVE" uir
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/${{ env.ARCHIVE }}
+          if-no-files-found: error

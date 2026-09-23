@@ -25,3 +25,4 @@ target/
 docs/uir-gorm-erd.html
 go.work
 go.work.sum
+dist/
