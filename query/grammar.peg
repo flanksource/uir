@@ -1,0 +1,30 @@
+package query
+
+type queryGrammar Peg {
+    parserState
+}
+
+Query <- _ (UnresolvedCalls / Callers / Callees / Nodes) _ !.
+
+Nodes <- 'nodes' { p.setOperation(OperationNodes) } (Spacing 'where' Spacing Predicates)?
+
+Callers <- 'callers' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallers) } Spacing 'where' Spacing Predicates
+
+Callees <- 'callees' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallees) } Spacing 'where' Spacing Predicates
+
+UnresolvedCalls <- 'unresolved' Spacing 'calls' { p.setOperation(OperationUnresolvedCalls) } (Spacing 'where' Spacing RootPredicate)?
+
+Predicates <- Predicate (Spacing 'and' Spacing Predicate)*
+
+Predicate <- Field _ '=' _ Quoted { p.addPredicate() }
+
+RootPredicate <- RootField _ '=' _ Quoted { p.addPredicate() }
+
+Field <- <('node_type' / 'module' / 'package' / 'type' / 'method' / 'field' / 'signature' / 'language' / 'symbol_key' / 'identity_key' / 'root')> { p.setField(text) }
+
+RootField <- <'root'> { p.setField(text) }
+
+Quoted <- '"' <(('\\' .) / [^"\\])*> '"' { p.setValue(text) }
+
+Spacing <- [ \t\r\n]+
+_ <- [ \t\r\n]*
