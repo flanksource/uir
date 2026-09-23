@@ -1,74 +1,128 @@
-export type Project = Record<string, unknown> & {
-  key: string;
+export type ModuleRoot = {
+  root_key: string;
   name: string;
-  snapshot_id?: string;
+  location: string;
+  snapshot_id: string;
   head_version: number;
-  roots: number;
-  sources: number;
-  nodes: number;
 };
 
-export type BrowseRow = Record<string, unknown> & {
+export type ModuleLocation = {
   id: string;
-  name: string;
-  project_key?: string;
-  snapshot_id?: string;
-  root_id?: string;
-  source_id?: string;
-  path?: string;
-  node_type?: string;
-  symbol?: string;
-  language?: string;
-  state?: string;
-  head?: boolean;
-  version?: number;
-  kind?: string;
-  repository?: string;
-  revision?: string;
-  local_path?: string;
-  started_at?: string;
+  root_key: string;
+  canonical_path: string;
+  kind: string;
+  mount_path: string;
+  primary: boolean;
+  head_snapshot_id: string;
+  head_version: number;
 };
 
+export type ModuleSnapshot = {
+  id: string;
+  root_key: string;
+  canonical_path: string;
+  base_snapshot_id?: string;
+  state: string;
+  revision: string;
+  started_at: string;
+  completed_at?: string;
+  head: boolean;
+  head_version?: number;
+};
+
+export type ModuleSource = {
+  id: string;
+  root_key: string;
+  location: string;
+  snapshot_id: string;
+  path: string;
+  package_path: string;
+  content_hash: string;
+  size_bytes: number;
+};
+
+export type ModuleCall = {
+  to_identifier: Record<string, unknown>;
+  to_root_key?: string;
+  resolvable: boolean;
+  statement_path: string;
+  line?: number;
+  text: string;
+};
+
+export type ModuleNode = {
+  id: string;
+  source_id: string;
+  path: string;
+  symbol: string;
+  node_type: string;
+  identifier: Record<string, unknown>;
+  parent_identity?: string;
+  child_slot: string;
+  ordinal: number;
+  payload: unknown;
+  semantic_hash: string;
+  field?: unknown;
+  line?: number;
+  end_line?: number;
+  column?: number;
+  calls: ModuleCall[];
+};
+
+export type ModuleBrowse = { sources: ModuleSource[]; nodes: ModuleNode[] };
+export type ModuleSourceContent = { path: string; content: string; origin: "local" | "git"; revision: string; snapshot_id: string };
+export type ModuleQueryRow = { kind: string; root: string; symbol: string; location: string; source: string; snapshot_id: string };
+export type ModuleIndexResult = {
+  root_key: string;
+  location: string;
+  snapshot_id: string;
+  head_version: number;
+  files: number;
+  parsed_files: number;
+  reused_files: number;
+  unchanged: boolean;
+};
 export type Page<T> = { data: T[]; page: { limit: number; offset: number; total: number } };
-export type SourceContent = { source_id: string; path: string; content?: string; repository?: string; revision?: string; origin: "git" | "local" | "remote" };
-export type QueryRow = Record<string, unknown> & { id: string; operation: string; root?: string; node_type: string; symbol: string; location?: string };
-export type ReindexResult = { snapshot_id: string; unchanged: boolean; nodes: number; files: number; head_version: number };
-export type NodeDetails = { node: Record<string, unknown>; fields: Record<string, unknown>[]; locations: Record<string, unknown>[]; relationships: Record<string, unknown>[] };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) }, ...options });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`${response.status} ${response.statusText}: ${body}`);
-  }
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
   return response.json() as Promise<T>;
 }
 
-function apiPath(entity: string, id?: string, action?: string): string {
-  return `/api/v1/${entity}${id ? `/${encodeURIComponent(id)}` : ""}${action ? `/${action}` : ""}`;
+function moduleURL(operation: string, params?: Record<string, string>): string {
+  const query = new URLSearchParams(params);
+  return `/api/v1/modules${operation ? `/${operation}` : ""}${query.size ? `?${query}` : ""}`;
 }
 
-export function listProjects(): Promise<Project[]> {
-  return request(apiPath("project"));
+export function listModuleRoots(): Promise<ModuleRoot[]> {
+  return request(moduleURL(""));
 }
 
-export function listRows(entity: "snapshot" | "root" | "source" | "node", params: Record<string, string>): Promise<Page<BrowseRow>> {
-  const query = new URLSearchParams({ limit: "100", ...params });
-  return request(`${apiPath(entity)}?${query}`);
+export function listModuleLocations(root: string): Promise<ModuleLocation[]> {
+  return request(moduleURL("locations", { root }));
 }
 
-export function getRow(entity: "node" | "source", id: string): Promise<NodeDetails | BrowseRow> {
-  return request(apiPath(entity, id));
+export function listModuleSnapshots(root: string, location: string, offset: number): Promise<Page<ModuleSnapshot>> {
+  return request(moduleURL("snapshots", { root, location, offset: String(offset), limit: "100" }));
 }
 
-export function getSourceContent(id: string): Promise<SourceContent> {
-  return request(apiPath("source", id, "content"));
+export function browseModule(snapshot: string): Promise<ModuleBrowse> {
+  return request(moduleURL("browse", { snapshot }));
 }
 
-export function runQuery(project: string, expression: string, snapshot: string): Promise<QueryRow[]> {
-  return request(apiPath("project", project, "query"), { method: "POST", body: JSON.stringify({ expression, snapshot }) });
+export function readModuleSource(snapshot: string, path: string): Promise<ModuleSourceContent> {
+  return request(moduleURL("content", { snapshot, path }));
 }
 
-export function runReindex(project: string, options: { path: string; root?: string; name?: string; "include-tests": boolean; force: boolean }): Promise<ReindexResult> {
-  return request(apiPath("project", project, "reindex"), { method: "POST", body: JSON.stringify(options) });
+export function runModuleQuery(expression: string, root: string, snapshot: string): Promise<ModuleQueryRow[]> {
+  return request(moduleURL("query"), { method: "POST", body: JSON.stringify({ args: [expression], root, snapshot }) });
+}
+
+export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexResult[]> {
+  return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, "no-workspace-uses": true }) });
+}
+
+export function reindexModules(path: string, includeTests: boolean, force: boolean): Promise<ModuleIndexResult[]> {
+  return request(moduleURL("reindex"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, force }) });
 }

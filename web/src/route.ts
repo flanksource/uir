@@ -1,8 +1,8 @@
 export type Route = {
   view: "overview" | "explorer" | "nodes" | "query";
-  project: string;
+  module: string;
+  location: string;
   snapshot: string;
-  root: string;
   source: string;
   node: string;
   search: string;
@@ -15,9 +15,9 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
   const path = location.pathname.slice(1);
   return {
     view: path === "explorer" || path === "nodes" || path === "query" ? path : "overview",
-    project: params.get("project") ?? "",
+    module: params.get("module") ?? "",
+    location: params.get("location") ?? "",
     snapshot: params.get("snapshot") ?? "",
-    root: params.get("root") ?? "",
     source: params.get("source") ?? "",
     node: params.get("node") ?? "",
     search: params.get("search") ?? "",
@@ -28,7 +28,7 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["project", "snapshot", "root", "source", "node", "search", "expression"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "search", "expression"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
   if (route.offset > 0) params.set("offset", String(route.offset));
