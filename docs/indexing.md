@@ -15,8 +15,8 @@ For each module, indexing resolves its full `go.mod` module path as logical root
 
 ## Snapshot lifecycle
 
-1. Discover modules and included `.go` paths, capture Git revision where available, hash source bytes, and parse changed files before opening the publication transaction.
-2. Compare each path with the effective source set of the location's previous head, or the primary head when a new location is first registered. Reuse an immutable `SourceRevision` only when root, path, content hash, package path, and extractor version agree.
+1. Discover modules and included `.go` paths, capture Git revision where available, and hash source bytes.
+2. Inside the publication transaction, compare each path with the effective source set of the location's previous head, or the primary head when a new location is first registered. Parse changed files there; reuse an immutable `SourceRevision` only when root, path, content hash, package path, and extractor version agree.
 3. Write `set` deltas for changed/new paths and `delete` tombstones for removed paths. Unchanged paths inherit from the base snapshot without another row.
 4. Mark the snapshot ready and advance that location's head with a version-checked update in the same transaction. An error rolls back every module in that `IndexModules` call.
 

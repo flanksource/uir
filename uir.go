@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/flanksource/clicky/api"
-	"github.com/flanksource/commons/logger"
 )
 
 // UIR is the root structure containing all top-level modules, packages, types, records, and functions
@@ -23,6 +22,9 @@ type UIR struct {
 	Functions []MethodNode    `json:"functions,omitempty"`
 	Hierarchy *HierarchyGraph `json:"hierarchy,omitempty"`
 	RawFiles  []RawFile       `json:"rawFiles,omitempty"`
+	// Warnings lists the nodes Add could not place. It is in-process only:
+	// an UnmarshalJSON caller reads it to learn the decoded document lost nodes.
+	Warnings []Warning `json:"-"`
 }
 
 // RawFile is a verbatim file emitted into the output directory alongside
@@ -100,7 +102,7 @@ func (uir *UIR) Add(node Node) *UIR {
 		// A node type with no arm here is dropped, and UnmarshalJSON routes every
 		// decoded node through Add — so a missing case silently empties a
 		// round-tripped UIR. Say so rather than losing it quietly.
-		logger.Warnf("uir: Add has no case for %T (node type %q); the node was dropped", node, node.GetType())
+		uir.Warnings = append(uir.Warnings, Warning{Message: "uir: Add has no case for this node type; the node was dropped", Node: node})
 	}
 	return uir
 }
@@ -163,6 +165,7 @@ func (uir UIR) Merge(other UIR) UIR {
 	uir.Endpoints = append(uir.Endpoints, other.Endpoints...)
 	uir.Functions = append(uir.Functions, other.Functions...)
 	uir.Hierarchy = mergeHierarchyGraphs(uir.Hierarchy, other.Hierarchy)
+	uir.Warnings = append(uir.Warnings, other.Warnings...)
 	return uir
 }
 

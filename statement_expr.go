@@ -1,7 +1,5 @@
 package uir
 
-import "github.com/samber/lo"
-
 type AssignmentStmt struct {
 	statementBase `json:",inline"`
 	Target        ScopedVariableRef `json:"target,omitempty"`
@@ -118,7 +116,7 @@ type ExprStmt struct {
 }
 
 func (e ExprStmt) Value() Statement {
-	first, _ := lo.First([]Statement{
+	return firstStatement(
 		e.Literal,
 		e.Variable,
 		e.Binary,
@@ -129,8 +127,7 @@ func (e ExprStmt) Value() Statement {
 		e.RecordRead,
 		e.Tuple,
 		e.ObjectLiteral,
-	})
-	return first
+	)
 }
 
 // GetIdentifier implements Node.

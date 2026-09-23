@@ -1,13 +1,10 @@
 package uir
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
-
-	"github.com/flanksource/commons/collections"
-	"github.com/samber/lo"
 )
 
 type NodeTreeMixin interface {
@@ -22,9 +19,10 @@ type NodeTree struct {
 type WalkOptions struct {
 	// If true, will include the root node in the walk
 	IncludeRoot bool
-	// Maximum search depth, 0 means unlimited
-
+	// Maximum search depth below the root, 0 means unlimited
 	Depth int
+	// level is how far below the walk's root the current node is.
+	level int
 	// Node types to descend into, but not call f on
 	Hide       []NodeType
 	HideFilter NodeFilter
@@ -59,16 +57,11 @@ type MatchExpression string
 
 func (me MatchExpression) Matches(value string) (matches bool, negated bool) {
 	patterns := strings.Split(string(me), ",")
-	return collections.MatchItem(value, patterns...)
+	return matchItem(value, patterns...)
 }
 
 func (opts WalkOptions) WithDepth(depth int) WalkOptions {
 	opts.Depth = depth
-	return opts
-}
-
-func (opts WalkOptions) HideRoot(hide bool) WalkOptions {
-	opts.IncludeRoot = hide
 	return opts
 }
 
@@ -77,6 +70,7 @@ func mergeOptions(options []WalkOptions) WalkOptions {
 	for _, opt := range options {
 		merged.IncludeRoot = merged.IncludeRoot || opt.IncludeRoot
 		merged.Depth += opt.Depth
+		merged.level = max(merged.level, opt.level)
 		merged.Hide = append(merged.Hide, opt.Hide...)
 		merged.Skip = append(merged.Skip, opt.Skip...)
 		merged.Stop = append(merged.Stop, opt.Stop...)
@@ -105,67 +99,43 @@ func (tree NodeTree) GetLastModified() time.Time {
 	return max
 }
 
+// Walk calls f depth-first on every node below the root, and on the root when
+// IncludeRoot is set. Hide suppresses f but still descends, Skip suppresses
+// both, and Stop calls f without descending. f returning false ends the walk,
+// and Walk then returns false.
 func (tree NodeTree) Walk(f func(Node) bool, options ...WalkOptions) bool {
 	option := mergeOptions(options)
-	shouldHide := !option.IncludeRoot
-	shouldSkip := false
-	shouldStop := false
-
 	node := tree.Node
 	nodeType := node.GetIdentifier().GetNodeType()
 
-	if !shouldHide && option.HideFilter != nil {
-		shouldHide = option.HideFilter(tree)
-	} else if !shouldHide {
-		for _, nt := range option.Hide {
-			if nodeType == nt {
-				shouldHide = true
-				break
-			}
-		}
+	if matchesNodeFilter(node, nodeType, option.Skip, option.SkipFilter) {
+		return true
 	}
-
-	if option.SkipFilter != nil {
-		shouldSkip = option.SkipFilter(tree)
-	} else if !shouldSkip {
-		for _, nt := range option.Skip {
-			if nodeType == nt {
-				shouldSkip = true
-				break
-			}
-		}
-	}
-
-	if option.StopFilter != nil {
-		shouldStop = option.StopFilter(tree)
-	} else if !shouldStop {
-		for _, nt := range option.Stop {
-			if nodeType == nt {
-				shouldStop = true
-				break
-			}
-		}
-	}
-
-	if shouldStop {
+	hidden := !option.IncludeRoot || matchesNodeFilter(node, nodeType, option.Hide, option.HideFilter)
+	if !hidden && !f(node) {
 		return false
 	}
-	if shouldSkip {
+	if matchesNodeFilter(node, nodeType, option.Stop, option.StopFilter) || (option.Depth > 0 && option.level >= option.Depth) {
 		return true
 	}
 
-	if !shouldHide {
-		if !f(tree) {
-			return false
-		}
-	}
-	for _, child := range tree.GetChildren() {
-		tree := NodeTree{Node: child}
-		if !tree.Walk(f, option.HideRoot(shouldHide)) {
+	child := option
+	child.IncludeRoot = true
+	child.level++
+	for _, c := range tree.GetChildren() {
+		if !(NodeTree{Node: c}).Walk(f, child) {
 			return false
 		}
 	}
 	return true
+}
+
+// matchesNodeFilter applies filter when set, otherwise membership in types.
+func matchesNodeFilter(node Node, nodeType NodeType, types []NodeType, filter NodeFilter) bool {
+	if filter != nil {
+		return filter(node)
+	}
+	return slices.Contains(types, nodeType)
 }
 
 // Returns a unique key for the relationship between two nodes by type
@@ -194,7 +164,7 @@ func (tree NodeTree) GetRelationships() []Relationship {
 		}
 		return true
 	}, WalkOptions{})
-	return lo.Values(relationships)
+	return slices.Collect(maps.Values(relationships))
 }
 
 func (tree NodeTree) GetLocations() []Location {
@@ -207,7 +177,7 @@ func (tree NodeTree) GetLocations() []Location {
 		}
 		return true
 	}, WalkOptions{})
-	return lo.Values(locations)
+	return slices.Collect(maps.Values(locations))
 }
 
 func (tree NodeTree) GetFiles() []string {
@@ -218,37 +188,57 @@ func (tree NodeTree) GetFiles() []string {
 		}
 		return true
 	}, WalkOptions{})
-	files := lo.Keys(fileSet)
-	sort.Strings(files)
-	return files
+	return slices.Sorted(maps.Keys(fileSet))
 }
 
-// GroupByPackage groups nodes by their package, nodes without a package are grouped under an empty package
+// GroupByPackage groups the tree's top-level nodes by package, sorted by
+// package name: same-named packages are merged, and nodes outside any package
+// are grouped under the empty package. It descends only through containers
+// (UIR, modules, node lists); a package or other node is grouped whole.
 func (tree NodeTree) GroupByPackage() ([]PackageNode, error) {
-	packages := map[string]PackageNode{}
-	walkErr := atomic.Value{}
-	_ = tree.Walk(func(node Node) bool {
-		pkgName := ""
-		var pkg PackageNode
-		if pkgNode, ok := node.(PackageNode); ok {
-			pkgName = pkgNode.Package
-			if existing, ok := packages[pkgName]; !ok {
-				pkg = node.(PackageNode)
-			} else {
-				pkg = existing
+	packages := map[string]*PackageNode{}
+	var group func(node Node) error
+	group = func(node Node) error {
+		switch n := node.(type) {
+		case UIR, *UIR, ModuleNode, *ModuleNode, NodeList, NodeTree:
+			for _, child := range n.GetChildren() {
+				if err := group(child); err != nil {
+					return err
+				}
 			}
+			return nil
+		case *PackageNode:
+			return group(*n)
+		case PackageNode:
+			if existing, ok := packages[n.Package]; ok {
+				existing.Types = append(existing.Types, n.Types...)
+				existing.Records = append(existing.Records, n.Records...)
+				existing.Tables = append(existing.Tables, n.Tables...)
+				existing.Endpoints = append(existing.Endpoints, n.Endpoints...)
+				existing.Functions = append(existing.Functions, n.Functions...)
+				existing.Variables = append(existing.Variables, n.Variables...)
+				existing.InitFunctions = append(existing.InitFunctions, n.InitFunctions...)
+				return nil
+			}
+			packages[n.Package] = &n
+			return nil
 		}
-		if err := pkg.Add(node); err != nil {
-			walkErr.Store(err)
-			return false
+		unpackaged, ok := packages[""]
+		if !ok {
+			unpackaged = &PackageNode{}
+			packages[""] = unpackaged
 		}
-		packages[pkgName] = pkg
-		return true
-	}, WalkOptions{})
-	if err := walkErr.Load(); err != nil {
-		return nil, err.(error)
+		return unpackaged.Add(node)
 	}
-	return lo.Values(packages), nil
+	if err := group(tree.Node); err != nil {
+		return nil, err
+	}
+
+	grouped := make([]PackageNode, 0, len(packages))
+	for _, name := range slices.Sorted(maps.Keys(packages)) {
+		grouped = append(grouped, *packages[name])
+	}
+	return grouped, nil
 }
 
 func NewTree(nodes ...Node) NodeTree {

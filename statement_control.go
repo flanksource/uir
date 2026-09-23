@@ -68,8 +68,17 @@ func (b BlockStmt) GetStatementType() StatementType {
 	return ASTStatementTypeBlock
 }
 
+// GetRelationships collects the relationships of the block's statements.
+// Statements are not Nodes, so a node tree over the block cannot reach them;
+// nested blocks recurse through their own GetRelationships.
 func (b BlockStmt) GetRelationships() []Relationship {
-	return b.AsTree().GetRelationships()
+	var relationships []Relationship
+	for _, child := range b.Children {
+		if relatable, ok := child.(Relatable); ok {
+			relationships = append(relationships, relatable.GetRelationships()...)
+		}
+	}
+	return relationships
 }
 
 func (b BlockStmt) AsTree() NodeTree {
