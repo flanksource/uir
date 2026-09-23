@@ -3,7 +3,6 @@ package uir
 import (
 	"fmt"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 )
 
@@ -57,9 +56,7 @@ func (d *DocStmt) WithHeading(level int) *DocStmt {
 	return d
 }
 
-func (d DocStmt) Pretty() api.Text {
-	return clicky.Text(d.Content)
-}
+func (d DocStmt) Pretty() api.Text { return api.Text{Content: d.Content} }
 
 func (d *DocStmt) GetChildren() []Statement {
 	statements := make([]Statement, len(d.Children))

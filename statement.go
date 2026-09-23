@@ -1,7 +1,6 @@
 package uir
 
 import (
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/samber/lo"
 )
@@ -208,7 +207,7 @@ func (s Stmt) Pretty() api.Text {
 	if val != nil {
 		return val.Pretty()
 	}
-	return clicky.Text("null", "text-gray-500")
+	return api.Text{Content: "null", Style: "text-gray-500"}
 }
 
 func (s Stmt) GetStatement() Statement {
