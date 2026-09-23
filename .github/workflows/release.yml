@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: flanksource/action-workflows/.github/workflows/create-release.yml@v1
+
+  binaries:
+    needs: version
+    if: needs.version.outputs.published == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-binaries.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      version: ${{ needs.version.outputs.version }}
+
+  docker:
+    needs: [version, binaries]
+    if: needs.version.outputs.published == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: flanksource/action-workflows/.github/workflows/publish-multi-platform-docker-image.yml@v1
+    with:
+      login_to_dockerhub: false
+      platforms: linux/amd64,linux/arm64
+      image_tags: |
+        ghcr.io/${{ github.repository }}:${{ needs.version.outputs.tag }}
+        ghcr.io/${{ github.repository }}:${{ needs.version.outputs.version }}
+        ghcr.io/${{ github.repository }}:latest
+      build_args: VERSION=${{ needs.version.outputs.version }}
+
+  assets:
+    needs: [version, binaries, docker]
+    if: needs.version.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum uir_*.tar.gz > checksums.txt
+
+      - name: Attach release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/uir_*.tar.gz
+            dist/checksums.txt
+
+  publish:
+    needs: [version, assets]
+    if: needs.version.outputs.published == 'true'
+    permissions:
+      contents: write
+    uses: flanksource/action-workflows/.github/workflows/publish-release.yml@v1
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}

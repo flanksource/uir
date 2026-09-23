@@ -46,6 +46,9 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Compile model for js/wasm
+        run: make wasm-check
+
       - name: Test Go
         run: go test ./... -race
 
@@ -71,3 +74,37 @@ jobs:
 
       - name: Test Python UIR model
         run: python3 python/test_uir.py
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: uir:ci
+          build-args: VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Smoke test image
+        run: test "$(docker run --rm uir:ci --version)" = "uir version ci"
+
+  release:
+    needs: [go, python, image]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/release.yml
