@@ -11,7 +11,9 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/pkg/diff v0.0.0-20241224192749-4e6772a4315c
 	github.com/samber/lo v1.53.0
+	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
+	golang.org/x/mod v0.37.0
 	gorm.io/gorm v1.31.2
 )
 
@@ -189,6 +191,9 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/playwright-community/playwright-go v0.5700.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/pointlander/compress v1.1.1-0.20190518213731-ff44bd196cc3 // indirect
+	github.com/pointlander/jetset v1.0.1-0.20190518214125-eee7eff80bd4 // indirect
+	github.com/pointlander/peg v1.0.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -205,7 +210,6 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.7 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
@@ -249,7 +253,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260527015227-08cc5374adb3 // indirect
-	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
@@ -289,3 +292,5 @@ require (
 // registered "sqlite" database/sql driver. This dialector fork reuses that
 // engine instead of registering glebarez/go-sqlite a second time.
 replace github.com/glebarez/sqlite => github.com/clarkmcc/gorm-sqlite v0.0.0-20240426202654-00ed082c0311
+
+tool github.com/pointlander/peg
