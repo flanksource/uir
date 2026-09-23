@@ -1,7 +1,6 @@
 package uir
 
 import (
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/api/icons"
 )
@@ -354,7 +353,7 @@ func (n NodeType) Icon() api.Textable {
 		return icons.Http
 
 	}
-	return clicky.Text("")
+	return api.Text{Content: ""}
 }
 
 var AllNodeTypes = []NodeType{

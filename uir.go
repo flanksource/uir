@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/commons/logger"
 )
@@ -393,7 +392,7 @@ func (uir UIR) AsTree() NodeTree {
 }
 
 func (uir UIR) PrettyFull() api.Text {
-	t := clicky.Text("")
+	t := api.Text{Content: ""}
 	for _, p := range uir.Packages {
 		t = t.Add(p.Pretty()).NewLine()
 	}
@@ -417,7 +416,7 @@ func (uir UIR) PrettyFull() api.Text {
 
 func (uir UIR) Pretty() api.Text {
 	m := make(map[string]any)
-	t := clicky.Text("")
+	t := api.Text{Content: ""}
 	if len(uir.Modules) > 0 {
 		m["modules"] = len(uir.Modules)
 	}
@@ -445,5 +444,5 @@ func (uir UIR) Pretty() api.Text {
 	} else if len(files) > 0 {
 		m["files"] = files
 	}
-	return t.Add(clicky.Map(m))
+	return t.Add(api.Map(m))
 }

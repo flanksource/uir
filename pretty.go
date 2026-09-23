@@ -5,16 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/api/icons"
 )
 
 func (p ParamsDef) Pretty() api.Text {
 	if len(p) == 0 {
-		return clicky.Text("()", "text-gray-600")
+		return api.Text{Content: "()", Style: "text-gray-600"}
 	}
-	t := clicky.Text("(", "text-gray-600")
+	t := api.Text{Content: "(", Style: "text-gray-600"}
 	for i, param := range p {
 		if len(p) > 5 {
 			t = t.NewLine().Indent(2)
@@ -32,19 +31,17 @@ func (p ParamsDef) Pretty() api.Text {
 	return t
 }
 
-func (node UIRNode) ShortName() api.Text {
-	return clicky.Text(node.GetIdentifier().GetName())
-}
+func (node UIRNode) ShortName() api.Text { return api.Text{Content: node.GetIdentifier().GetName()} }
 
 func (e ASTEndpoint) Pretty() api.Text {
-	t := clicky.Text(e.String(), "text-blue-500").Append("(", "text-gray-600")
+	t := api.Text{Content: e.String(), Style: "text-blue-500"}.Append("(", "text-gray-600")
 	t = t.Add(e.Input.Pretty())
 	t = t.Append(") ", "text-gray-600").Append("->", "text-gray-400").Add(e.Output.Pretty())
 	return t
 }
 
 func (p PackageNode) Pretty() api.Text {
-	t := clicky.Text("package ", "text-blue-500").Append(p.Package, "text-green-600")
+	t := api.Text{Content: "package ", Style: "text-blue-500"}.Append(p.Package, "text-green-600")
 
 	for _, v := range p.Variables {
 		t = t.NewLine().Add(v.Pretty())
@@ -63,8 +60,7 @@ func (p PackageNode) Pretty() api.Text {
 }
 
 func (t TypedNode) Pretty() api.Text {
-	p := clicky.Text("")
-
+	p := api.Text{Content: ""}
 	p = p.Append("class ", "text-blue-500").Append(t.Type, "text-green-600").Append("{", "text-gray-600").NewLine()
 
 	for _, field := range t.Variables {
@@ -82,7 +78,7 @@ func (t TypedNode) Pretty() api.Text {
 }
 
 func (r ASTRecord) Pretty() api.Text {
-	p := clicky.Text(string(r.RecordType), "text-blue-500").Append(r.Type, "text-green-600").Append("{", "text-gray-600").NewLine()
+	p := api.Text{Content: string(r.RecordType), Style: "text-blue-500"}.Append(r.Type, "text-green-600").Append("{", "text-gray-600").NewLine()
 
 	for _, field := range r.Fields {
 		p = p.Append("  ").Add(field.Pretty()).Append(";", "text-gray-600").NewLine()
@@ -93,7 +89,7 @@ func (r ASTRecord) Pretty() api.Text {
 }
 
 func (f RecordField) Pretty() api.Text {
-	p := clicky.Text(f.Field, "text-green-600").Append(": ", "text-gray-600").Add(f.FieldType.Pretty())
+	p := api.Text{Content: f.Field, Style: "text-green-600"}.Append(": ", "text-gray-600").Add(f.FieldType.Pretty())
 	if f.DefaultValue != nil {
 		p = p.Append(" = ", "text-gray-400").Add(f.DefaultValue.Pretty())
 	}
@@ -101,8 +97,7 @@ func (f RecordField) Pretty() api.Text {
 }
 
 func (n MethodNode) Pretty() api.Text {
-	t := clicky.Text("", "")
-
+	t := api.Text{Content: "", Style: ""}
 	t = t.Append("function ", "text-blue-500").Append(n.Method, "text-green-600").
 		Add(n.Params.Pretty())
 
@@ -119,7 +114,7 @@ func (n MethodNode) Pretty() api.Text {
 }
 
 func (s IfStmt) Pretty() api.Text {
-	t := clicky.Text("if ", "text-blue-500").Add(s.Condition.Pretty()).NewLine().Add(s.Then.Pretty().Indent(2))
+	t := api.Text{Content: "if ", Style: "text-blue-500"}.Add(s.Condition.Pretty()).NewLine().Add(s.Then.Pretty().Indent(2))
 
 	if s.Else != nil {
 		t = t.Append(" else ", "muted").NewLine().Add(s.Else.Pretty().Indent(2))
@@ -132,7 +127,7 @@ func (s IfStmt) String() string {
 }
 
 func (s SwitchStmt) Pretty() api.Text {
-	t := clicky.Text("switch", "text-blue-500").Add(s.Value.Pretty())
+	t := api.Text{Content: "switch", Style: "text-blue-500"}.Add(s.Value.Pretty())
 
 	for _, c := range s.Cases {
 		t = t.NewLine().Append("case ", "muted").Add(c.Condition.Pretty()).Append(": ", "muted").Add(c.Body.Pretty())
@@ -146,7 +141,7 @@ func (s SwitchStmt) String() string {
 }
 
 func (s ForStmt) Pretty() api.Text {
-	return clicky.Text("for", "text-blue-500").Add(s.Init.Pretty()).Append("; ", "text-gray-500").Add(s.Cond.Pretty()).Append("; ", "text-gray-500").Add(s.Update.Pretty()).
+	return api.Text{Content: "for", Style: "text-blue-500"}.Add(s.Init.Pretty()).Append("; ", "text-gray-500").Add(s.Cond.Pretty()).Append("; ", "text-gray-500").Add(s.Update.Pretty()).
 		NewLine().Add(s.Body.Pretty().Indent(2))
 }
 
@@ -170,7 +165,7 @@ func (s AssignmentStmt) String() string {
 }
 
 func (s UnaryStmt) Pretty() api.Text {
-	return clicky.Text(string(s.Operator), "text-orange-500").Add(s.Operand.Pretty())
+	return api.Text{Content: string(s.Operator), Style: "text-orange-500"}.Add(s.Operand.Pretty())
 }
 
 func (s UnaryStmt) String() string {
@@ -205,7 +200,7 @@ func (s BinaryStmt) String() string {
 }
 
 func (s CastStmt) Pretty() api.Text {
-	return clicky.Text("(", "text-gray-600").Append(s.TargetType, "text-blue-500").Append(")", "text-gray-600").Add(s.Expr.Pretty())
+	return api.Text{Content: "(", Style: "text-gray-600"}.Append(s.TargetType, "text-blue-500").Append(")", "text-gray-600").Add(s.Expr.Pretty())
 }
 
 func (s CastStmt) String() string {
@@ -213,7 +208,7 @@ func (s CastStmt) String() string {
 }
 
 func (s WhileStmt) Pretty() api.Text {
-	return clicky.Text("while", "text-blue-500").Add(s.Condition.Pretty()).Add(s.Body.Pretty())
+	return api.Text{Content: "while", Style: "text-blue-500"}.Add(s.Condition.Pretty()).Add(s.Body.Pretty())
 }
 
 func (s WhileStmt) String() string {
@@ -221,7 +216,7 @@ func (s WhileStmt) String() string {
 }
 
 func (t TypeDeclStmt) Pretty() api.Text {
-	p := clicky.Text("type ", "text-blue-500").Append(t.Name, "text-green-600")
+	p := api.Text{Content: "type ", Style: "text-blue-500"}.Append(t.Name, "text-green-600")
 	return p
 }
 
@@ -230,7 +225,7 @@ func (t TypeDeclStmt) String() string {
 }
 
 func (s ConstDeclStmt) Pretty() api.Text {
-	p := clicky.Text("const ", "text-blue-500").Append(s.Field, "text-green-600")
+	p := api.Text{Content: "const ", Style: "text-blue-500"}.Append(s.Field, "text-green-600")
 	if s.FieldType != "" {
 		p = p.Append(" ", "text-muted").Append(string(s.FieldType))
 	}
@@ -248,7 +243,7 @@ func (s BlockStmt) Pretty() api.Text {
 	if len(s.Children) == 1 && len(s.Variables) == 0 {
 		return s.Children[0].Pretty()
 	}
-	t := clicky.Text("{", "text-gray-600").NewLine()
+	t := api.Text{Content: "{", Style: "text-gray-600"}.NewLine()
 	for _, v := range s.Variables {
 		t = t.NewLine().Add(v.Pretty()).Append(";", "text-gray-600").NewLine()
 	}
@@ -264,7 +259,7 @@ func (s BlockStmt) String() string {
 }
 
 func (s TupleStmt) Pretty() api.Text {
-	t := clicky.Text("(", "text-gray-600")
+	t := api.Text{Content: "(", Style: "text-gray-600"}
 	for i, elem := range s.Elements {
 		if i > 0 {
 			t = t.Append(", ", "text-gray-600")
@@ -280,7 +275,7 @@ func (s TupleStmt) String() string {
 }
 
 func (s ObjectLiteralStmt) Pretty() api.Text {
-	t := clicky.Text("{ ", "text-gray-600")
+	t := api.Text{Content: "{ ", Style: "text-gray-600"}
 	for i, entry := range s.Entries {
 		if i > 0 {
 			t = t.Append(", ", "text-gray-600")
@@ -295,16 +290,14 @@ func (s ObjectLiteralStmt) String() string {
 	return s.Pretty().ANSI()
 }
 
-func (s VariableStmt) Pretty() api.Text {
-	return clicky.Text(s.Name, "text-green-600")
-}
+func (s VariableStmt) Pretty() api.Text { return api.Text{Content: s.Name, Style: "text-green-600"} }
 
 func (s VariableStmt) String() string {
 	return s.Pretty().ANSI()
 }
 
 func (s MethodCallStmt) Pretty() api.Text {
-	t := clicky.Text("")
+	t := api.Text{Content: ""}
 	if s.Method != nil {
 		t = t.Add(s.Method.Pretty())
 	}
@@ -316,11 +309,11 @@ func (s MethodCallStmt) String() string {
 }
 
 func (r RecordType) Pretty() api.Text {
-	return clicky.Text("").Append(string(r), "text-green-600")
+	return api.Text{Content: ""}.Append(string(r), "text-green-600")
 }
 
 func (r RecordIdentifier) Pretty() api.Text {
-	t := clicky.Text("").Add(r.RecordType.Pretty()).Append("://", "text-gray-400")
+	t := api.Text{Content: ""}.Add(r.RecordType.Pretty()).Append("://", "text-gray-400")
 	if r.EnvironmentIdentifier.String() != "" {
 		t = t.Add(r.EnvironmentIdentifier.Pretty()).Append("/", "text-gray-400")
 	}
@@ -335,27 +328,27 @@ func (s RecordReadStmt) String() string {
 func (s RecordReadStmt) Pretty() api.Text {
 	if s.Expression.Expression != "" {
 		if s.ExpressionType == ExpressionTypeSQL {
-			return clicky.Text("db.Query", "text-green-500").Add(clicky.Text("").Add(api.Code{Language: "sql", Content: s.Expression.Expression}).Wrap("(\"", "\")", "text-gray-600"))
+			return api.Text{Content: "db.Query", Style: "text-green-500"}.Add(api.Text{Content: ""}.Add(api.Code{Language: "sql", Content: s.Expression.Expression}).Wrap("(\"", "\")", "text-gray-600"))
 		}
-		return clicky.Text("").Add(api.Code{Language: string(s.ExpressionType), Content: s.Expression.Expression})
+		return api.Text{Content: ""}.Add(api.Code{Language: string(s.ExpressionType), Content: s.Expression.Expression})
 	}
 	if s.Record == nil {
-		return clicky.Text("read", "text-green-600").Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
+		return api.Text{Content: "read", Style: "text-green-600"}.Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
 	}
-	return clicky.Text("").Add(s.Record.Pretty()).Append(".read", "text-green-600").Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
+	return api.Text{Content: ""}.Add(s.Record.Pretty()).Append(".read", "text-green-600").Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
 }
 
 func (s RecordWriteStmt) Pretty() api.Text {
 	if s.Content != nil {
 		if s.ExpressionType == ExpressionTypeSQL {
-			return clicky.Text("db.Update", "text-green-500").Add(clicky.Text("").Add(api.Code{Language: "sql", Content: *s.Expression.Content}).Wrap("(\"", "\")", "text-gray-600"))
+			return api.Text{Content: "db.Update", Style: "text-green-500"}.Add(api.Text{Content: ""}.Add(api.Code{Language: "sql", Content: *s.Expression.Content}).Wrap("(\"", "\")", "text-gray-600"))
 		}
-		return clicky.Text("").Add(api.Code{Language: string(s.ExpressionType), Content: *s.Content})
+		return api.Text{Content: ""}.Add(api.Code{Language: string(s.ExpressionType), Content: *s.Content})
 	}
 	if s.Record == nil {
-		return clicky.Text("write", "text-green-600").Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
+		return api.Text{Content: "write", Style: "text-green-600"}.Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
 	}
-	return clicky.Text("").Add(s.Record.Pretty()).Append(".write", "text-green-600").Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
+	return api.Text{Content: ""}.Add(s.Record.Pretty()).Append(".write", "text-green-600").Add(s.Arguments.Pretty().Wrap("(", ")", "text-gray-600"))
 }
 
 func (s RecordWriteStmt) String() string {
@@ -363,18 +356,18 @@ func (s RecordWriteStmt) String() string {
 }
 
 func (e EnvironmentIdentifier) Pretty() api.Text {
-	return clicky.Text(e.Environment, "text-blue-600").Append("/", "text-gray-400").Append(e.URN, "text-green-600")
+	return api.Text{Content: e.Environment, Style: "text-blue-600"}.Append("/", "text-gray-400").Append(e.URN, "text-green-600")
 }
 
 func (e EndpointType) Pretty() api.Text {
-	return clicky.Text(e.String(), "text-purple-600")
+	return api.Text{Content: e.String(), Style: "text-purple-600"}
 }
 
 func (a Arguments) Pretty() api.Text {
 	if len(a) == 0 {
-		return clicky.Text("", "text-gray-600")
+		return api.Text{Content: "", Style: "text-gray-600"}
 	}
-	t := clicky.Text("")
+	t := api.Text{Content: ""}
 	for i, arg := range a {
 		if i > 0 {
 			t = t.Append(", ", "text-gray-600")
@@ -388,7 +381,7 @@ func (a Arguments) Pretty() api.Text {
 }
 
 func (s EndpointCallStmt) Pretty() api.Text {
-	t := clicky.Text("")
+	t := api.Text{Content: ""}
 	if s.Endpoint != nil {
 		t = t.Add(s.Endpoint.Pretty())
 	}
@@ -401,7 +394,7 @@ func (s EndpointCallStmt) String() string {
 }
 
 func (v ScopedVariableRef) Pretty() api.Text {
-	t := clicky.Text("")
+	t := api.Text{Content: ""}
 	id := v.Identifier.Pretty()
 	if id.String() != "" {
 		t = t.Add(id).Append(".", "muted")
@@ -440,7 +433,7 @@ func (s ExprStmt) Pretty() api.Text {
 	if s.ObjectLiteral != nil {
 		return s.ObjectLiteral.Pretty()
 	}
-	return clicky.Text("expr", "text-gray-500")
+	return api.Text{Content: "expr", Style: "text-gray-500"}
 }
 
 func (s ExprStmt) String() string {
@@ -448,23 +441,21 @@ func (s ExprStmt) String() string {
 }
 
 func (s ReturnStmt) Pretty() api.Text {
-	return clicky.Text("return ", "text-red-500").Add(s.Value.Pretty())
+	return api.Text{Content: "return ", Style: "text-red-500"}.Add(s.Value.Pretty())
 }
 
 func (s ReturnStmt) String() string {
 	return s.Pretty().ANSI()
 }
 
-func (s BreakStmt) Pretty() api.Text {
-	return clicky.Text("break", "text-red-500")
-}
+func (s BreakStmt) Pretty() api.Text { return api.Text{Content: "break", Style: "text-red-500"} }
 
 func (s BreakStmt) String() string {
 	return s.Pretty().ANSI()
 }
 
 func (s ContinueStmt) Pretty() api.Text {
-	return clicky.Text("continue", "text-yellow-500")
+	return api.Text{Content: "continue", Style: "text-yellow-500"}
 }
 
 func (s ContinueStmt) String() string {
@@ -476,7 +467,7 @@ func (s RawStmt) Pretty() api.Text {
 	if lang == "" {
 		lang = "text"
 	}
-	return clicky.Text("").Add(api.CodeBlock(lang, s.Source))
+	return api.Text{Content: ""}.Add(api.CodeBlock(lang, s.Source))
 }
 
 func (s RawStmt) String() string {
@@ -484,7 +475,7 @@ func (s RawStmt) String() string {
 }
 
 func (s ThrowStmt) Pretty() api.Text {
-	return clicky.Text("throw", "text-red-600").Add(s.Exception.Pretty())
+	return api.Text{Content: "throw", Style: "text-red-600"}.Add(s.Exception.Pretty())
 }
 
 func (s ThrowStmt) String() string {
@@ -492,7 +483,7 @@ func (s ThrowStmt) String() string {
 }
 
 func (s TryStmt) Pretty() api.Text {
-	return clicky.Text("try", "text-blue-600").
+	return api.Text{Content: "try", Style: "text-blue-600"}.
 		Add(s.Body.Pretty().Indent(2)).Append("catch", "text-red-600").Add(s.Catch.Pretty().Indent(2))
 }
 
@@ -511,23 +502,23 @@ func (s ConditionStmt) String() string {
 func (r RecordFieldType) Pretty() api.Text {
 	switch r {
 	case RecordFieldTypeString:
-		return clicky.Text("string", "text-green-600")
+		return api.Text{Content: "string", Style: "text-green-600"}
 	case RecordFieldTypeNumber, RecordFieldTypeFloat, RecordFieldTypeInt:
-		return clicky.Text(string(r), "text-blue-600")
+		return api.Text{Content: string(r), Style: "text-blue-600"}
 	case RecordFieldTypeBoolean:
-		return clicky.Text("boolean", "text-yellow-600")
+		return api.Text{Content: "boolean", Style: "text-yellow-600"}
 	case RecordFieldTypeArray:
-		return clicky.Text("array", "text-purple-600")
+		return api.Text{Content: "array", Style: "text-purple-600"}
 	case RecordFieldTypeObject, RecordFieldTypeMap:
-		return clicky.Text("object", "text-cyan-600")
+		return api.Text{Content: "object", Style: "text-cyan-600"}
 	case RecordFieldTypeEnum:
-		return clicky.Text("enum", "text-red-600")
+		return api.Text{Content: "enum", Style: "text-red-600"}
 	case RecordFieldTypeDate:
-		return clicky.Text("date", "text-indigo-600")
+		return api.Text{Content: "date", Style: "text-indigo-600"}
 	case RecordFieldTypeIP, RecordFieldTypeCIDR:
-		return clicky.Text(string(r), "text-teal-600")
+		return api.Text{Content: string(r), Style: "text-teal-600"}
 	default:
-		return clicky.Text(string(r), "text-orange-600")
+		return api.Text{Content: string(r), Style: "text-orange-600"}
 	}
 }
 
@@ -536,7 +527,7 @@ func (l Location) Pretty() api.Text {
 
 	if l.Path != "" {
 		fileName := filepath.Base(l.Path)
-		result = clicky.Text(fileName, "text-blue-500 font-medium")
+		result = api.Text{Content: fileName, Style: "text-blue-500 font-medium"}
 	}
 
 	if l.EndLine != nil && l.StartLine != nil && *l.EndLine != *l.StartLine {
@@ -561,24 +552,24 @@ func (l Location) Pretty() api.Text {
 func (r RelationshipType) Pretty() api.Text {
 	switch r {
 	case RelationshipTypeImport:
-		return clicky.Text("").Add(icons.ArrowDown).Append(" import", "text-blue-600")
+		return api.Text{Content: ""}.Add(icons.ArrowDown).Append(" import", "text-blue-600")
 	case RelationshipTypeCall:
-		return clicky.Text("").Add(icons.ArrowRight).Append(" call", "text-green-600")
+		return api.Text{Content: ""}.Add(icons.ArrowRight).Append(" call", "text-green-600")
 	case RelationshipTypeInheritance:
-		return clicky.Text("").Add(icons.ArrowRight).Append(" extends", "text-purple-600")
+		return api.Text{Content: ""}.Add(icons.ArrowRight).Append(" extends", "text-purple-600")
 	case RelationshipTypeImplements:
-		return clicky.Text("").Add(icons.ArrowRight).Append(" implements", "text-indigo-600")
+		return api.Text{Content: ""}.Add(icons.ArrowRight).Append(" implements", "text-indigo-600")
 	case RelationshipTypeIncludes:
-		return clicky.Text("").Add(icons.ArrowRight).Append(" includes", "text-pink-600")
+		return api.Text{Content: ""}.Add(icons.ArrowRight).Append(" includes", "text-pink-600")
 	case RelationshipTypeForeignKey:
-		return clicky.Text("").Add(icons.ArrowRight).Append(" foreign key", "text-red-600")
+		return api.Text{Content: ""}.Add(icons.ArrowRight).Append(" foreign key", "text-red-600")
 	default:
-		return clicky.Text("").Add(icons.ArrowRight).Append(" reference", "text-yellow-600")
+		return api.Text{Content: ""}.Add(icons.ArrowRight).Append(" reference", "text-yellow-600")
 	}
 }
 
 func (t StatementType) Pretty() api.Text {
-	c := clicky.Text("")
+	c := api.Text{Content: ""}
 	switch {
 	case t == ASTStatementTypeIf:
 		return c.Add(icons.If)
@@ -599,32 +590,32 @@ func (t StatementType) Pretty() api.Text {
 	case strings.HasSuffix(string(t), string(ASTStatementTypeCall)):
 		return c.Add(icons.ArrowRight)
 	default:
-		return clicky.Text(" other", "text-gray-600")
+		return api.Text{Content: " other", Style: "text-gray-600"}
 	}
 }
 
 func (f FieldType) Pretty() api.Text {
 	switch f {
 	case FieldTypeString:
-		return clicky.Text("string", "text-green-600")
+		return api.Text{Content: "string", Style: "text-green-600"}
 	case FieldTypeNumber, FieldTypeFloat:
-		return clicky.Text("number", "text-blue-600")
+		return api.Text{Content: "number", Style: "text-blue-600"}
 	case FieldTypeBoolean:
-		return clicky.Text("boolean", "text-red-600")
+		return api.Text{Content: "boolean", Style: "text-red-600"}
 	case FieldTypeArray:
-		return clicky.Text("array", "text-purple-600")
+		return api.Text{Content: "array", Style: "text-purple-600"}
 	case FieldTypeObject:
-		return clicky.Text("object", "text-pink-600")
+		return api.Text{Content: "object", Style: "text-pink-600"}
 	case FieldTypeEnum:
-		return clicky.Text("enum", "text-indigo-600")
+		return api.Text{Content: "enum", Style: "text-indigo-600"}
 	case FieldTypeDate:
-		return clicky.Text("date", "text-gray-600")
+		return api.Text{Content: "date", Style: "text-gray-600"}
 	case FieldTypeMap:
-		return clicky.Text("map", "text-teal-600")
+		return api.Text{Content: "map", Style: "text-teal-600"}
 	case FieldTypeXPath:
-		return clicky.Text("xpath", "text-orange-600")
+		return api.Text{Content: "xpath", Style: "text-orange-600"}
 	default:
-		return clicky.Text(string(f), "text-yellow-600")
+		return api.Text{Content: string(f), Style: "text-yellow-600"}
 	}
 }
 
@@ -632,7 +623,7 @@ func (v Value) Pretty() api.Text {
 	if v.IsEmpty() {
 		return api.Text{}
 	}
-	p := clicky.Text(" ").Add(v.FieldType.Pretty())
+	p := api.Text{Content: " "}.Add(v.FieldType.Pretty())
 	if !v.IsEmpty() {
 		p = p.Append(" = ", "text-gray-400 font-mono").Add(v.AsText("text-orange-600"))
 	}
@@ -641,31 +632,31 @@ func (v Value) Pretty() api.Text {
 
 func (v Value) AsText(styles ...string) api.Textable {
 	if v.Text != nil && v.Text.String() != "" {
-		return clicky.Text("").Add(v.Text).Styles(styles...)
+		return api.Text{Content: ""}.Add(v.Text).Styles(styles...)
 	}
-	return clicky.Text(v.Value, styles...).Append(" ")
+	return api.Text{Content: v.Value, Style: strings.Join(styles, " ")}.Append(" ")
 }
 
 func (t TypedValue) Pretty() api.Text {
 	if t.IsEmpty() {
-		return clicky.Text("null", "text-gray-500")
+		return api.Text{Content: "null", Style: "text-gray-500"}
 	}
 	val := t.String()
 
 	if t.Bool != nil {
-		return clicky.Text(val, "text-green-500")
+		return api.Text{Content: val, Style: "text-green-500"}
 	}
 	if t.Int != nil || t.Float != nil {
-		return clicky.Text(val, "text-blue-500")
+		return api.Text{Content: val, Style: "text-blue-500"}
 	}
 	if t.Date != nil {
-		return clicky.Text(val, "text-yellow-500")
+		return api.Text{Content: val, Style: "text-yellow-500"}
 	}
-	return clicky.Text(val, "text-green-500")
+	return api.Text{Content: val, Style: "text-green-500"}
 }
 
 func (v VariableDeclStmt) Pretty() api.Text {
-	p := clicky.Text("var ", "text-blue-500").Append(v.Field)
+	p := api.Text{Content: "var ", Style: "text-blue-500"}.Append(v.Field)
 	if v.FieldType != "" {
 		p = p.Append(" ", "text-muted").Append(string(v.FieldType))
 	}
@@ -683,5 +674,5 @@ func (v VariableDeclStmt) String() string {
 }
 
 func (e Expression) Pretty() api.Text {
-	return clicky.Text("").Add(api.Code{Content: e.Expression, Language: string(e.ExpressionType)})
+	return api.Text{Content: ""}.Add(api.Code{Content: e.Expression, Language: string(e.ExpressionType)})
 }

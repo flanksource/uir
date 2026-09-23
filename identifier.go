@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/google/uuid"
 )
@@ -318,7 +317,7 @@ func (id Identifier) GetNodeType() NodeType {
 }
 
 func (id Identifier) Pretty() api.Text {
-	s := clicky.Text("")
+	s := api.Text{Content: ""}
 	style := id.GetNodeType().Color()
 
 	if id.Module != "" {

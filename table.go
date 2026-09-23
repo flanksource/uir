@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 )
 
@@ -197,7 +196,7 @@ func (f RecordForeignKey) Reference() RecordReference {
 }
 
 func (t RecordTable) Pretty() api.Text {
-	p := clicky.Text(string(t.RecordType)+" ", "text-blue-500").
+	p := api.Text{Content: string(t.RecordType) + " ", Style: "text-blue-500"}.
 		Append(t.QualifiedName(), "text-green-600").
 		Append(" {", "text-gray-600").NewLine()
 	for _, column := range t.Columns {
@@ -213,7 +212,7 @@ func (t RecordTable) Pretty() api.Text {
 }
 
 func (c RecordColumn) Pretty() api.Text {
-	p := clicky.Text(c.Field, "text-green-600").Append(": ", "text-gray-600")
+	p := api.Text{Content: c.Field, Style: "text-green-600"}.Append(": ", "text-gray-600")
 	if c.SQLType != "" {
 		p = p.Append(c.SQLType, "text-blue-400")
 	} else {
@@ -249,7 +248,7 @@ func (i RecordIndex) Pretty() api.Text {
 	case i.Unique:
 		kind = "UNIQUE INDEX"
 	}
-	p := clicky.Text(kind+" ", "text-purple-500").
+	p := api.Text{Content: kind + " ", Style: "text-purple-500"}.
 		Append(i.Field, "text-green-600").
 		Append(" ("+strings.Join(i.Columns, ", ")+")", "text-gray-600")
 	if len(i.Included) > 0 {
@@ -266,7 +265,7 @@ func (f RecordForeignKey) Pretty() api.Text {
 	if f.ReferencedSchema != "" {
 		target = f.ReferencedSchema + "." + f.ReferencedTable
 	}
-	return clicky.Text("FOREIGN KEY ", "text-teal-500").
+	return api.Text{Content: "FOREIGN KEY ", Style: "text-teal-500"}.
 		Append("("+strings.Join(f.Columns, ", ")+")", "text-gray-600").
 		Append(" REFERENCES ", "text-teal-500").
 		Append(target, "text-green-600").
