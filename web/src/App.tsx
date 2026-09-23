@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { AppShell, Button, Select, Tabs } from "@flanksource/clicky-ui/components";
 import { DataTable, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { getRow, getSourceContent, listProjects, listRows, runQuery, runReindex, type BrowseRow, type NodeDetails, type Page, type Project, type QueryRow, type SourceContent } from "./api";
+import { addModules, browseModule, listModuleLocations, listModuleRoots, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleIndexResult, type ModuleLocation, type ModuleNode, type ModuleQueryRow, type ModuleRoot, type ModuleSnapshot, type ModuleSource, type ModuleSourceContent, type Page } from "./api";
 import { readRoute, routeURL, type Route } from "./route";
-import { repositoryURL } from "./repository";
 import { Card, CodeBlock, Detail, DetailGrid, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
 
 type Load<T> = { data?: T; error?: string; loading: boolean };
@@ -31,141 +30,125 @@ function ErrorMessage({ error }: { error?: string }) {
   return error ? <div role="alert" className="whitespace-pre-wrap rounded-md border border-destructive p-3 text-destructive">{error}</div> : null;
 }
 
-function DataList({ rows, loading, error, columns, onClick, page, onPage }: {
-  rows: BrowseRow[];
+function DataList<T extends { id: string }>({ rows, loading, error, columns, onClick, total, offset, onPage }: {
+  rows: T[];
   loading: boolean;
   error?: string;
-  columns: DataTableColumn<BrowseRow>[];
-  onClick?: (row: BrowseRow) => void;
-  page?: Page<BrowseRow>["page"];
+  columns: DataTableColumn<T>[];
+  onClick?: (row: T) => void;
+  total?: number;
+  offset?: number;
   onPage?: (offset: number) => void;
 }) {
   return <>
     <ErrorMessage error={error} />
     <DataTable className="min-h-40 max-h-[28rem]" data={rows} columns={columns} loading={loading} getRowId={(row) => row.id} onRowClick={onClick}
       emptyMessage="No saved records match this view"
-      pagination={page && onPage ? { page: Math.floor(page.offset / page.limit), pageSize: page.limit, total: page.total,
-        onPageChange: (next) => onPage(next * page.limit), onPageSizeChange: () => onPage(0), pageSizeOptions: [100] } : undefined} />
+      pagination={total !== undefined && onPage ? { page: Math.floor((offset ?? 0) / 100), pageSize: 100, total,
+        onPageChange: (next) => onPage(next * 100), onPageSizeChange: () => onPage(0), pageSizeOptions: [100] } : undefined} />
   </>;
 }
 
-const snapshotColumns: DataTableColumn<BrowseRow>[] = [
+const locationColumns: DataTableColumn<ModuleLocation>[] = [
+  { key: "canonical_path", label: "Checkout", sortable: true, grow: true },
+  { key: "kind", label: "Kind" },
+  { key: "primary", label: "Primary", render: (_, row) => row.primary ? "Yes" : "" },
+  { key: "head_version", label: "Head", render: (_, row) => `v${row.head_version}` },
+];
+const snapshotColumns: DataTableColumn<ModuleSnapshot>[] = [
   { key: "id", label: "Snapshot", render: (_, row) => row.id.slice(0, 12), sortable: true },
   { key: "state", label: "State", sortable: true },
-  { key: "head", label: "Published", render: (_, row) => row.head ? `Head v${row.version}` : "", sortable: true },
+  { key: "head", label: "Published", render: (_, row) => row.head ? `Head v${row.head_version}` : "" },
+  { key: "revision", label: "Git revision", render: (_, row) => row.revision?.slice(0, 12) ?? "" },
   { key: "started_at", label: "Started", sortable: true },
 ];
-const rootColumns: DataTableColumn<BrowseRow>[] = [
-  { key: "name", label: "Root", sortable: true, grow: true },
-  { key: "kind", label: "Kind" },
-  { key: "revision", label: "Revision", render: (_, row) => row.revision?.slice(0, 12) ?? "" },
-  { key: "local_path", label: "Local path", grow: true },
-];
-const sourceColumns: DataTableColumn<BrowseRow>[] = [
+const sourceColumns: DataTableColumn<ModuleSource>[] = [
   { key: "path", label: "Source", sortable: true, grow: true },
-  { key: "language", label: "Language" },
-  { key: "kind", label: "Kind" },
+  { key: "package_path", label: "Package", grow: true },
+  { key: "size_bytes", label: "Bytes" },
 ];
-const nodeColumns: DataTableColumn<BrowseRow>[] = [
-  { key: "name", label: "Symbol", sortable: true, grow: true },
+const nodeColumns: DataTableColumn<ModuleNode>[] = [
+  { key: "symbol", label: "Symbol", sortable: true, grow: true },
   { key: "node_type", label: "Kind", sortable: true },
-  { key: "language", label: "Language" },
-  { key: "root_id", label: "Root", render: (_, row) => row.root_id?.slice(0, 8) ?? "" },
+  { key: "path", label: "Source", grow: true },
+  { key: "line", label: "Line" },
 ];
 
-function ReindexForm({ project, defaultPath, onSuccess }: { project: string; defaultPath: string; onSuccess: (snapshot: string, project: string) => void }) {
-  const [projectKey, setProjectKey] = useState(project);
+function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath: string; onSuccess: (results: ModuleIndexResult[]) => void }) {
   const [path, setPath] = useState(defaultPath);
-  const [root, setRoot] = useState("");
-  const [name, setName] = useState("");
   const [includeTests, setIncludeTests] = useState(false);
   const [force, setForce] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => setProjectKey(project), [project]);
-  useEffect(() => { if (!path) setPath(defaultPath); }, [defaultPath, path]);
+  const [message, setMessage] = useState("");
+  useEffect(() => setPath(defaultPath), [defaultPath]);
 
-  async function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent, action: "add" | "reindex") {
     event.preventDefault();
     setPending(true);
     setError("");
+    setMessage("");
     try {
-      const result = await runReindex(projectKey.trim(), { path: path.trim(), root: root.trim(), name: name.trim(), "include-tests": includeTests, force });
-      onSuccess(result.snapshot_id, projectKey.trim());
+      const results = action === "add" ? await addModules(path.trim(), includeTests) : await reindexModules(path.trim(), includeTests, force);
+      if (!results.length) throw new Error(`No Go modules found under ${path}`);
+      setMessage(`${action === "add" ? "Added" : "Reindexed"} ${results.length} module ${results.length === 1 ? "root" : "roots"}`);
+      onSuccess(results);
     } catch (reason) { setError(String(reason)); }
     finally { setPending(false); }
   }
 
-  return <PanelForm onSubmit={submit}>
-    <h2>Reindex a workspace</h2>
-    <Muted>Publish an updated snapshot from a local checkout. The selected snapshot changes when indexing succeeds.</Muted>
-    <Row>
-      <Field label="Project key"><TextInput required value={projectKey} onChange={(event) => setProjectKey(event.target.value)} /></Field>
-      <Field label="Local path"><TextInput required value={path} onChange={(event) => setPath(event.target.value)} /></Field>
-    </Row>
-    <Row>
-      <Field label="Root key (optional)"><TextInput value={root} onChange={(event) => setRoot(event.target.value)} /></Field>
-      <Field label="Project name (optional)"><TextInput value={name} onChange={(event) => setName(event.target.value)} /></Field>
-    </Row>
+  return <PanelForm onSubmit={(event) => submit(event, root ? "reindex" : "add")}>
+    <h2>{root ? "Reindex a checkout" : "Add a directory"}</h2>
+    <Muted>Discover Go modules from a local directory. Each module path becomes a root; each checkout keeps its own snapshot history.</Muted>
+    <Field label="Local path"><TextInput required value={path} onChange={(event) => setPath(event.target.value)} /></Field>
     <Row>
       <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={includeTests} onChange={(event) => setIncludeTests(event.target.checked)} />Include Go tests</label>
-      <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Force reparse</label>
-      <Button type="submit" loading={pending}>Reindex</Button>
+      {root && <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Force reparse</label>}
+      <Button type="submit" loading={pending}>{root ? "Reindex" : "Add"}</Button>
+      {root && <Button type="button" variant="outline" disabled={pending} onClick={(event) => submit(event, "add")}>Add another directory</Button>}
     </Row>
     <ErrorMessage error={error} />
+    {message && <Muted>{message}</Muted>}
   </PanelForm>;
 }
 
-function SourceView({ source }: { source: string }) {
-  const content = useLoad<SourceContent>(source ? () => getSourceContent(source) : null, source);
-  if (!source) return <Muted>Select a source to view its saved reference.</Muted>;
-  if (content.loading) return <Muted>Loading source…</Muted>;
-  if (content.error) return <ErrorMessage error={content.error} />;
-  if (!content.data) return null;
-  const item = content.data;
+function SourceView({ snapshot, source }: { snapshot: string; source?: ModuleSource }) {
+  const content = useLoad<ModuleSourceContent>(source ? () => readModuleSource(snapshot, source.path) : null, `${snapshot}:${source?.id}`);
+  if (!source) return <Muted>Select a source to view its verified content.</Muted>;
   return <Card>
-    <strong>{item.path}</strong>
-    <div><Muted>{item.origin === "git" ? `Git revision ${item.revision}` : item.origin === "local" ? "Current local file; no hash verification" : "Remote Git source"}</Muted></div>
-    {item.origin === "remote" ? <div className="break-all">
-      <p>Source content is unavailable locally. Open the repository to inspect this revision.</p>
-      {item.repository && repositoryURL(item.repository) ? <a className="break-all text-primary underline" href={repositoryURL(item.repository)!} target="_blank" rel="noreferrer">{item.repository}</a> : <span>{item.repository}</span>}
-      <p>Revision: {item.revision}</p>
-    </div> : <CodeBlock>{item.content}</CodeBlock>}
+    <strong>{source.path}</strong>
+    <div><Muted>{source.package_path} · SHA-256 {source.content_hash.slice(0, 12)}</Muted></div>
+    {content.loading && <Muted>Loading source…</Muted>}
+    <ErrorMessage error={content.error} />
+    {content.data && <><Muted>{content.data.origin === "git" ? `Pinned Git revision ${content.data.revision}` : "Local file matches indexed hash"}</Muted><CodeBlock>{content.data.content}</CodeBlock></>}
   </Card>;
 }
 
-function NodeView({ node, onSource }: { node: string; onSource: (source: string) => void }) {
-  const details = useLoad<NodeDetails>(node ? () => getRow("node", node) as Promise<NodeDetails> : null, node);
+function NodeView({ node, onSource }: { node?: ModuleNode; onSource: (sourceID: string) => void }) {
   const [tab, setTab] = useState("overview");
-  if (!node) return <Muted>Select a node for fields, locations, and relationships.</Muted>;
-  if (details.loading) return <Muted>Loading node…</Muted>;
-  if (details.error) return <ErrorMessage error={details.error} />;
-  if (!details.data) return null;
-  const { node: record, fields, locations, relationships } = details.data;
+  if (!node) return <Muted>Select a symbol for its payload, field, and outgoing calls.</Muted>;
   return <Card>
-    <strong>{String(record.SymbolKey || record.IdentityKey || node)}</strong>
+    <strong>{node.symbol || node.id}</strong>
     <Tabs value={tab} onChange={setTab} tabs={[
-      { id: "overview", label: "Overview" }, { id: "fields", label: "Fields", count: fields.length },
-      { id: "relationships", label: "Relationships", count: relationships.length }, { id: "raw", label: "Raw" },
+      { id: "overview", label: "Overview" }, { id: "field", label: "Field", count: node.field ? 1 : 0 },
+      { id: "calls", label: "Calls", count: node.calls.length }, { id: "raw", label: "Raw" },
     ]} />
     {tab === "overview" && <>
       <DetailGrid>
-        <Detail label="Kind">{String(record.NodeType || "")}</Detail>
-        <Detail label="Language">{String(record.Language || "")}</Detail>
-        <Detail label="Package">{String(record.Package || "")}</Detail>
-        <Detail label="Signature">{String(record.Signature || "")}</Detail>
+        <Detail label="Kind">{node.node_type}</Detail>
+        <Detail label="Source"><button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-primary underline" onClick={() => onSource(node.source_id)}>{node.path}{node.line ? `:${node.line}` : ""}</button></Detail>
+        <Detail label="Child slot">{node.child_slot}</Detail>
+        <Detail label="Semantic hash">{node.semantic_hash.slice(0, 12)}</Detail>
       </DetailGrid>
-      <h3>Locations</h3>
-      {locations.length ? <ul>{locations.map((location, index) => <li key={String(location.ID || index)}>
-        <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-primary underline" onClick={() => onSource(String(location.SourceID))}>Source {String(location.SourceID).slice(0, 8)}</button>
-        {location.StartLine ? `:${String(location.StartLine)}` : ""}{location.EndLine && location.EndLine !== location.StartLine ? `–${String(location.EndLine)}` : ""}
-      </li>)}</ul> : <Muted>No source locations</Muted>}
+      <h3>UIR payload</h3><CodeBlock>{JSON.stringify(node.payload, null, 2)}</CodeBlock>
     </>}
-    {tab === "fields" && (fields.length ? <CodeBlock>{JSON.stringify(fields, null, 2)}</CodeBlock> : <Muted>No fields</Muted>)}
-    {tab === "relationships" && (relationships.length ? <CodeBlock>{JSON.stringify(relationships, null, 2)}</CodeBlock> : <Muted>No relationships</Muted>)}
-    {tab === "raw" && <CodeBlock>{JSON.stringify(details.data, null, 2)}</CodeBlock>}
+    {tab === "field" && (node.field ? <CodeBlock>{JSON.stringify(node.field, null, 2)}</CodeBlock> : <Muted>No field projection</Muted>)}
+    {tab === "calls" && (node.calls.length ? <CodeBlock>{JSON.stringify(node.calls, null, 2)}</CodeBlock> : <Muted>No outgoing calls</Muted>)}
+    {tab === "raw" && <CodeBlock>{JSON.stringify(node, null, 2)}</CodeBlock>}
   </Card>;
 }
+
+function pageRows<T>(rows: T[], offset: number): T[] { return rows.slice(offset, offset + 100); }
 
 export function App() {
   const [route, setRouteState] = useState(readRoute);
@@ -181,76 +164,97 @@ export function App() {
     setRouteState(next);
   }
 
-  const projects = useLoad<Project[]>(listProjects, String(refresh));
-  const project = projects.data?.find((item) => item.key === route.project);
+  const roots = useLoad<ModuleRoot[]>(listModuleRoots, String(refresh));
+  const selectedRoot = roots.data?.find((item) => item.root_key === route.module);
   useEffect(() => {
-    if (!route.project && projects.data?.length) setRoute({ project: projects.data[0].key, snapshot: projects.data[0].snapshot_id ?? "" }, true);
-    // The route is updated only when no project is selected.
+    if (!route.module && roots.data?.length) setRoute({ module: roots.data[0].root_key, location: roots.data[0].location, snapshot: roots.data[0].snapshot_id }, true);
+    // A missing selection resolves to the first indexed module.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects.data, route.project]);
+  }, [roots.data, route.module]);
+  const locations = useLoad<ModuleLocation[]>(route.module ? () => listModuleLocations(route.module) : null, `locations:${route.module}:${refresh}`);
   useEffect(() => {
-    if (route.project && !route.snapshot && project?.snapshot_id) setRoute({ snapshot: project.snapshot_id }, true);
-    // A project head is resolved only when the URL does not name a snapshot.
+    if (route.module && !route.location && selectedRoot) setRoute({ location: selectedRoot.location, snapshot: selectedRoot.snapshot_id }, true);
+    // The root's primary checkout is the default URL location.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.project, route.snapshot, project?.snapshot_id]);
-  const snapshots = useLoad<Page<BrowseRow>>(route.project ? () => listRows("snapshot", { project: route.project, offset: String(route.offset) }) : null, `snapshots:${route.project}:${route.offset}:${refresh}`);
-  const snapshot = route.snapshot || project?.snapshot_id || "";
-  const roots = useLoad<Page<BrowseRow>>(snapshot ? () => listRows("root", { snapshot }) : null, `roots:${snapshot}:${refresh}`);
-  const sources = useLoad<Page<BrowseRow>>(snapshot && route.view === "explorer" ? () => listRows("source", { snapshot, ...(route.root ? { root: route.root } : {}), ...(route.search ? { search: route.search } : {}), offset: String(route.offset) }) : null, `sources:${snapshot}:${route.root}:${route.search}:${route.offset}:${refresh}:${route.view}`);
-  const nodes = useLoad<Page<BrowseRow>>(snapshot && route.view === "nodes" ? () => listRows("node", { snapshot, ...(route.root ? { root: route.root } : {}), ...(route.source ? { source: route.source } : {}), ...(route.search ? { search: route.search } : {}), offset: String(route.offset) }) : null, `nodes:${snapshot}:${route.root}:${route.source}:${route.search}:${route.offset}:${refresh}:${route.view}`);
-  const query = useLoad<QueryRow[]>(snapshot && route.view === "query" && route.expression ? () => runQuery(route.project, route.expression, snapshot) : null, `query:${route.project}:${snapshot}:${route.expression}:${route.view}`);
+  }, [route.module, route.location, selectedRoot]);
+  const selectedLocation = locations.data?.find((item) => item.canonical_path === route.location);
+  useEffect(() => {
+    if (route.location && !route.snapshot && selectedLocation) setRoute({ snapshot: selectedLocation.head_snapshot_id }, true);
+    // A selected checkout resolves to its current head only without an explicit snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.location, route.snapshot, selectedLocation]);
+  const snapshots = useLoad<Page<ModuleSnapshot>>(route.module && route.location ? () => listModuleSnapshots(route.module, route.location, route.offset) : null,
+    `snapshots:${route.module}:${route.location}:${route.offset}:${refresh}`);
+  const browse = useLoad<ModuleBrowse>(route.snapshot && (route.view === "explorer" || route.view === "nodes") ? () => browseModule(route.snapshot) : null,
+    `browse:${route.snapshot}:${route.view}:${refresh}`);
+  const query = useLoad<ModuleQueryRow[]>(route.snapshot && route.view === "query" && route.expression ? () => runModuleQuery(route.expression, route.module, route.snapshot) : null,
+    `query:${route.module}:${route.snapshot}:${route.expression}:${route.view}`);
   const [queryDraft, setQueryDraft] = useState(route.expression);
   useEffect(() => setQueryDraft(route.expression), [route.expression]);
-  const selectedRoot = roots.data?.data.find((item) => item.id === route.root) ?? roots.data?.data[0];
+
+  const sources = (browse.data?.sources ?? []).filter((source) => source.path.toLowerCase().includes(route.search.toLowerCase()));
+  const nodes = (browse.data?.nodes ?? []).filter((node) => (!route.source || node.source_id === route.source) && node.symbol.toLowerCase().includes(route.search.toLowerCase()));
+  const selectedSource = browse.data?.sources.find((source) => source.id === route.source);
+  const selectedNode = browse.data?.nodes.find((node) => node.id === route.node);
+  const queryRows = (query.data ?? []).map((row, index) => ({ ...row, id: `${row.snapshot_id}:${row.source}:${row.symbol}:${index}` }));
   const nav = ["overview", "explorer", "nodes", "query"] as const;
 
   return <AppShell brand={<strong>UIR</strong>} contentWidth="full"
-    navSections={[{ label: "Snapshot browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
-    sidebarHeader={<Field label="Project"><Select aria-label="Project" value={route.project} onChange={(event) => {
-      const next = projects.data?.find((item) => item.key === event.target.value);
-      setRoute({ project: event.target.value, snapshot: next?.snapshot_id ?? "", root: "", source: "", node: "", offset: 0 });
-    }} options={(projects.data ?? []).map((item) => ({ value: item.key, label: item.name || item.key }))} /></Field>}
-    bodyHeader={<span>{project?.name || route.project || "Projects"} {snapshot && <Muted>/ {snapshot.slice(0, 12)}</Muted>}</span>}
+    navSections={[{ label: "Module browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
+    sidebarHeader={<Field label="Module root"><Select aria-label="Module root" value={route.module} onChange={(event) => {
+      const next = roots.data?.find((item) => item.root_key === event.target.value);
+      setRoute({ module: event.target.value, location: next?.location ?? "", snapshot: next?.snapshot_id ?? "", source: "", node: "", offset: 0 });
+    }} options={(roots.data ?? []).map((item) => ({ value: item.root_key, label: item.name || item.root_key }))} /></Field>}
+    bodyHeader={<span>{selectedRoot?.name || route.module || "Module roots"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
     bodyActions={<Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button>}>
     <PageLayout>
-      {projects.loading && <Muted>Loading projects…</Muted>}
-      <ErrorMessage error={projects.error} />
+      {roots.loading && <Muted>Loading module roots…</Muted>}
+      <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
-        <Section><Heading>Saved projects</Heading><Muted>Browse immutable UIR snapshots and their indexed code.</Muted>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(projects.data ?? []).map((item) => <Card key={item.key}><strong>{item.name || item.key}</strong><div><Muted>{item.key}</Muted></div><div className="text-2xl font-bold">{item.nodes}</div><Muted>nodes · {item.sources} sources · {item.roots} roots</Muted></Card>)}</div>
-          {projects.data?.length === 0 && <p>No projects are indexed yet. Use the form below to create the first snapshot.</p>}
+        <Section><Heading>Indexed module roots</Heading><Muted>Each Go module path has one root and can have multiple registered checkouts.</Muted>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(roots.data ?? []).map((item) => <Card key={item.root_key}><strong>{item.name || item.root_key}</strong><div><Muted>{item.root_key}</Muted></div><div>{item.location}</div><Muted>Primary head v{item.head_version}</Muted></Card>)}</div>
+          {roots.data?.length === 0 && <p>No modules are indexed yet. Add a local directory below.</p>}
         </Section>
-        {route.project && <Section><h2>Snapshots</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
-          onClick={(row) => setRoute({ snapshot: row.id, root: "", source: "", node: "", offset: 0 })} page={snapshots.data?.page} onPage={(offset) => setRoute({ offset })} /></Section>}
-        <ReindexForm project={route.project} defaultPath={selectedRoot?.local_path ?? ""} onSuccess={(nextSnapshot, nextProject) => { setRoute({ project: nextProject, snapshot: nextSnapshot, root: "", source: "", node: "", offset: 0 }); setRefresh((current) => current + 1); }} />
+        {route.module && <Section><h2>Checkouts</h2><DataList rows={locations.data ?? []} loading={locations.loading} error={locations.error} columns={locationColumns}
+          onClick={(row) => setRoute({ location: row.canonical_path, snapshot: row.head_snapshot_id, source: "", node: "", offset: 0 })} /></Section>}
+        {route.location && <Section><h2>Snapshots for {route.location}</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
+          onClick={(row) => setRoute({ snapshot: row.id, source: "", node: "", offset: 0 })} total={snapshots.data?.page.total} offset={route.offset} onPage={(offset) => setRoute({ offset })} /></Section>}
+        <IndexForm root={route.module} defaultPath={route.location} onSuccess={(results) => {
+          const first = results[0];
+          setRoute({ module: first.root_key, location: first.location, snapshot: first.snapshot_id, source: "", node: "", offset: 0 });
+          setRefresh((current) => current + 1);
+        }} />
       </>}
-      {route.view !== "overview" && !snapshot && <Card>Select or create a project snapshot on the Overview page.</Card>}
-      {route.view === "explorer" && snapshot && <>
+      {route.view !== "overview" && !route.snapshot && <Card>Select or add a module snapshot on the Overview page.</Card>}
+      {route.view === "explorer" && route.snapshot && <>
         <Heading>Source explorer</Heading>
-        <Section><h2>Roots</h2><DataList rows={roots.data?.data ?? []} loading={roots.loading} error={roots.error} columns={rootColumns} onClick={(row) => setRoute({ root: row.id, source: "", offset: 0 })} /></Section>
-        <Row><Field label="Root"><Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, source: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></Field>
+        <Row><Field label="Checkout"><Select value={route.location} onChange={(event) => {
+          const next = locations.data?.find((item) => item.canonical_path === event.target.value);
+          setRoute({ location: event.target.value, snapshot: next?.head_snapshot_id ?? "", source: "", node: "", offset: 0 });
+        }} options={(locations.data ?? []).map((item) => ({ value: item.canonical_path, label: item.canonical_path }))} /></Field>
           <Field label="Path search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
-        <Section><h2>Sources</h2><DataList rows={sources.data?.data ?? []} loading={sources.loading} error={sources.error} columns={sourceColumns} onClick={(row) => setRoute({ source: row.id })} page={sources.data?.page} onPage={(offset) => setRoute({ offset })} /></Section>
-        <SourceView source={route.source} />
+        <Section><h2>Sources</h2><DataList rows={pageRows(sources, route.offset)} loading={browse.loading} error={browse.error} columns={sourceColumns}
+          onClick={(row) => setRoute({ source: row.id })} total={sources.length} offset={route.offset} onPage={(offset) => setRoute({ offset })} /></Section>
+        <SourceView snapshot={route.snapshot} source={selectedSource} />
       </>}
-      {route.view === "nodes" && snapshot && <>
-        <Heading>Nodes</Heading>
-        <Row><Field label="Root"><Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, node: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></Field>
-          <Field label="Symbol search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
-        {route.source && <Button variant="outline" onClick={() => setRoute({ source: "" })}>Clear source filter</Button>}
-        <DataList rows={nodes.data?.data ?? []} loading={nodes.loading} error={nodes.error} columns={nodeColumns} onClick={(row) => setRoute({ node: row.id })} page={nodes.data?.page} onPage={(offset) => setRoute({ offset })} />
-        <NodeView node={route.node} onSource={(source) => setRoute({ view: "explorer", source, offset: 0 })} />
+      {route.view === "nodes" && route.snapshot && <>
+        <Heading>Symbols</Heading>
+        <Row><Field label="Symbol search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
+        {route.source && <Button variant="outline" onClick={() => setRoute({ source: "", offset: 0 })}>Clear source filter</Button>}
+        <DataList rows={pageRows(nodes, route.offset)} loading={browse.loading} error={browse.error} columns={nodeColumns}
+          onClick={(row) => setRoute({ node: row.id })} total={nodes.length} offset={route.offset} onPage={(offset) => setRoute({ offset })} />
+        <NodeView node={selectedNode} onSource={(source) => setRoute({ view: "explorer", source, offset: 0 })} />
       </>}
-      {route.view === "query" && snapshot && <>
-        <Heading>PEG query</Heading><Muted>Run a symbol or call query against the selected snapshot.</Muted>
+      {route.view === "query" && route.snapshot && <>
+        <Heading>PEG query</Heading><Muted>Run a symbol or call query against the selected module snapshot.</Muted>
         <PanelForm layout="row" onSubmit={(event) => { event.preventDefault(); setRoute({ expression: queryDraft.trim() }); }}>
           <Field label="Expression"><TextInput required value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} /></Field>
           <Button type="submit">Run query</Button>
         </PanelForm>
         <h2>Results {query.data ? `(${query.data.length})` : ""}</h2>
         <ErrorMessage error={query.error} />
-        <DataTable className="min-h-40 max-h-[28rem]" data={query.data ?? []} loading={query.loading} getRowId={(row) => row.id} emptyMessage={route.expression ? "No matches" : "Enter a PEG expression"}
-          columns={[{ key: "operation", label: "Operation" }, { key: "symbol", label: "Symbol", grow: true }, { key: "node_type", label: "Kind" }, { key: "root", label: "Root" }, { key: "location", label: "Location", grow: true }]} />
+        <DataTable className="min-h-40 max-h-[28rem]" data={queryRows} loading={query.loading} getRowId={(row) => row.id} emptyMessage={route.expression ? "No matches" : "Enter a PEG expression"}
+          columns={[{ key: "kind", label: "Kind" }, { key: "symbol", label: "Symbol", grow: true }, { key: "root", label: "Root" }, { key: "location", label: "Checkout", grow: true }, { key: "source", label: "Source", grow: true }]} />
       </>}
     </PageLayout>
   </AppShell>;
