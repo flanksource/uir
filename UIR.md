@@ -140,6 +140,8 @@ These are the statement types currently registered in `StatementMarshaler`.
 
 `Identifier` is the logical name carrier for most nodes.
 
+See [`docs/symbols.md`](docs/symbols.md) for rendered formats, durable identity scope, reference forms, and call-query examples.
+
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `id` | `string` | Optional explicit UUID-like identifier. Rarely needed for plugin authors. |

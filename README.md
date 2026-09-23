@@ -15,8 +15,14 @@ import "github.com/flanksource/uir"
 | `.` (`package uir`) | The model: node and statement types, enums, identifiers, fluent builders, pretty printers, semantic hashing, polymorphic JSON, and tree traversal. |
 | `diff/` | Structural diffing. `DiffNode` compares two nodes; `DiffTree` compares whole documents and classifies renames and moves. |
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
+| `indexer/` | Incremental Go AST indexing into immutable, root-aware relational snapshots, exposed as a context-bound Clicky task. |
+| `query/` | PEG query grammar plus the project, snapshot, root, symbol, and call resolution pipeline. |
 | `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
+| [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and in-memory or relational call queries. |
+| [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
+| [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
+| `cmd/uir` | Clicky entity CLI for listing projects, querying snapshots, and incrementally reindexing Go workspaces. |
 | `python/` | A parallel Python port of the model (pure stdlib). |
 | `java/` | A parallel Java port of the model (Jackson-based, source only — no build file is checked in). |
 
@@ -103,4 +109,5 @@ make build     # compile every package
 make test      # go test ./...
 make lint      # golangci-lint
 make fmt       # go fmt + go mod tidy
+make query-parser # regenerate query/grammar.peg.go
 ```

@@ -21,6 +21,10 @@ build: ## Compile every package
 schema: ## Regenerate schema/uir.schema.json from the Go model
 	go run ./cmd/genschema
 
+.PHONY: query-parser
+query-parser: ## Regenerate the PEG query parser
+	go generate ./query
+
 .PHONY: test
 test: ## Run the Go test suite
 	go test ./...
