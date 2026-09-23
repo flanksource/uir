@@ -88,7 +88,7 @@ func (pipeline *Pipeline) ReadModuleSource(ctx context.Context, snapshotID, path
 		return ModuleSourceContent{}, fmt.Errorf("read Git source %q at %s: %w", path, scope.snapshot.Revision, err)
 	}
 	if contentHash(content) != source.ContentHash {
-		return ModuleSourceContent{}, fmt.Errorf("Git source %q at %s does not match indexed content hash", path, scope.snapshot.Revision)
+		return ModuleSourceContent{}, fmt.Errorf("git source %q at %s does not match indexed content hash", path, scope.snapshot.Revision)
 	}
 	return ModuleSourceContent{Path: path, Content: string(content), Origin: "git", Revision: scope.snapshot.Revision, SnapshotID: snapshotID}, nil
 }

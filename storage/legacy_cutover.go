@@ -15,7 +15,7 @@ var legacyProjectTables = []string{
 
 func discardLegacyProjects(ctx context.Context, database *gorm.DB) error {
 	return database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if tx.Dialector.Name() == "sqlite" {
+		if tx.Name() == "sqlite" {
 			if err := checkLegacySQLiteReferences(tx); err != nil {
 				return err
 			}

@@ -20,7 +20,7 @@ defer sqlDB.Close()
 
 Opening an existing database **discards legacy project history**. After applying the module schema, `UirDB` drops only `uir_relationships`, `uir_fields`, `uir_node_locations`, `uir_nodes`, `uir_sources`, `uir_roots`, `uir_project_heads`, `uir_snapshots`, and `uir_projects`, child first, in one transaction. Project rows are not imported into module roots. Back up an old database *before* opening it with this version if its project snapshots matter. PostgreSQL refuses a drop blocked by an external dependency; SQLite checks nonlegacy tables for foreign keys to legacy tables and refuses the cutover. Initialization then fails instead of silently removing dependent data. Reopening a cut-over database has no legacy tables left to drop.
 
-The HCL files are one schema source for both targets. PostgreSQL uses canonical `uuid`, `jsonb`, and `timestamptz`; the SQLite adapter in `commons-db/migrate` maps them to text, JSON-valid text, and datetime while preserving keys, checks, and indexes. See [commons-db migration support](../../commons-db/migrate/README.md) for the portable HCL subset and incompatibilities. UIR does not request destructive reconciliation; unexpected schema drift fails rather than rebuilding populated tables.
+The HCL files are one schema source for both targets. PostgreSQL uses canonical `uuid`, `jsonb`, and `timestamptz`; the SQLite adapter in `commons-db/migrate` maps them to text, JSON-valid text, and datetime while preserving keys, checks, and indexes. The `commons-db/migrate/README.md` guide defines the portable HCL subset and incompatibilities. UIR does not request destructive reconciliation; unexpected schema drift fails rather than rebuilding populated tables.
 
 ## Relational hierarchy
 

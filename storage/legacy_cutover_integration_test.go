@@ -3,9 +3,11 @@ package storage_test
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"github.com/flanksource/commons-db/dbtest"
 	"github.com/flanksource/uir/storage"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -27,6 +29,8 @@ var _ = Describe("legacy project cutover", func() {
 			}
 			Expect(database.Exec("CREATE TABLE external_sentinel (id TEXT PRIMARY KEY)").Error).To(Succeed())
 			Expect(database.Exec("INSERT INTO external_sentinel (id) VALUES (?)", "keep-me").Error).To(Succeed())
+			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/retained", Name: "retained", CreatedAt: time.Now()}
+			Expect(database.Create(&root).Error).To(Succeed())
 
 			cutover := openDB(ctx, config)
 			for _, name := range legacyTables {
@@ -36,8 +40,13 @@ var _ = Describe("legacy project cutover", func() {
 			Expect(cutover.Table("external_sentinel").Where("id = ?", "keep-me").Count(&count).Error).To(Succeed())
 			Expect(count).To(Equal(int64(1)))
 			Expect(cutover.Migrator().HasTable(&storage.ModuleRoot{})).To(BeTrue())
+			var retained storage.ModuleRoot
+			Expect(cutover.Where("root_key = ?", root.RootKey).First(&retained).Error).To(Succeed())
+			Expect(retained.ID).To(Equal(root.ID))
 		},
-		Entry("SQLite", func() storage.DBOptions { return storage.DBOptions{DSN: filepath.Join(GinkgoT().TempDir(), "cutover.db")} }),
+		Entry("SQLite", func() storage.DBOptions {
+			return storage.DBOptions{DSN: filepath.Join(GinkgoT().TempDir(), "cutover.db")}
+		}),
 		Entry("PostgreSQL", func() storage.DBOptions {
 			return storage.DBOptions{DSN: dbtest.ForGinkgo(dbtest.Options{Name: "uir_legacy_cutover"}).DSN(), Schema: "uir_legacy_cutover"}
 		}),

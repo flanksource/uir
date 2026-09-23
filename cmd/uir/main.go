@@ -106,10 +106,6 @@ func (runtime *commandRuntime) Close() error {
 	return sqlDB.Close()
 }
 
-func withDatabase(ctx context.Context, database *gorm.DB) context.Context {
-	return context.WithValue(ctx, runtimeContextKey{}, &commandRuntime{database: database})
-}
-
 func databaseFor(ctx context.Context) (*gorm.DB, error) {
 	runtime, ok := ctx.Value(runtimeContextKey{}).(*commandRuntime)
 	if !ok || runtime == nil {
