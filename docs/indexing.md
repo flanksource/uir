@@ -8,6 +8,8 @@ go run ./cmd/uir --dsn ./state/uir.db project reindex billing --path ../billing 
 
 The project is created on its first reindex. Later runs follow its current `ProjectHead`, compare root and file content hashes, and either return the existing snapshot unchanged or publish a new head.
 
+The result includes `timings.discovery_ms`, `load_ms`, `preparation_ms`, and `publication_ms` so a slow run can be attributed to root scanning, previous-snapshot loading, AST or cached-projection preparation, or transactional publication. An unchanged run has zero preparation and publication time.
+
 | Flag | Meaning |
 | --- | --- |
 | positional `project` | Stable logical project key. |
@@ -33,6 +35,8 @@ An index run performs these steps:
 Readers following `ProjectHead` therefore see either the old complete snapshot or the new complete snapshot. A concurrent writer that moved the head causes the transaction to fail with a retryable error; the indexer never mutates the published graph in place.
 
 An unchanged run does not create a snapshot. A changed run creates new rows even for unchanged files because snapshots are immutable, but it avoids reparsing those files: their validated relational projection is copied into the new snapshot. A change to extractor version or indexing configuration disables reuse and reparses every included source.
+
+Reusable declarations, fields, and calls are loaded in source batches. Call payloads retain the original syntax target and root scope, so a reused call is resolved again against the new snapshot when roots or overloads change. Publication indexes exact and signature-free call targets once per snapshot, including root-scoped and cross-root lookup buckets; an ambiguous bucket stays unresolved. Sources, nodes, locations, fields, and relationships are inserted in bounded batches while preserving parent-before-child foreign-key order. The phase timings show the cost of this full publication separately from source preparation.
 
 ## Roots, repositories, and submodules
 
