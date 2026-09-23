@@ -64,6 +64,17 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	clicky.GenerateCLI(root)
 	registerModuleCommands(root)
 	root.AddCommand(newServeCommand(runtime))
+	versionCommand := &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s version %s\n", cmd.Root().Name(), cmd.Root().Version)
+			return err
+		},
+	}
+	clicky.MarkLocalOnly(versionCommand)
+	root.AddCommand(versionCommand)
 	return root
 }
 

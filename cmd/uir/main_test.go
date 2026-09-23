@@ -5,6 +5,7 @@ import (
 	"context"
 	"path/filepath"
 
+	"github.com/flanksource/clicky"
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -21,10 +22,22 @@ var _ = Describe("UIR module CLI", func() {
 		Expect(root.Execute()).To(Succeed())
 		Expect(output.String()).To(Equal("uir version dev\n"))
 	})
+	It("prints the root version through a local version command without opening a database", func() {
+		runtime := &commandRuntime{DSN: "invalid"}
+		root := newRootCommand(runtime)
+		root.Version = "v1.2.3"
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetArgs([]string{"version"})
+		Expect(root.Execute()).To(Succeed())
+		Expect(output.String()).To(Equal("uir version v1.2.3\n"))
+		Expect(runtime.database).To(BeNil())
+		Expect(clicky.IsLocalOnly(findCommand(root, "version"))).To(BeTrue())
+	})
 
 	It("registers the module operations without a project entity", func() {
 		root := newRootCommand(&commandRuntime{})
-		Expect(commandNames(root)).To(ContainElements("add", "list", "get", "query", "reindex", "locations", "snapshots", "browse", "content", "serve"))
+		Expect(commandNames(root)).To(ContainElements("add", "list", "get", "query", "reindex", "locations", "snapshots", "browse", "content", "serve", "version"))
 		Expect(commandNames(root)).ToNot(ContainElement("project"))
 	})
 })
