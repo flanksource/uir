@@ -2,6 +2,8 @@
 
 The `storage` package owns the relational projection of the canonical UIR model. `UirDB` applies the embedded Atlas HCL schema and returns an initialized GORM handle; GORM `AutoMigrate` is deliberately not part of schema ownership.
 
+The module-root delta tables and their current coexistence with the older project tables are documented in [module-root indexing](../docs/module-indexing.md). The project/snapshot hierarchy below describes the older full-snapshot path, not the `uir add`/`uir reindex` path.
+
 ## Opening a database
 
 The DSN is the only backend selector. A PostgreSQL URL or keyword DSN opens PostgreSQL, `sqlite://` opens SQLite, and a plain path ending in `.db` opens SQLite.
