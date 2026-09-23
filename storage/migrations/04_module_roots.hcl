@@ -1,3 +1,5 @@
+schema "public" {}
+
 table "uir_module_roots" {
   schema = schema.public
 
