@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/clicky/route"
 	"github.com/flanksource/clicky/rpc"
 	uiweb "github.com/flanksource/uir/web"
 	"github.com/spf13/cobra"
@@ -109,7 +110,7 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		return nil, errors.New("register UIR Clicky operations: executor is unavailable")
 	}
 	mux := http.NewServeMux()
-	server.RegisterRoutes(mux)
+	server.RegisterRoutes(route.NewRouter(mux))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" {
 			http.NotFound(w, r)

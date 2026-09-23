@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 
 	"github.com/flanksource/clicky"
@@ -58,6 +59,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	root.PersistentFlags().StringVar(&runtime.Schema, "schema", "", "PostgreSQL schema")
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)
+	registerModuleCommands(root)
 	root.AddCommand(newServeCommand(runtime))
 	return root
 }
@@ -69,7 +71,15 @@ func (runtime *commandRuntime) Database(ctx context.Context) (*gorm.DB, error) {
 		return runtime.database, nil
 	}
 	if runtime.DSN == "" {
-		return nil, errors.New("--dsn is required")
+		configDir, err := os.UserConfigDir()
+		if err != nil {
+			return nil, fmt.Errorf("find UIR configuration directory: %w", err)
+		}
+		directory := filepath.Join(configDir, "uir")
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return nil, fmt.Errorf("create UIR data directory %q: %w", directory, err)
+		}
+		runtime.DSN = filepath.Join(directory, "uir.db")
 	}
 	database, err := storage.UirDB(ctx, storage.DBOptions{DSN: runtime.DSN, Schema: runtime.Schema})
 	if err != nil {

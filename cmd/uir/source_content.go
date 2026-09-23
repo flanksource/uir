@@ -60,7 +60,7 @@ func readSourceContent(ctx context.Context, id string, _ sourceContentOptions) (
 		return result, nil
 	}
 	absolute := filepath.Join(*root.LocalPath, filepath.FromSlash(source.PathKey))
-	if result.Revision != "" {
+	if result.Revision != "" && (root.Kind == "git" || root.Kind == "git-submodule") {
 		if !gitRevision.MatchString(result.Revision) {
 			return sourceContent{}, entity.NewStatusErrorf(http.StatusBadRequest, "invalid_revision", "source %q has an invalid Git revision", source.PathKey)
 		}
