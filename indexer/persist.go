@@ -42,8 +42,11 @@ type persistState struct {
 	roots         map[string]storage.Root
 	sources       map[string]storage.Source
 	nodes         map[string]storage.Node
-	targets       []persistedTarget
+	targets       targetIndex
 	locations     map[string]int
+	nodeBatches   [3][]storage.Node
+	nodeLocations []storage.NodeLocation
+	nodeFields    []storage.Field
 	relationships int
 }
 
@@ -128,6 +131,7 @@ func (state *persistState) createRoots(database *gorm.DB) error {
 
 func (state *persistState) createSources(database *gorm.DB) error {
 	state.sources = make(map[string]storage.Source, len(state.request.Files))
+	sources := make([]storage.Source, 0, len(state.request.Files))
 	for _, indexed := range state.request.Files {
 		root, ok := state.roots[indexed.Root.RootKey]
 		if !ok {
@@ -142,10 +146,13 @@ func (state *persistState) createSources(database *gorm.DB) error {
 				"package_path": indexed.UIR.PackagePath, "package_name": indexed.UIR.PackageName,
 			}),
 		}
-		if err := database.Create(&source).Error; err != nil {
-			return fmt.Errorf("create source %q in root %q: %w", source.PathKey, indexed.Root.RootKey, err)
-		}
+		sources = append(sources, source)
 		state.sources[sourceMapKey(indexed.Root.RootKey, indexed.File.PathKey)] = source
+	}
+	if len(sources) > 0 {
+		if err := database.CreateInBatches(sources, 32).Error; err != nil {
+			return fmt.Errorf("create %d snapshot sources: %w", len(sources), err)
+		}
 	}
 	return nil
 }
@@ -169,14 +176,32 @@ func (state *persistState) createNodes(database *gorm.DB) error {
 	state.locations = make(map[string]int, len(requested))
 	ordinals := map[string]int{}
 	for _, requestedNode := range requested {
-		if err := state.createNode(database, requestedNode, ordinals); err != nil {
+		if err := state.createNode(requestedNode, ordinals); err != nil {
 			return err
+		}
+	}
+	for priority, nodes := range state.nodeBatches {
+		if len(nodes) == 0 {
+			continue
+		}
+		if err := database.CreateInBatches(nodes, 32).Error; err != nil {
+			return fmt.Errorf("create %d snapshot nodes at priority %d: %w", len(nodes), priority, err)
+		}
+	}
+	if len(state.nodeLocations) > 0 {
+		if err := database.CreateInBatches(state.nodeLocations, 32).Error; err != nil {
+			return fmt.Errorf("create %d node locations: %w", len(state.nodeLocations), err)
+		}
+	}
+	if len(state.nodeFields) > 0 {
+		if err := database.CreateInBatches(state.nodeFields, 32).Error; err != nil {
+			return fmt.Errorf("create %d field projections: %w", len(state.nodeFields), err)
 		}
 	}
 	return nil
 }
 
-func (state *persistState) createNode(database *gorm.DB, requested persistNode, ordinals map[string]int) error {
+func (state *persistState) createNode(requested persistNode, ordinals map[string]int) error {
 	root, ok := state.roots[requested.RootKey]
 	if !ok {
 		return fmt.Errorf("node %q has unknown root %q", requested.Spec.Identifier.SymbolKey(), requested.RootKey)
@@ -187,7 +212,7 @@ func (state *persistState) createNode(database *gorm.DB, requested persistNode, 
 		if existing.SemanticHash != requested.Spec.SemanticHash {
 			return fmt.Errorf("conflicting declarations for identity %q in root %q have semantic hashes %q and %q", identityKey, requested.RootKey, existing.SemanticHash, requested.Spec.SemanticHash)
 		}
-		return state.createNodeLocation(database, requested, existing, false)
+		return state.createNodeLocation(requested, existing, false)
 	}
 	var parentID *uuid.UUID
 	if requested.Spec.ParentIdentity != "" {
@@ -200,25 +225,21 @@ func (state *persistState) createNode(database *gorm.DB, requested persistNode, 
 	ordinalKey := requested.RootKey + "\x00" + requested.Spec.ParentIdentity + "\x00" + requested.Spec.ChildSlot
 	node := storageNode(state.snapshot.ID, root.ID, parentID, requested.Spec, ordinals[ordinalKey])
 	ordinals[ordinalKey]++
-	if err := database.Create(&node).Error; err != nil {
-		return fmt.Errorf("create node %q in root %q: %w", identityKey, requested.RootKey, err)
-	}
-	if err := state.createNodeLocation(database, requested, node, true); err != nil {
+	if err := state.createNodeLocation(requested, node, true); err != nil {
 		return err
 	}
 	if requested.Spec.Field != nil {
 		field := *requested.Spec.Field
 		field.NodeID = node.ID
-		if err := database.Create(&field).Error; err != nil {
-			return fmt.Errorf("create field projection for node %q: %w", identityKey, err)
-		}
+		state.nodeFields = append(state.nodeFields, field)
 	}
+	state.nodeBatches[nodePriority(requested.Spec.Identifier)] = append(state.nodeBatches[nodePriority(requested.Spec.Identifier)], node)
 	state.nodes[nodeKey] = node
-	state.targets = append(state.targets, persistedTarget{RootKey: requested.RootKey, Node: node, ID: requested.Spec.Identifier})
+	state.targets.add(persistedTarget{RootKey: requested.RootKey, Node: node, ID: requested.Spec.Identifier})
 	return nil
 }
 
-func (state *persistState) createNodeLocation(database *gorm.DB, requested persistNode, node storage.Node, primary bool) error {
+func (state *persistState) createNodeLocation(requested persistNode, node storage.Node, primary bool) error {
 	identityKey := requested.Spec.Identifier.IdentityKey()
 	source, ok := state.sources[sourceMapKey(requested.RootKey, requested.PathKey)]
 	if !ok {
@@ -230,9 +251,7 @@ func (state *persistState) createNodeLocation(database *gorm.DB, requested persi
 		Role: "declaration", Ordinal: state.locations[nodeKey], StartLine: requested.Spec.StartLine,
 		EndLine: requested.Spec.EndLine, Column: requested.Spec.Column, IsPrimary: primary,
 	}
-	if err := database.Create(&location).Error; err != nil {
-		return fmt.Errorf("create location for node %q: %w", identityKey, err)
-	}
+	state.nodeLocations = append(state.nodeLocations, location)
 	state.locations[nodeKey]++
 	return nil
 }
@@ -306,32 +325,47 @@ func nodePriority(identifier uir.Identifier) int {
 }
 
 func (state *persistState) createRelationships(database *gorm.DB) error {
+	relationships := make([]storage.Relationship, 0, 32)
 	for _, indexed := range state.request.Files {
 		for _, call := range indexed.UIR.Calls {
-			if err := state.createRelationship(database, indexed, call); err != nil {
+			relationship, err := state.createRelationship(indexed, call)
+			if err != nil {
 				return err
 			}
+			relationships = append(relationships, relationship)
+			if len(relationships) == cap(relationships) {
+				if err := database.CreateInBatches(relationships, 32).Error; err != nil {
+					return fmt.Errorf("create call relationships: %w", err)
+				}
+				relationships = relationships[:0]
+			}
 			state.relationships++
+		}
+	}
+	if len(relationships) > 0 {
+		if err := database.CreateInBatches(relationships, 32).Error; err != nil {
+			return fmt.Errorf("create call relationships: %w", err)
 		}
 	}
 	return nil
 }
 
-func (state *persistState) createRelationship(database *gorm.DB, indexed indexedFile, call callSpec) error {
+func (state *persistState) createRelationship(indexed indexedFile, call callSpec) (storage.Relationship, error) {
+	sourceRootKey := call.ToRootKey
 	from, ok := state.nodes[nodeMapKey(indexed.Root.RootKey, call.FromIdentity)]
 	if !ok {
-		return fmt.Errorf("call %q has unknown source identity %q", call.StatementPath, call.FromIdentity)
+		return storage.Relationship{}, fmt.Errorf("call %q has unknown source identity %q", call.StatementPath, call.FromIdentity)
 	}
 	source, ok := state.sources[sourceMapKey(indexed.Root.RootKey, indexed.File.PathKey)]
 	if !ok {
-		return fmt.Errorf("call %q has unknown source %q", call.StatementPath, indexed.File.PathKey)
+		return storage.Relationship{}, fmt.Errorf("call %q has unknown source %q", call.StatementPath, indexed.File.PathKey)
 	}
 	if call.LocalRoot && call.ToRootKey == nil {
 		call.ToRootKey = stringPointer(indexed.Root.RootKey)
 	}
 	target, resolved := persistedTarget{}, false
 	if call.Resolvable {
-		target, resolved = state.resolveTarget(call)
+		target, resolved = state.targets.resolve(call)
 	}
 	targetIdentifier := call.ToIdentifier
 	if resolved {
@@ -347,48 +381,16 @@ func (state *persistState) createRelationship(database *gorm.DB, indexed indexed
 		ToIdentifier: identifierJSON, RelationshipType: string(uir.RelationshipTypeCall),
 		SourceID: &source.ID, StartLine: call.StartLine, EndLine: call.EndLine, Column: call.Column,
 		StatementPath: call.StatementPath, Text: call.Text,
-		Payload: jsonValue(map[string]any{"resolvable": call.Resolvable}),
+		Payload: jsonValue(map[string]any{
+			"resolvable": call.Resolvable, "source_identifier": call.ToIdentifier,
+			"source_root_key": sourceRootKey, "local_root": call.LocalRoot,
+		}),
 	}
 	if resolved {
 		relationship.ToSnapshotID = &state.snapshot.ID
 		relationship.ToNodeID = &target.Node.ID
 	}
-	if err := database.Create(&relationship).Error; err != nil {
-		return fmt.Errorf("create relationship %q: %w", edgeKey, err)
-	}
-	return nil
-}
-
-func (state *persistState) resolveTarget(call callSpec) (persistedTarget, bool) {
-	candidates := make([]persistedTarget, 0, 1)
-	for _, target := range state.targets {
-		if call.ToRootKey != nil && target.RootKey != *call.ToRootKey {
-			continue
-		}
-		if target.ID.IdentityKey() == call.ToIdentifier.IdentityKey() {
-			candidates = append(candidates, target)
-		}
-	}
-	if len(candidates) == 0 && call.ToIdentifier.Signature == "" {
-		for _, target := range state.targets {
-			if call.ToRootKey != nil && target.RootKey != *call.ToRootKey {
-				continue
-			}
-			if sameCallable(target.ID, call.ToIdentifier) {
-				candidates = append(candidates, target)
-			}
-		}
-	}
-	if len(candidates) == 1 {
-		return candidates[0], true
-	}
-	return persistedTarget{}, false
-}
-
-func sameCallable(candidate, target uir.Identifier) bool {
-	return candidate.GetNodeType() == target.GetNodeType() && candidate.Module == target.Module &&
-		candidate.Package == target.Package && candidate.Type == target.Type &&
-		candidate.Method == target.Method && candidate.Field == target.Field
+	return relationship, nil
 }
 
 func relationshipEdgeKey(pathKey string, call callSpec) string {

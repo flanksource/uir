@@ -102,48 +102,83 @@ func (indexer *Indexer) loadSources(ctx context.Context, root storage.Root) (map
 
 type copiedNodeRow struct {
 	storage.Node
-	ParentIdentity string `gorm:"column:parent_identity"`
-	StartLine      *int   `gorm:"column:start_line"`
-	EndLine        *int   `gorm:"column:end_line"`
-	Column         *int   `gorm:"column:column"`
+	SourceID       uuid.UUID `gorm:"column:source_id"`
+	ParentIdentity string    `gorm:"column:parent_identity"`
+	StartLine      *int      `gorm:"column:start_line"`
+	EndLine        *int      `gorm:"column:end_line"`
+	Column         *int      `gorm:"column:column"`
 }
 
-func (indexer *Indexer) copyFile(ctx context.Context, source storage.Source) (fileIndex, error) {
-	rows, err := indexer.loadCachedNodes(ctx, source)
-	if err != nil {
-		return fileIndex{}, err
-	}
-	indexed, err := cachedFileIndex(source)
-	if err != nil {
-		return fileIndex{}, err
-	}
-	oldIdentityByID := make(map[uuid.UUID]string, len(rows))
-	for _, row := range rows {
-		oldIdentityByID[row.ID] = row.IdentityKey
-		spec, err := indexer.cachedNodeSpec(ctx, row)
+func (indexer *Indexer) loadCachedFiles(ctx context.Context, sources []storage.Source) (map[uuid.UUID]fileIndex, error) {
+	files := make(map[uuid.UUID]fileIndex, len(sources))
+	ids := make([]uuid.UUID, 0, len(sources))
+	for _, source := range sources {
+		file, err := cachedFileIndex(source)
 		if err != nil {
-			return fileIndex{}, err
+			return nil, err
 		}
-		indexed.Nodes = append(indexed.Nodes, spec)
+		files[source.ID] = file
+		ids = append(ids, source.ID)
 	}
-	if err := indexer.copyRelationships(ctx, source, oldIdentityByID, &indexed); err != nil {
-		return fileIndex{}, err
+	if len(ids) == 0 {
+		return files, nil
 	}
-	return indexed, nil
+	nodes, err := indexer.loadCachedNodes(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	fields, err := indexer.loadCachedFields(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	identities := make(map[uuid.UUID]string, len(nodes))
+	for _, row := range nodes {
+		identities[row.ID] = row.IdentityKey
+		file := files[row.SourceID]
+		file.Nodes = append(file.Nodes, cachedNodeSpec(row, fields))
+		files[row.SourceID] = file
+	}
+	if err := indexer.loadCachedCalls(ctx, ids, identities, files); err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
-func (indexer *Indexer) loadCachedNodes(ctx context.Context, source storage.Source) ([]copiedNodeRow, error) {
+func (indexer *Indexer) loadCachedNodes(ctx context.Context, ids []uuid.UUID) ([]copiedNodeRow, error) {
 	var rows []copiedNodeRow
-	err := indexer.database.WithContext(ctx).Table("uir_nodes AS node").
-		Select("node.*, COALESCE(parent.identity_key, '') AS parent_identity, location.start_line, location.end_line, location.column").
-		Joins("JOIN uir_node_locations AS location ON location.node_id = node.id").
-		Joins("LEFT JOIN uir_nodes AS parent ON parent.id = node.parent_id").
-		Where("location.source_id = ? AND node.node_type <> ?", source.ID, uir.NodeTypePackage).
-		Order("node.ordinal, node.identity_key").Scan(&rows).Error
-	if err != nil {
-		return nil, fmt.Errorf("load cached nodes for %q: %w", source.PathKey, err)
+	for start := 0; start < len(ids); start += 256 {
+		end := min(start+256, len(ids))
+		var batch []copiedNodeRow
+		err := indexer.database.WithContext(ctx).Table("uir_nodes AS node").
+			Select("node.*, COALESCE(parent.identity_key, '') AS parent_identity, location.source_id, location.start_line, location.end_line, location.column").
+			Joins("JOIN uir_node_locations AS location ON location.node_id = node.id").
+			Joins("LEFT JOIN uir_nodes AS parent ON parent.id = node.parent_id").
+			Where("location.source_id IN ? AND node.node_type <> ?", ids[start:end], uir.NodeTypePackage).
+			Order("location.source_id, node.ordinal, node.identity_key").Scan(&batch).Error
+		if err != nil {
+			return nil, fmt.Errorf("load cached nodes: %w", err)
+		}
+		rows = append(rows, batch...)
 	}
 	return rows, nil
+}
+
+func (indexer *Indexer) loadCachedFields(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]storage.Field, error) {
+	fields := make(map[uuid.UUID]storage.Field)
+	for start := 0; start < len(ids); start += 256 {
+		end := min(start+256, len(ids))
+		var batch []storage.Field
+		err := indexer.database.WithContext(ctx).Table("uir_fields AS field").Select("field.*").
+			Joins("JOIN uir_node_locations AS location ON location.node_id = field.node_id").
+			Where("location.source_id IN ?", ids[start:end]).Scan(&batch).Error
+		if err != nil {
+			return nil, fmt.Errorf("load cached field projections: %w", err)
+		}
+		for _, field := range batch {
+			fields[field.NodeID] = field
+		}
+	}
+	return fields, nil
 }
 
 func cachedFileIndex(source storage.Source) (fileIndex, error) {
@@ -157,62 +192,89 @@ func cachedFileIndex(source storage.Source) (fileIndex, error) {
 	return fileIndex{PackagePath: properties.PackagePath, PackageName: properties.PackageName}, nil
 }
 
-func (indexer *Indexer) cachedNodeSpec(ctx context.Context, row copiedNodeRow) (nodeSpec, error) {
+func cachedNodeSpec(row copiedNodeRow, fields map[uuid.UUID]storage.Field) nodeSpec {
 	spec := nodeSpec{
 		Identifier: storageIdentifier(row.Node), ParentIdentity: row.ParentIdentity,
 		ChildSlot: row.ChildSlot, Ordinal: row.Ordinal, Payload: row.Payload,
 		SemanticHash: row.SemanticHash, StartLine: row.StartLine, EndLine: row.EndLine, Column: row.Column,
 	}
-	var field storage.Field
-	if err := indexer.database.WithContext(ctx).Where("node_id = ?", row.ID).First(&field).Error; err == nil {
+	if field, found := fields[row.ID]; found {
 		field.NodeID = uuid.Nil
 		spec.Field = &field
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nodeSpec{}, fmt.Errorf("load cached field for node %s: %w", row.ID, err)
 	}
-	return spec, nil
+	return spec
 }
 
-func (indexer *Indexer) copyRelationships(ctx context.Context, source storage.Source, identities map[uuid.UUID]string, indexed *fileIndex) error {
-	var relationships []storage.Relationship
-	if err := indexer.database.WithContext(ctx).Where("source_id = ?", source.ID).Order("edge_key").Find(&relationships).Error; err != nil {
-		return fmt.Errorf("load cached relationships for %q: %w", source.PathKey, err)
-	}
-	for _, relationship := range relationships {
-		call, err := indexer.cachedCallSpec(ctx, relationship, identities)
-		if err != nil {
+func (indexer *Indexer) loadCachedCalls(ctx context.Context, ids []uuid.UUID, identities map[uuid.UUID]string, files map[uuid.UUID]fileIndex) error {
+	for start := 0; start < len(ids); start += 256 {
+		end := min(start+256, len(ids))
+		var relationships []storage.Relationship
+		if err := indexer.database.WithContext(ctx).Where("source_id IN ?", ids[start:end]).Order("source_id, edge_key").Find(&relationships).Error; err != nil {
+			return fmt.Errorf("load cached relationships: %w", err)
+		}
+		if err := indexer.loadMissingCallSources(ctx, relationships, identities); err != nil {
 			return err
 		}
-		indexed.Calls = append(indexed.Calls, call)
+		for _, relationship := range relationships {
+			call, err := cachedCallSpec(relationship, identities)
+			if err != nil {
+				return err
+			}
+			file := files[*relationship.SourceID]
+			file.Calls = append(file.Calls, call)
+			files[*relationship.SourceID] = file
+		}
 	}
 	return nil
 }
 
-func (indexer *Indexer) cachedCallSpec(ctx context.Context, relationship storage.Relationship, identities map[uuid.UUID]string) (callSpec, error) {
-	var target uir.Identifier
-	if err := json.Unmarshal(relationship.ToIdentifier, &target); err != nil {
-		return callSpec{}, fmt.Errorf("decode target for relationship %s: %w", relationship.ID, err)
+func (indexer *Indexer) loadMissingCallSources(ctx context.Context, relationships []storage.Relationship, identities map[uuid.UUID]string) error {
+	missing := make(map[uuid.UUID]struct{})
+	for _, relationship := range relationships {
+		if _, found := identities[relationship.FromNodeID]; !found {
+			missing[relationship.FromNodeID] = struct{}{}
+		}
 	}
+	if len(missing) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(missing))
+	for id := range missing {
+		ids = append(ids, id)
+	}
+	for start := 0; start < len(ids); start += 256 {
+		end := min(start+256, len(ids))
+		var nodes []storage.Node
+		if err := indexer.database.WithContext(ctx).Where("id IN ?", ids[start:end]).Find(&nodes).Error; err != nil {
+			return fmt.Errorf("load missing cached call sources: %w", err)
+		}
+		for _, node := range nodes {
+			identities[node.ID] = node.IdentityKey
+		}
+	}
+	return nil
+}
+
+func cachedCallSpec(relationship storage.Relationship, identities map[uuid.UUID]string) (callSpec, error) {
 	var properties struct {
-		Resolvable *bool `json:"resolvable"`
+		Resolvable       *bool           `json:"resolvable"`
+		SourceIdentifier *uir.Identifier `json:"source_identifier"`
+		SourceRootKey    *string         `json:"source_root_key"`
+		LocalRoot        bool            `json:"local_root"`
 	}
 	if err := json.Unmarshal(relationship.Payload, &properties); err != nil {
 		return callSpec{}, fmt.Errorf("decode payload for relationship %s: %w", relationship.ID, err)
 	}
-	if properties.Resolvable == nil {
-		return callSpec{}, fmt.Errorf("relationship %s is missing resolvable syntax metadata", relationship.ID)
+	if properties.Resolvable == nil || properties.SourceIdentifier == nil {
+		return callSpec{}, fmt.Errorf("relationship %s is missing source syntax metadata", relationship.ID)
 	}
 	fromIdentity, ok := identities[relationship.FromNodeID]
 	if !ok {
-		var from storage.Node
-		if err := indexer.database.WithContext(ctx).Where("id = ?", relationship.FromNodeID).First(&from).Error; err != nil {
-			return callSpec{}, fmt.Errorf("load source node for cached relationship %s: %w", relationship.ID, err)
-		}
-		fromIdentity = from.IdentityKey
+		return callSpec{}, fmt.Errorf("cached relationship %s has unknown source node %s", relationship.ID, relationship.FromNodeID)
 	}
 	return callSpec{
-		FromIdentity: fromIdentity, ToIdentifier: target, ToRootKey: relationship.ToRootKey,
-		Resolvable:    *properties.Resolvable,
+		FromIdentity: fromIdentity, ToIdentifier: *properties.SourceIdentifier, ToRootKey: properties.SourceRootKey,
+		LocalRoot: properties.LocalRoot, Resolvable: *properties.Resolvable,
 		StatementPath: cachedStatementPath(relationship), StartLine: relationship.StartLine, EndLine: relationship.EndLine,
 		Column: relationship.Column, Text: relationship.Text,
 	}, nil

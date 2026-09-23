@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const ExtractorVersion = "go-ast-v2"
+const ExtractorVersion = "go-ast-v3"
 
 type Options struct {
 	ProjectKey   string
@@ -22,16 +22,24 @@ type Options struct {
 }
 
 type Result struct {
-	ProjectKey    string `json:"project_key"`
-	SnapshotID    string `json:"snapshot_id"`
-	HeadVersion   int64  `json:"head_version"`
-	Roots         int    `json:"roots"`
-	Files         int    `json:"files"`
-	ParsedFiles   int    `json:"parsed_files"`
-	ReusedFiles   int    `json:"reused_files"`
-	Nodes         int    `json:"nodes"`
-	Relationships int    `json:"relationships"`
-	Unchanged     bool   `json:"unchanged"`
+	ProjectKey    string  `json:"project_key"`
+	SnapshotID    string  `json:"snapshot_id"`
+	HeadVersion   int64   `json:"head_version"`
+	Roots         int     `json:"roots"`
+	Files         int     `json:"files"`
+	ParsedFiles   int     `json:"parsed_files"`
+	ReusedFiles   int     `json:"reused_files"`
+	Nodes         int     `json:"nodes"`
+	Relationships int     `json:"relationships"`
+	Unchanged     bool    `json:"unchanged"`
+	Timings       Timings `json:"timings"`
+}
+
+type Timings struct {
+	DiscoveryMS   float64 `json:"discovery_ms"`
+	LoadMS        float64 `json:"load_ms"`
+	PreparationMS float64 `json:"preparation_ms"`
+	PublicationMS float64 `json:"publication_ms"`
 }
 
 func (Result) Columns() []api.ColumnDef {
@@ -46,6 +54,10 @@ func (Result) Columns() []api.ColumnDef {
 		api.Column("nodes").Label("Nodes").Type("int").Build(),
 		api.Column("relationships").Label("Relationships").Type("int").Build(),
 		api.Column("unchanged").Label("Unchanged").Build(),
+		api.Column("discovery_ms").Label("Discover ms").Build(),
+		api.Column("load_ms").Label("Load ms").Build(),
+		api.Column("preparation_ms").Label("Prepare ms").Build(),
+		api.Column("publication_ms").Label("Publish ms").Build(),
 	}
 }
 
@@ -55,6 +67,8 @@ func (result Result) Row() map[string]any {
 		"roots": result.Roots, "files": result.Files, "parsed_files": result.ParsedFiles,
 		"reused_files": result.ReusedFiles, "nodes": result.Nodes,
 		"relationships": result.Relationships, "unchanged": result.Unchanged,
+		"discovery_ms": result.Timings.DiscoveryMS, "load_ms": result.Timings.LoadMS,
+		"preparation_ms": result.Timings.PreparationMS, "publication_ms": result.Timings.PublicationMS,
 	}
 }
 

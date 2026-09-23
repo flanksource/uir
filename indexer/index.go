@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/flanksource/uir/storage"
 )
@@ -23,10 +24,13 @@ func (indexer *Indexer) Index(ctx context.Context, options Options) (Result, err
 	if err := validateOptions(&options); err != nil {
 		return Result{}, err
 	}
+	started := time.Now()
 	workspace, err := discoverWorkspace(ctx, options)
 	if err != nil {
 		return Result{}, err
 	}
+	timings := Timings{DiscoveryMS: millisecondsSince(started)}
+	started = time.Now()
 	project, err := indexer.ensureProject(ctx, options)
 	if err != nil {
 		return Result{}, err
@@ -35,20 +39,33 @@ func (indexer *Indexer) Index(ctx context.Context, options Options) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
+	timings.LoadMS = millisecondsSince(started)
 	configurationHash := indexConfigurationHash(options)
 	if unchanged(previous, workspace, configurationHash, options.Force) {
-		return indexer.unchangedResult(ctx, project, previous, workspace)
+		result, err := indexer.unchangedResult(ctx, project, previous, workspace)
+		result.Timings = timings
+		return result, err
 	}
 	reparseAll := options.Force || previous == nil || previous.Snapshot.ConfigurationHash != configurationHash ||
 		previous.Snapshot.ExtractorVersion != ExtractorVersion
+	started = time.Now()
 	files, parsed, reused, err := indexer.prepareFiles(ctx, workspace, previous, reparseAll)
 	if err != nil {
 		return Result{}, err
 	}
-	return indexer.persist(ctx, persistRequest{
+	timings.PreparationMS = millisecondsSince(started)
+	started = time.Now()
+	result, err := indexer.persist(ctx, persistRequest{
 		Project: project, Previous: previous, Workspace: workspace, Files: files,
 		ConfigurationHash: configurationHash, ParsedFiles: parsed, ReusedFiles: reused,
 	})
+	result.Timings = timings
+	result.Timings.PublicationMS = millisecondsSince(started)
+	return result, err
+}
+
+func millisecondsSince(started time.Time) float64 {
+	return float64(time.Since(started).Microseconds()) / 1000
 }
 
 func unchanged(previous *previousSnapshot, workspace discoveredWorkspace, configurationHash string, force bool) bool {
@@ -58,43 +75,51 @@ func unchanged(previous *previousSnapshot, workspace discoveredWorkspace, config
 
 func (indexer *Indexer) prepareFiles(ctx context.Context, workspace discoveredWorkspace, previous *previousSnapshot, force bool) ([]indexedFile, int, int, error) {
 	files := make([]indexedFile, 0, workspaceFileCount(workspace))
+	selected := make(map[string]storage.Source)
+	var reusable []storage.Source
+	if !force && previous != nil {
+		for _, root := range workspace.Roots {
+			oldRoot, found := previous.Roots[root.RootKey]
+			if !found {
+				continue
+			}
+			for _, file := range root.Files {
+				source, found := oldRoot.Sources[file.PathKey]
+				if !found || source.ContentHash != file.ContentHash {
+					continue
+				}
+				metadata, err := cachedFileIndex(source)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+				if samePackagePath(metadata, file.PackagePath) {
+					selected[sourceMapKey(root.RootKey, file.PathKey)] = source
+					reusable = append(reusable, source)
+				}
+			}
+		}
+	}
+	cached, err := indexer.loadCachedFiles(ctx, reusable)
+	if err != nil {
+		return nil, 0, 0, err
+	}
 	parsed, reused := 0, 0
 	for _, root := range workspace.Roots {
 		for _, file := range root.Files {
-			indexed, wasReused, err := indexer.prepareFile(ctx, root, file, previous, force)
+			if source, found := selected[sourceMapKey(root.RootKey, file.PathKey)]; found {
+				files = append(files, indexedFile{Root: root, File: file, UIR: cached[source.ID]})
+				reused++
+				continue
+			}
+			extracted, err := extractGoFile(file.PathKey, file.PackagePath, file.Content)
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			files = append(files, indexed)
-			if wasReused {
-				reused++
-			} else {
-				parsed++
-			}
+			files = append(files, indexedFile{Root: root, File: file, UIR: extracted})
+			parsed++
 		}
 	}
 	return files, parsed, reused, nil
-}
-
-func (indexer *Indexer) prepareFile(ctx context.Context, root discoveredRoot, file discoveredFile, previous *previousSnapshot, force bool) (indexedFile, bool, error) {
-	if !force && previous != nil {
-		if oldRoot, ok := previous.Roots[root.RootKey]; ok {
-			if oldSource, ok := oldRoot.Sources[file.PathKey]; ok && oldSource.ContentHash == file.ContentHash {
-				cached, err := indexer.copyFile(ctx, oldSource)
-				if err != nil {
-					return indexedFile{}, false, err
-				}
-				if samePackagePath(cached, file.PackagePath) {
-					return indexedFile{Root: root, File: file, UIR: cached}, true, nil
-				}
-			}
-		}
-	}
-	extracted, err := extractGoFile(file.PathKey, file.PackagePath, file.Content)
-	if err != nil {
-		return indexedFile{}, false, err
-	}
-	return indexedFile{Root: root, File: file, UIR: extracted}, false, nil
 }
 
 func samePackagePath(cached fileIndex, discovered string) bool {
