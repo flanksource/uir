@@ -44,6 +44,7 @@ var _ = Describe("UIR entity CLI", func() {
 		Expect(ok).To(BeTrue())
 		Expect(rows).To(HaveLen(1))
 		Expect(rows[0].Row()).To(gstruct.MatchAllKeys(gstruct.Keys{
+			"id": Not(BeEmpty()),
 			"operation": Equal("nodes"), "root": Equal("app"), "node_type": Equal("method"),
 			"symbol": Equal("method:acme.Worker:Run"), "package": BeEmpty(), "type": Equal("Worker"),
 			"method": Equal("Run"), "field": BeEmpty(), "signature": BeEmpty(), "language": Equal("go"),

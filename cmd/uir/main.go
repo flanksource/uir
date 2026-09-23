@@ -58,6 +58,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	root.PersistentFlags().StringVar(&runtime.Schema, "schema", "", "PostgreSQL schema")
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)
+	root.AddCommand(newServeCommand(runtime))
 	return root
 }
 

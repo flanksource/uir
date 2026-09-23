@@ -1,0 +1,21 @@
+html, body, #root { margin: 0; width: 100%; height: 100%; }
+body { background: var(--background); color: var(--foreground); font-family: system-ui, sans-serif; }
+.uir-page { display: flex; flex-direction: column; gap: 1rem; padding: 1.25rem; min-width: 0; }
+.uir-heading { margin: 0; font-size: 1.5rem; font-weight: 650; }
+.uir-muted { color: var(--muted-foreground); font-size: .875rem; }
+.uir-section { display: flex; flex-direction: column; gap: .65rem; min-width: 0; }
+.uir-row { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.uir-field { display: flex; flex-direction: column; gap: .3rem; min-width: 12rem; flex: 1; font-size: .875rem; }
+.uir-field input, .uir-field textarea { min-height: 2.25rem; box-sizing: border-box; width: 100%; padding: .45rem .65rem; border: 1px solid var(--input); border-radius: .375rem; background: var(--background); color: var(--foreground); font: inherit; }
+.uir-field textarea { min-height: 5rem; resize: vertical; }
+.uir-check { display: inline-flex; align-items: center; gap: .35rem; font-size: .875rem; }
+.uir-card { border: 1px solid var(--border); border-radius: .5rem; padding: 1rem; background: var(--card); min-width: 0; }
+.uir-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
+.uir-stat { font-size: 1.5rem; font-weight: 700; }
+.uir-table { min-height: 10rem; max-height: 28rem; }
+.uir-code { background: var(--muted); padding: 1rem; border-radius: .375rem; overflow: auto; max-height: 35rem; white-space: pre; font-family: ui-monospace, monospace; font-size: .8rem; }
+.uir-error { border: 1px solid var(--destructive); color: var(--destructive); border-radius: .375rem; padding: .75rem; white-space: pre-wrap; }
+.uir-link { color: var(--primary); text-decoration: underline; overflow-wrap: anywhere; }
+.uir-detail { overflow-wrap: anywhere; }
+.uir-detail dt { color: var(--muted-foreground); font-size: .75rem; margin-top: .6rem; }
+.uir-detail dd { margin: .15rem 0 0; }

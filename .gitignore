@@ -13,6 +13,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+!web/dist/
+!web/dist/**
 
 # Java (sources only; no build system is checked in)
 target/

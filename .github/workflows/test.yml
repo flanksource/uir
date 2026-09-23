@@ -27,11 +27,36 @@ jobs:
           # cross_language_test.go shells out to python3 python/test_uir.py.
           python-version: "3.12"
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.22.0"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install browser dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Install API test dependencies
+        run: pnpm --dir packages/api install --frozen-lockfile
+
       - name: Build
         run: make build
 
-      - name: Test
+      - name: Test Go
         run: go test ./... -race
+
+      - name: Test browser
+        run: pnpm --dir web run test
+
+      - name: Test API client
+        run: pnpm --dir packages/api run test
+
+      - name: Check embedded browser assets
+        run: test -z "$(git status --porcelain -- web/dist)"
 
   python:
     runs-on: ubuntu-latest

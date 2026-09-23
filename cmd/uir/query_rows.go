@@ -12,6 +12,7 @@ import (
 )
 
 type queryRow struct {
+	ID        string `json:"id"`
 	Operation string `json:"operation"`
 	Root      string `json:"root,omitempty"`
 	NodeType  string `json:"node_type"`
@@ -27,6 +28,7 @@ type queryRow struct {
 
 func (queryRow) Columns() []api.ColumnDef {
 	return []api.ColumnDef{
+		api.Column("id").Label("ID").Build(),
 		api.Column("operation").Label("Operation").Build(),
 		api.Column("root").Label("Root").Build(),
 		api.Column("node_type").Label("Kind").Build(),
@@ -43,6 +45,7 @@ func (queryRow) Columns() []api.ColumnDef {
 
 func (row queryRow) Row() map[string]any {
 	return map[string]any{
+		"id":        row.ID,
 		"operation": row.Operation, "root": row.Root, "node_type": row.NodeType, "symbol": row.Symbol,
 		"package": row.Package, "type": row.Type, "method": row.Method, "field": row.Field,
 		"signature": row.Signature, "language": row.Language, "location": row.Location,
@@ -87,6 +90,7 @@ func queryResultRows(ctx context.Context, database *gorm.DB, result query.Result
 	rows := make([]queryRow, 0, len(result.Nodes)+len(result.Relationships))
 	for _, node := range result.Nodes {
 		rows = append(rows, queryRow{
+			ID:        node.ID.String(),
 			Operation: string(result.Operation), Root: roots[node.RootID], NodeType: node.NodeType,
 			Symbol: node.SymbolKey, Package: node.Package, Type: node.TypeName, Method: node.Method,
 			Field: node.Field, Signature: node.Signature, Language: node.Language, Location: locations[node.ID],
@@ -98,6 +102,7 @@ func queryResultRows(ctx context.Context, database *gorm.DB, result query.Result
 			path = relationshipSources[*relationship.SourceID]
 		}
 		rows = append(rows, queryRow{
+			ID:        relationship.ID.String(),
 			Operation: string(result.Operation), Root: roots[relationship.FromRootID], NodeType: relationship.RelationshipType,
 			Symbol: relationship.ToSymbolKey, Location: formatLocation(path, relationship.StartLine, relationship.EndLine, relationship.Column),
 		})

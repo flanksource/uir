@@ -14,8 +14,12 @@ help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_:-]+:.*## /{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: build
-build: ## Compile every package
+build: web-build ## Build the browser and compile every package
 	go build ./...
+
+.PHONY: web-build
+web-build: ## Build embedded browser assets
+	pnpm --dir web run build
 
 .PHONY: schema
 schema: ## Regenerate schema/uir.schema.json from the Go model
@@ -26,8 +30,10 @@ query-parser: ## Regenerate the PEG query parser
 	go generate ./query
 
 .PHONY: test
-test: ## Run the Go test suite
+test: ## Run Go and browser tests
 	go test ./...
+	pnpm --dir web run test
+	pnpm --dir packages/api run test
 
 .PHONY: test-python
 test-python: ## Run the Python UIR model test
@@ -46,8 +52,9 @@ $(LOCALBIN)/golangci-lint: $(LOCALBIN)
 	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: lint
-lint: $(LOCALBIN)/golangci-lint ## Run golangci-lint
+lint: $(LOCALBIN)/golangci-lint ## Run Go and browser lint
 	$(LOCALBIN)/golangci-lint run
+	pnpm --dir web run lint
 
 .PHONY: clean
 clean: ## Remove build and scratch output

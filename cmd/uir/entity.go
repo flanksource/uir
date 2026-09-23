@@ -85,6 +85,7 @@ func registerEntities() {
 			WithAction(clicky.TypedActionWithContext("reindex", reindexOptions{}, runReindex).
 				WithShort("Incrementally reindex Go syntax into a new immutable snapshot")).
 			Register()
+		registerBrowseEntities()
 	})
 }
 

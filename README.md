@@ -23,6 +23,7 @@ import "github.com/flanksource/uir"
 | [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
 | `cmd/uir` | Clicky entity CLI for listing projects, querying snapshots, and incrementally reindexing Go workspaces. |
+| `web/` | Vite and Clicky UI browser for saved snapshots, embedded in `uir serve`. |
 | `python/` | A parallel Python port of the model (pure stdlib). |
 | `java/` | A parallel Java port of the model (Jackson-based, source only — no build file is checked in). |
 
@@ -102,12 +103,22 @@ python3 python/test_uir.py
 
 The Java port under `java/com/flanksource/uir/` is source only; no `pom.xml` or `build.gradle` is checked in, and it is compiled ad hoc (see `java/README.md`).
 
+## Snapshot browser
+
+`uir serve` opens the saved UIR database in a local web browser. It lists projects and snapshots, explores roots, sources and nodes, runs PEG queries against the selected snapshot, and reindexes local workspaces.
+
+```sh
+uir --dsn ./uir.db serve --host localhost --port 8080
+```
+
+Open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `uir --dsn ./uir.db serve --dev`. See [serve documentation](docs/serve.md) for source behavior and API routes.
+
 ## Development
 
 ```sh
-make build     # compile every package
-make test      # go test ./...
-make lint      # golangci-lint
+make build     # build embedded browser assets and compile every Go package
+make test      # Go, browser, and API tests
+make lint      # Go and browser lint
 make fmt       # go fmt + go mod tidy
 make query-parser # regenerate query/grammar.peg.go
 ```
