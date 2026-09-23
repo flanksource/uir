@@ -67,7 +67,7 @@ ref := uir.NewRef(target)
 
 ## Persisted call projection and query behavior
 
-The Go AST indexer stores each call occurrence inside its source revision's JSON projection, with `FromIdentity`, structured `ToIdentifier`, optional `ToRootKey`, `Resolvable`, statement path, source position, and original text. The target locator survives whether or not a declaration can be found. There is no stored `to_node_id` to imply a type-checked relationship. Reused source revisions are resolved against the selected snapshot's effective modules at query time.
+The Go AST indexer stores each call occurrence inside its source revision's JSON projection, with `FromIdentity`, structured `ToIdentifier`, `Resolvable`, statement path, source position, and original text. The projection format also has optional `ToRootKey` and `LocalRoot` fields, but the current Go extractor does not populate `ToRootKey`, and query-time resolution does not use either root field. There is no stored `to_node_id` to imply a type-checked relationship. Reused source revisions are matched by `ToIdentifier.IdentityKey()` against declarations in the selected scopes; identical identifiers in multiple roots or checkout heads cannot be constrained by an edge's intended root.
 
 `uir query` accepts these expressions:
 

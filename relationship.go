@@ -2,7 +2,6 @@ package uir
 
 import (
 	"github.com/google/uuid"
-	"github.com/samber/lo"
 )
 
 type RelationshipBuilder struct {
@@ -14,8 +13,8 @@ func (b *RelationshipBuilder) Build() UIRRelationship {
 }
 
 func (b *RelationshipBuilder) Source(path string, start, end int) *RelationshipBuilder {
-	b.rel.StartLine = lo.ToPtr(start)
-	b.rel.EndLine = lo.ToPtr(end)
+	b.rel.StartLine = new(start)
+	b.rel.EndLine = new(end)
 	b.rel.Path = path
 	return b
 }
@@ -26,7 +25,7 @@ func (b *RelationshipBuilder) Comments(comments string) *RelationshipBuilder {
 }
 
 func (b *RelationshipBuilder) Text(text string) *RelationshipBuilder {
-	b.rel.Content = lo.ToPtr(text)
+	b.rel.Content = new(text)
 	return b
 }
 

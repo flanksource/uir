@@ -1,7 +1,5 @@
 package uir
 
-import "github.com/flanksource/commons/logger"
-
 func Find[T Node](tree Node) FindOptions[T] {
 	var empty T
 	options := FindOptions[T]{
@@ -13,34 +11,34 @@ func Find[T Node](tree Node) FindOptions[T] {
 	return options
 }
 
-func (find FindOptions[T]) One() T {
-	results := find.WithLimit(1).Many()
-	var zero T
+func (find FindOptions[T]) One() (T, []Warning) {
+	results, warnings := find.WithLimit(1).Many()
 	if len(results) == 0 {
-		return zero
+		var zero T
+		return zero, warnings
 	}
-	return results[0]
+	return results[0], warnings
 }
 
-func (find FindOptions[T]) Many() []T {
-
+// Many returns the matching nodes, and a warning for each node that matched
+// but is not a T.
+func (find FindOptions[T]) Many() ([]T, []Warning) {
 	results := []T{}
+	var warnings []Warning
 	_ = NodeTree{Node: find.Root}.Walk(func(node Node) bool {
 		if find.Matches(node) {
 			if v, ok := node.(T); ok {
 				results = append(results, v)
 			} else {
-				logger.Warnf("%s matched filter, but was of wrong type: %T", node.GetIdentifier(), node)
+				warnings = append(warnings, Warning{Message: "uir: node matched the filter but has the wrong type", Node: node})
 			}
 			if find.Limit > 0 && len(results) >= find.Limit {
 				return false
 			}
 		}
 		return true
-	}, WalkOptions{}.WithSkipper(func(n Node) bool {
-		return !find.Matches(n)
-	}))
-	return results
+	}, WalkOptions{Depth: find.Depth})
+	return results, warnings
 }
 
 type FindOptions[T Node] struct {
