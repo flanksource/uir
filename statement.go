@@ -272,6 +272,7 @@ var Statements = []Statement{
 	RawStmt{statementBase: statementBase{Type: ASTStatementTypeRaw}},
 	DestructuringStmt{statementBase: statementBase{Type: ASTStatementTypeDestructure}},
 	TemplateLiteralStmt{statementBase: statementBase{Type: ASTStatementTypeTemplateLit}},
+	ScopedVariableRef{},
 }
 
 // Basic Statement Types

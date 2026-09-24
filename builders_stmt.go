@@ -244,6 +244,7 @@ func NewRecordRead(recordType RecordType, record Node) *RecordReadBuilder {
 			recordBase: recordBase{
 				statementBase: statementBase{Type: ASTStatementTypeRecordRead},
 				Record:        record,
+				RecordType:    recordType,
 			},
 		},
 	}
@@ -283,6 +284,7 @@ func NewRecordWrite(recordType RecordType, record Node) *RecordWriteBuilder {
 			recordBase: recordBase{
 				statementBase: statementBase{Type: ASTStatementTypeRecordWrite},
 				Record:        record,
+				RecordType:    recordType,
 			},
 		},
 	}

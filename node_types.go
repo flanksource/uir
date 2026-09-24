@@ -144,62 +144,24 @@ func (m MethodNode) IsPublic() bool {
 }
 
 // PersistentBodyMixin implementation for MethodNode
-func (m MethodNode) Marshal() json.RawMessage {
+func (m MethodNode) Marshal() (json.RawMessage, error) {
 	if m.Body == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(m.Body)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to marshal MethodNode body: %w", err)
 	}
-	return data
+	return data, nil
 }
 
+// UnmarshalJSON decodes every field through encoding/json: Body is a *BlockStmt,
+// whose own decoder rebuilds its interface-typed children and refuses a body
+// stamped as anything but a block, and a null body stays nil. It is declared so
+// MethodNode satisfies PersistentBodyMixin.
 func (m *MethodNode) UnmarshalJSON(data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	// First unmarshal everything except Body using an alias to avoid recursion
-	type Alias MethodNode
-	aux := (*Alias)(m)
-
-	// Parse into a map to separate body from other fields
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-
-	// Extract and remove body from raw data
-	bodyData := raw["body"]
-	delete(raw, "body")
-
-	// Marshal back without body and unmarshal into aux
-	dataWithoutBody, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(dataWithoutBody, aux); err != nil {
-		return err
-	}
-
-	// Unmarshal the body field separately using StatementMarshaler
-	if len(bodyData) > 0 {
-		if body, err := StatementMarshaler.UnmarshalByType(bodyData); err != nil {
-			return err
-		} else if bodyPtr, ok := body.(*BlockStmt); ok {
-			m.Body = bodyPtr
-		} else if bodyVal, ok := body.(BlockStmt); ok {
-			m.Body = &bodyVal
-		} else {
-			m.Body = &BlockStmt{
-				Children: []Statement{body},
-			}
-		}
-	}
-
-	return nil
+	type alias MethodNode
+	return json.Unmarshal(data, (*alias)(m))
 }
 
 func (m MethodNode) LineCount() int {
@@ -263,15 +225,15 @@ func (p PackageNode) GetChildren() []Node {
 }
 
 // PersistentBodyMixin implementation for PackageNode
-func (p PackageNode) GetPersistentBody() json.RawMessage {
+func (p PackageNode) GetPersistentBody() (json.RawMessage, error) {
 	if len(p.Functions) == 0 {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(p.Functions)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to marshal PackageNode functions: %w", err)
 	}
-	return data
+	return data, nil
 }
 
 func (p *PackageNode) LoadPersistentBody(data json.RawMessage) error {
