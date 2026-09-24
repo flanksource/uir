@@ -181,7 +181,7 @@ func (index *indexContext) match(posting scopedPosting, document decodedDocument
 	scope := index.scopes[posting.scope]
 	return ModuleMatch{
 		Kind: kind, RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath, SnapshotID: scope.snapshot.ID.String(),
-		Path: document.path, Coverage: string(document.coverage),
+		Path: document.path, PackagePath: document.content.PackagePath, Coverage: string(document.coverage),
 	}
 }
 

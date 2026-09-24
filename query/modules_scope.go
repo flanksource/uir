@@ -10,25 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func rootSelector(predicates []Predicate, optionRoot string) (string, []Predicate, error) {
-	rootKey := optionRoot
-	nodePredicates := make([]Predicate, 0, len(predicates))
-	for _, predicate := range predicates {
-		if predicate.Field != "root" {
-			nodePredicates = append(nodePredicates, predicate)
-			continue
-		}
-		if predicate.Value == "" {
-			return "", nil, errors.New("root predicate cannot be empty")
-		}
-		if rootKey != "" && rootKey != predicate.Value {
-			return "", nil, fmt.Errorf("root %q conflicts with root %q from the query", rootKey, predicate.Value)
-		}
-		rootKey = predicate.Value
-	}
-	return rootKey, nodePredicates, nil
-}
-
 func lookupError(err error, subject string) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("%s was not found", subject)
