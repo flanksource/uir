@@ -17,9 +17,11 @@ import "github.com/flanksource/uir"
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
 | `indexer/` | Incremental Go AST indexing into immutable module-root snapshots, exposed as a context-bound Clicky task. |
 | `query/` | PEG query grammar plus module, checkout, snapshot, symbol, and call resolution. |
+| `symboldiff/` | Commit-to-commit symbol diff over two snapshots' documents, with per-symbol line counts from hash-verified Git blobs. |
 | `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
 | [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and call projection queries. |
 | [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
+| [`docs/diff.md`](docs/diff.md) | `uir diff`: commit selection, symbol classification, shape diff rendering, line attribution, and failure modes. |
 | [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
 | `cmd/uir` | CLI for adding module directories, querying snapshots, and incrementally reindexing Go workspaces. |
