@@ -1,5 +1,5 @@
 export type Route = {
-  view: "overview" | "explorer" | "query";
+  view: "overview" | "explorer" | "query" | "tasks";
   module: string;
   location: string;
   snapshot: string;
@@ -15,7 +15,7 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
   const params = new URLSearchParams(location.search);
   const path = location.pathname.slice(1);
   return {
-    view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : "overview",
+    view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : path === "tasks" ? "tasks" : "overview",
     module: params.get("module") ?? "",
     location: params.get("location") ?? "",
     snapshot: params.get("snapshot") ?? "",

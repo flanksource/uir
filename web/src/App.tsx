@@ -1,8 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { AppShell, Button, Select } from "@flanksource/clicky-ui/components";
-import { DataTable, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { addModules, browseModule, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleIndexResult, type ModuleLocation, type ModuleQueryRow, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
+import { AppShell, Button, CommandPalette, CommandPaletteTrigger, Select, type CommandGroup } from "@flanksource/clicky-ui/components";
+import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
+import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryRow, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
+import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
 import { readRoute, routeURL, type Route } from "./route";
+import { SystemDetails } from "./SystemDetails";
 import { Card, ErrorMessage, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
 import { useLoad } from "./use-load";
 
@@ -81,6 +83,7 @@ function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath
 export function App() {
   const [route, setRouteState] = useState(readRoute);
   const [refresh, setRefresh] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
   useEffect(() => {
     const onPop = () => setRouteState(readRoute());
     window.addEventListener("popstate", onPop);
@@ -120,25 +123,37 @@ export function App() {
   }, [route.location, route.snapshot, selectedLocation]);
   const snapshots = useLoad<Page<ModuleSnapshot>>(route.module && route.location ? () => listModuleSnapshots(route.module, route.location, route.offset) : null,
     `snapshots:${route.module}:${route.location}:${route.offset}:${refresh}`);
-  const browse = useLoad<ModuleBrowse>(route.snapshot && route.view === "explorer" ? () => browseModule(route.snapshot) : null,
-    `browse:${route.snapshot}:${route.view}:${refresh}`);
+  const heads = useLoad<ModuleHead[]>(route.view === "explorer" ? listModuleHeads : null, `heads:${route.view}:${refresh}`);
+  const browse = useLoad<ModuleBrowse>(route.snapshot && (route.view === "explorer" || searchOpen) ? () => browseModule(route.snapshot) : null,
+    `browse:${route.snapshot}:${route.view === "explorer" || searchOpen ? "active" : "idle"}:${refresh}`);
   const query = useLoad<ModuleQueryRow[]>(route.snapshot && route.view === "query" && route.expression ? () => runModuleQuery(route.expression, route.module, route.snapshot) : null,
     `query:${route.module}:${route.snapshot}:${route.expression}:${route.view}`);
   const [queryDraft, setQueryDraft] = useState(route.expression);
   useEffect(() => setQueryDraft(route.expression), [route.expression]);
 
   const queryRows = (query.data ?? []).map((row, index) => ({ ...row, id: `${row.snapshot_id}:${row.source}:${row.symbol}:${index}` }));
-  const nav = ["overview", "explorer", "query"] as const;
+  const nav = ["overview", "explorer", "query", "tasks"] as const;
+  const commandGroups: CommandGroup[] = [
+    { id: "navigation", heading: "Go to", items: nav.map((view) => ({ id: `view:${view}`, label: view[0].toUpperCase() + view.slice(1), icon: commandNavigationIcons[view], onSelect: () => setRoute({ view }) })) },
+    { id: "modules", heading: "Module roots", items: (roots.data ?? []).map((item) => ({ id: `module:${item.root_key}`, label: item.name || item.root_key, description: item.root_key, icon: commandModuleIcon,
+      onSelect: () => setRoute({ view: "overview", module: item.root_key, location: item.location, snapshot: item.snapshot_id, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 }) })) },
+    { id: "files", heading: "Files in selected snapshot", limit: 20, items: (browse.data?.sources ?? []).map((source) => ({ id: `file:${source.id}`, label: source.path, keywords: [source.package_path], icon: commandFileIcon(source.path),
+      onSelect: () => setRoute({ view: "explorer", source: source.id, node: "", fileSearch: "", symbolSearch: "" }) })) },
+    { id: "symbols", heading: "Symbols in selected snapshot", limit: 20, items: (browse.data?.nodes ?? []).map((node) => ({ id: `node:${node.id}`, label: node.symbol, description: node.path, icon: commandSymbolIcon(node.node_type),
+      onSelect: () => setRoute({ view: "explorer", source: node.source_id, node: node.id, fileSearch: "", symbolSearch: "" }) })) },
+  ];
 
-  return <AppShell brand={<strong>UIR</strong>} contentWidth="full" contentClassName={route.view === "explorer" && route.snapshot ? "overflow-hidden" : undefined}
+  return <><AppShell brand={<strong>UIR</strong>} contentWidth="full" contentClassName={route.view === "explorer" && route.snapshot ? "overflow-hidden" : undefined}
     navSections={[{ label: "Module browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
+    search={<CommandPaletteTrigger onClick={() => setSearchOpen(true)} open={searchOpen} label="Search modules, files, symbols…" />}
     sidebarHeader={<Field label="Module root"><Select aria-label="Module root" value={route.module} onChange={(event) => {
       const next = roots.data?.find((item) => item.root_key === event.target.value);
       setRoute({ module: event.target.value, location: next?.location ?? "", snapshot: next?.snapshot_id ?? "", source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 });
     }} options={(roots.data ?? []).map((item) => ({ value: item.root_key, label: item.name || item.root_key }))} /></Field>}
+    sidebarFooter={<SystemDetails />}
     bodyHeader={<span>{selectedRoot?.name || route.module || "Module roots"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
-    bodyActions={<Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button>}>
-    {route.view === "explorer" && route.snapshot ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} browse={browse} locations={locations} onRoute={setRoute} /></Suspense> : <PageLayout>
+    bodyActions={<Row><TaskManagerButton basePath="/api/v1" kind="module-index" tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
+    {route.view === "explorer" && route.snapshot ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} heads={heads} browse={browse} locations={locations} onRoute={setRoute} /></Suspense> : <PageLayout>
       {roots.loading && <Muted>Loading module roots…</Muted>}
       <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
@@ -156,7 +171,8 @@ export function App() {
           setRefresh((current) => current + 1);
         }} />
       </>}
-      {route.view !== "overview" && !route.snapshot && <Card>Select or add a module snapshot on the Overview page.</Card>}
+      {route.view === "tasks" && <><Heading>Indexing tasks</Heading><TaskManager basePath="/api/v1" kind="module-index" /></>}
+      {(route.view === "explorer" || route.view === "query") && !route.snapshot && <Card>Select or add a module snapshot on the Overview page.</Card>}
       {route.view === "query" && route.snapshot && <>
         <Heading>PEG query</Heading><Muted>Run a symbol or call query against the selected module snapshot.</Muted>
         <PanelForm layout="row" onSubmit={(event) => { event.preventDefault(); setRoute({ expression: queryDraft.trim() }); }}>
@@ -169,5 +185,5 @@ export function App() {
           columns={[{ key: "kind", label: "Kind" }, { key: "symbol", label: "Symbol", grow: true }, { key: "root", label: "Root" }, { key: "location", label: "Checkout", grow: true }, { key: "source", label: "Source", grow: true }]} />
       </>}
     </PageLayout>}
-  </AppShell>;
+  </AppShell><CommandPalette open={searchOpen} onOpenChange={setSearchOpen} groups={commandGroups} footer={browse.loading ? "Loading snapshot files and symbols…" : browse.error ? browse.error : undefined} /></>;
 }
