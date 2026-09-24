@@ -34,4 +34,4 @@ This is syntax indexing, not a compiler or whole-program call graph:
 - A call can be ambiguous across modules or checkout heads. Graph query target selection returns candidates instead of choosing arbitrarily; a signature-free locator can match a declaration signature, but that is not type-checked proof.
 - Source bytes are not persisted. The browser only shows a local or pinned Git file whose hash matches the indexed revision; an uncommitted historical version may be unavailable once the working tree changes.
 
-Use `uir query 'unresolved calls' --root example.org/service` to inspect unresolved call occurrences. See the [query guide](query.md) for exact grammar and scoping.
+Use `uir query 'service.Run <' --root example.org/service` to inspect indexed callers. Unresolved call locators remain in stored documents but have no canonical edge in the compact query graph. See the [query guide](query.md) for grammar and scoping.

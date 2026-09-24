@@ -88,21 +88,19 @@ ref := uir.NewRef(target)
 
 Every call occurrence carries a call locator: the enclosing declaration's identity key as `enclosing_key`, the structured target identifier as `target`, `resolvable`, `local_root`, statement path, range, and original text. In a `syntax` document the symbol is null and `target` is what the AST could name; in a typed document the symbol is the callee's canonical id, `target` names the callee's package and, for a method, the receiver type the type checker proved, and `resolvable` is whether the callee has a canonical symbol, so a call to an undefined function or a local closure is unresolved. Calls carry no target root, and query-time resolution does not use `local_root`.
 
-Two query families read these forms. `nodes` and `unresolved calls` compare `Identifier` fields and `IdentityKey()` against the declarations and call locators of active documents, typed and syntax alike; identical identifiers in multiple roots or checkout heads cannot be constrained by a locator's intended root, and a signature-free locator may match a declaration with a signature. The symbol operations (`references`, `definitions`, `implementations`, `callers`, `callees`, `search`) compare canonical symbol ids instead, so what they return is compiler-proven: a reference is an occurrence whose `symbol` is the target's id, a definition a symbol entry with that id, an implementation a type whose `implements` names it, a caller a `call` occurrence of it, and a callee a `call` occurrence whose `enclosing` is it. One identity declared at several checkout heads resolves to one target with several declarations, not to ambiguous candidates; only different identities matching one selector (for example `Run(int)` at one head and `Run(string)` at another) are candidates. `callers ... including dispatch` adds calls through the interfaces a method's receiver type implements. These operations see nothing in `syntax` packages, which have no ids or postings, and only the proven facts of `partial` ones; every result lists such packages under `coverage`.
+The compact query grammar compares canonical symbol ids: a reference is an occurrence whose `symbol` is the target's id, a definition a symbol entry with that id, an implementation a type whose `implements` names it, a caller a `call` occurrence of it, and a callee a `call` occurrence whose `enclosing` is it. One identity declared at several checkout heads resolves to one target with several declarations; different identities matching one spelling return candidates. Incoming method calls include known interface dispatch by default. Queries read the primary head of each selected root unless another indexed view is explicitly selected. They see nothing in `syntax` packages, which have no ids or postings, and only the proven facts of `partial` ones; every result lists such packages under `coverage`.
 
 `uir query` accepts these expressions:
 
 ```sh
-uir query 'nodes where symbol_key = "method:example.org/service.example.org/service/invoices.InvoiceService:Approve"' --root example.org/service
-uir query 'nodes where identity_key = "v1:[\"method\",\"example.org/service\",\"example.org/service/invoices\",\"InvoiceService\",\"Approve\",\"\",\"\"]"' --root example.org/service
-uir query 'references of node where package = "example.org/service/invoices" and type = "InvoiceService" and method = "Approve"' --root example.org/service
-uir query 'callers of node where type = "InvoiceService" and method = "Approve" including dispatch' --root example.org/service --location .
-uir query 'callees of node where method = "Approve"' --snapshot 6f8b2c6e-79af-4b59-8736-e45696f0c546
-uir query 'definitions of node where symbol_id = "3f9c…"' --root example.org/service
-uir query 'search "InvoiceService.Ap"' --root example.org/service
-uir query 'unresolved calls' --root example.org/service
+uir query 'example.org/service/invoices.InvoiceService.Approve <' --root example.org/service
+uir query 'invoices.InvoiceService.Approve <' --root example.org/service --location .
+uir query 'invoices.InvoiceService.Approve >' --snapshot 6f8b2c6e-79af-4b59-8736-e45696f0c546
+uir query 'invoices.InvoiceService.Approve =' --root example.org/service
+uir query 'invoices.InvoiceService :methods' --root example.org/service
+uir query 'api.* >> invoices.InvoiceService.Approve' --root example.org/service
 ```
 
-The `symbol_key`, `identity_key`, and `symbol_id` examples are illustrative; inspect actual indexed identifiers for a real module. Without an explicit checkout, the symbol operations read the heads of all registered checkouts. See the [query guide](query.md) for grammar and resolution, and the [storage design](../storage/README.md) for snapshot scope.
+These names are illustrative; inspect indexed symbols for a real module. See the [query guide](query.md) for grammar and resolution, and the [storage design](../storage/README.md) for snapshot scope.
 
 For an in-memory UIR document, `NodeTree.Walk` and structured identifier comparisons remain independent of the relational index. `Find(...).WithName(...)` compares `GetName()` and `String()`, but its skip-filter traversal may miss descendants of a heterogeneous root. Prefer `Walk` when searching the entire tree.
