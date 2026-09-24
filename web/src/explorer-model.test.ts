@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import type { ModuleNode, ModuleSource } from "./api";
-import { fileTree, symbolTree } from "./explorer-model";
+import type { ModuleHead, ModuleNode, ModuleSource } from "./api";
+import { fileTree, moduleHeadTree, symbolTree } from "./explorer-model";
 
 function source(id: string, path: string): ModuleSource {
   return { id, path, root_key: "example.org/service", location: "/checkout/service", snapshot_id: "snapshot-1",
@@ -21,6 +21,29 @@ it("groups source paths into folders with stable file selections", () => {
     ] },
     { id: "file:a", label: "main.go", path: "main.go", children: [], source: source("a", "main.go") },
   ]);
+});
+
+it("groups every checkout head under its module and keeps reused source IDs distinct", () => {
+  const heads: ModuleHead[] = [
+    { root_key: "example.org/service", name: "service", location: "/work/service-a", snapshot_id: "head-a", sources: [{ ...source("shared", "internal/run.go"), location: "/work/service-a", snapshot_id: "head-a" }] },
+    { root_key: "example.org/service", name: "service", location: "/work/service-b", snapshot_id: "head-b", sources: [{ ...source("shared", "internal/run.go"), location: "/work/service-b", snapshot_id: "head-b" }] },
+    { root_key: "example.org/worker", name: "worker", location: "/work/worker", snapshot_id: "head-c", sources: [{ ...source("worker", "main.go"), root_key: "example.org/worker", location: "/work/worker", snapshot_id: "head-c" }] },
+  ];
+  const tree = moduleHeadTree(heads);
+  expect(tree.map((root) => [root.label, root.children.map((checkout) => checkout.label)])).toEqual([
+    ["service", ["service-a", "service-b"]], ["worker", ["main.go"]],
+  ]);
+  expect(tree[1].head).toBe(heads[2]);
+  const first = tree[0].children[0].children[0].children[0];
+  const second = tree[0].children[1].children[0].children[0];
+  expect(first).toMatchObject({ kind: "file", label: "run.go", head: heads[0] });
+  expect(second).toMatchObject({ kind: "file", label: "run.go", head: heads[1] });
+  expect(first.id).not.toBe(second.id);
+});
+
+it("rejects source metadata from a different checkout head", () => {
+  const head: ModuleHead = { root_key: "example.org/service", name: "service", location: "/work/service", snapshot_id: "head-a", sources: [source("a", "main.go")] };
+  expect(() => moduleHeadTree([head])).toThrow(/does not belong to head/);
 });
 
 it("nests symbols by the source-local parent identity", () => {

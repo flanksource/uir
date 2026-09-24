@@ -4,5 +4,7 @@ import "./styles.css";
 import "@flanksource/clicky-ui/styles.css";
 import { App } from "./App";
 import { ErrorWrapper } from "@flanksource/clicky-ui/components";
+import { QueryClient, QueryClientProvider } from "@flanksource/clicky-ui/rpc";
 
-createRoot(document.getElementById("root")!).render(<React.StrictMode><ErrorWrapper><App /></ErrorWrapper></React.StrictMode>);
+const queryClient = new QueryClient();
+createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={queryClient}><ErrorWrapper><App /></ErrorWrapper></QueryClientProvider></React.StrictMode>);

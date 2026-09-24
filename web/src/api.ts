@@ -70,6 +70,7 @@ export type ModuleNode = {
 };
 
 export type ModuleBrowse = { sources: ModuleSource[]; nodes: ModuleNode[] };
+export type ModuleHead = { root_key: string; name: string; location: string; snapshot_id: string; sources: ModuleSource[] };
 export type ModuleSourceContent = { path: string; content: string; origin: "local" | "git"; revision: string; snapshot_id: string };
 export type ModuleQueryRow = { kind: string; root: string; symbol: string; location: string; source: string; snapshot_id: string };
 export type ModuleIndexResult = {
@@ -83,6 +84,13 @@ export type ModuleIndexResult = {
   unchanged: boolean;
 };
 export type Page<T> = { data: T[]; page: { limit: number; offset: number; total: number } };
+export type SystemInfo = {
+  backend_version: string;
+  database_type: string;
+  database_version: string;
+  database_location: string;
+  database_size_bytes: number;
+};
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) }, ...options });
@@ -97,6 +105,14 @@ function moduleURL(operation: string, params?: Record<string, string>): string {
 
 export function listModuleRoots(): Promise<ModuleRoot[]> {
   return request(moduleURL(""));
+}
+
+export function listModuleHeads(): Promise<ModuleHead[]> {
+  return request(moduleURL("heads"));
+}
+
+export function getSystemInfo(): Promise<SystemInfo> {
+  return request("/api/v1/system/info");
 }
 
 export function listModuleLocations(root: string): Promise<ModuleLocation[]> {
