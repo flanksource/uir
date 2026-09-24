@@ -11,46 +11,60 @@ import (
 type Operation string
 
 const (
-	// OperationNodes selects nodes without traversing relationships.
-	OperationNodes Operation = "nodes"
-	// OperationCallers selects the call occurrences that target one symbol.
-	OperationCallers Operation = "callers"
-	// OperationCallees selects the call occurrences one symbol's declaration encloses.
-	OperationCallees Operation = "callees"
-	// OperationUnresolvedCalls selects call edges whose target is unresolved.
-	OperationUnresolvedCalls Operation = "unresolved_calls"
-	// OperationReferences selects every non-declaring occurrence of one symbol.
-	OperationReferences Operation = "references"
-	// OperationDefinitions selects the declarations of one symbol.
-	OperationDefinitions Operation = "definitions"
-	// OperationImplementations selects the types that implement one interface.
-	OperationImplementations Operation = "implementations"
-	// OperationSearch selects declared symbols by name prefix.
-	OperationSearch Operation = "search"
+	OperationResolve           Operation = "resolve"
+	OperationIncoming          Operation = "incoming"
+	OperationOutgoing          Operation = "outgoing"
+	OperationDefinition        Operation = "definition"
+	OperationImplementers      Operation = "implementers"
+	OperationMethods           Operation = "methods"
+	OperationTransitiveCallers Operation = "transitive_callers"
+	OperationSet               Operation = "set"
+	OperationPath              Operation = "path"
 )
 
-// indexed reports whether the operation reads symbols and postings rather than scanning documents.
-func (operation Operation) indexed() bool {
-	switch operation {
-	case OperationNodes, OperationUnresolvedCalls:
-		return false
-	}
-	return true
-}
-
-// Predicate is one exact structured field comparison produced by the PEG parser.
-type Predicate struct {
-	Field string `json:"field"`
-	Value string `json:"value"`
-}
-
-// Query is the typed syntax tree consumed by the resolution pipeline. Dispatch asks callers to
-// include calls through the interfaces the target's receiver implements; Search is the search input.
+// Query is the typed syntax tree consumed by the resolution pipeline.
 type Query struct {
-	Operation  Operation   `json:"operation"`
-	Predicates []Predicate `json:"predicates,omitempty"`
-	Dispatch   bool        `json:"dispatch,omitempty"`
-	Search     string      `json:"search,omitempty"`
+	Expr *Expr `json:"expr"`
+}
+
+type ExprKind string
+
+const (
+	ExprSymbol       ExprKind = "symbol"
+	ExprSelector     ExprKind = "selector"
+	ExprModifier     ExprKind = "modifier"
+	ExprRelation     ExprKind = "relation"
+	ExprIntersection ExprKind = "intersection"
+	ExprUnion        ExprKind = "union"
+	ExprPath         ExprKind = "path"
+)
+
+type Filter struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value,omitempty"`
+}
+
+type Selector struct {
+	Kind          string `json:"kind"`
+	Pattern       string `json:"pattern"`
+	ModulePattern string `json:"module_pattern,omitempty"`
+}
+
+type TypedModifier struct {
+	Include  bool     `json:"include"`
+	Selector Selector `json:"selector"`
+}
+
+type Expr struct {
+	Kind      ExprKind        `json:"kind"`
+	Symbol    string          `json:"symbol,omitempty"`
+	Selector  *Selector       `json:"selector,omitempty"`
+	Modifiers []TypedModifier `json:"modifiers,omitempty"`
+	Relation  string          `json:"relation,omitempty"`
+	Depth     int             `json:"depth,omitempty"`
+	Filters   []Filter        `json:"filters,omitempty"`
+	Left      *Expr           `json:"left,omitempty"`
+	Right     *Expr           `json:"right,omitempty"`
 }
 
 // ResolutionStage records one successful, externally visible pipeline decision.
