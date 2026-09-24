@@ -21,6 +21,21 @@ type moduleContentOptions struct {
 }
 
 func registerModuleBrowseCommands(root *cobra.Command) {
+	heads := clicky.AddNamedCommandWithContext("heads", root, struct{}{}, func(ctx context.Context, _ struct{}) ([]query.ModuleHeadFiles, error) {
+		database, err := databaseFor(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pipeline, err := query.NewPipeline(database)
+		if err != nil {
+			return nil, err
+		}
+		return pipeline.BrowseModuleHeads(ctx)
+	})
+	heads.Short = "List files from every published module checkout head"
+	setModuleRoute(heads, "modules/heads")
+	heads.Annotations["clicky/operation-method"] = http.MethodGet
+
 	browse := clicky.AddNamedCommandWithContext("browse", root, moduleBrowseOptions{}, func(ctx context.Context, options moduleBrowseOptions) (query.ModuleBrowseResult, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {

@@ -32,21 +32,21 @@ type ModuleCallView struct {
 }
 
 type ModuleNodeView struct {
-	ID             string          `json:"id"`
-	SourceID       string          `json:"source_id"`
-	Path           string          `json:"path"`
-	Symbol         string          `json:"symbol"`
-	NodeType       string          `json:"node_type"`
-	Identifier     uir.Identifier  `json:"identifier"`
-	ParentIdentity string          `json:"parent_identity,omitempty"`
-	ChildSlot      string          `json:"child_slot"`
-	Ordinal        int             `json:"ordinal"`
-	Payload        json.RawMessage `json:"payload"`
-	SemanticHash   string          `json:"semantic_hash"`
-	Field          json.RawMessage `json:"field,omitempty"`
-	Line           *int            `json:"line,omitempty"`
-	EndLine        *int            `json:"end_line,omitempty"`
-	Column         *int            `json:"column,omitempty"`
+	ID             string           `json:"id"`
+	SourceID       string           `json:"source_id"`
+	Path           string           `json:"path"`
+	Symbol         string           `json:"symbol"`
+	NodeType       string           `json:"node_type"`
+	Identifier     uir.Identifier   `json:"identifier"`
+	ParentIdentity string           `json:"parent_identity,omitempty"`
+	ChildSlot      string           `json:"child_slot"`
+	Ordinal        int              `json:"ordinal"`
+	Payload        json.RawMessage  `json:"payload"`
+	SemanticHash   string           `json:"semantic_hash"`
+	Field          json.RawMessage  `json:"field,omitempty"`
+	Line           *int             `json:"line,omitempty"`
+	EndLine        *int             `json:"end_line,omitempty"`
+	Column         *int             `json:"column,omitempty"`
 	Calls          []ModuleCallView `json:"calls"`
 }
 
@@ -92,11 +92,7 @@ func (pipeline *Pipeline) BrowseModules(ctx context.Context, options ModuleScope
 		if projection.PackagePath != revision.PackagePath {
 			return ModuleBrowseResult{}, fmt.Errorf("projection for %s has package %q, expected %q", path, projection.PackagePath, revision.PackagePath)
 		}
-		result.Sources = append(result.Sources, ModuleSourceView{
-			ID: revision.ID.String(), RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath,
-			SnapshotID: scope.snapshot.ID.String(), Path: path, PackagePath: revision.PackagePath,
-			ContentHash: revision.ContentHash, SizeBytes: revision.SizeBytes,
-		})
+		result.Sources = append(result.Sources, moduleSourceView(scope, path, revision))
 		calls := make(map[string][]ModuleCallView)
 		for _, call := range projection.Calls {
 			calls[call.FromIdentity] = append(calls[call.FromIdentity], ModuleCallView{
@@ -124,4 +120,12 @@ func (pipeline *Pipeline) BrowseModules(ctx context.Context, options ModuleScope
 		return left.Symbol+"\x00"+left.Path+"\x00"+left.ID < right.Symbol+"\x00"+right.Path+"\x00"+right.ID
 	})
 	return result, nil
+}
+
+func moduleSourceView(scope moduleScope, path string, revision storage.SourceRevision) ModuleSourceView {
+	return ModuleSourceView{
+		ID: revision.ID.String(), RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath,
+		SnapshotID: scope.snapshot.ID.String(), Path: path, PackagePath: revision.PackagePath,
+		ContentHash: revision.ContentHash, SizeBytes: revision.SizeBytes,
+	}
 }
