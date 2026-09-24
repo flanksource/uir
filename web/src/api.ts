@@ -22,10 +22,11 @@ export type ModuleSnapshot = {
   root_key: string;
   canonical_path: string;
   base_snapshot_id?: string;
-  state: string;
   revision: string;
+  worktree_state: "clean" | "dirty" | "unknown";
+  coverage: "indexed" | "partial" | "syntax" | "excluded";
   started_at: string;
-  completed_at?: string;
+  completed_at: string;
   head: boolean;
   head_version?: number;
 };
@@ -43,7 +44,6 @@ export type ModuleSource = {
 
 export type ModuleCall = {
   to_identifier: Record<string, unknown>;
-  to_root_key?: string;
   resolvable: boolean;
   statement_path: string;
   line?: number;
@@ -72,7 +72,46 @@ export type ModuleNode = {
 export type ModuleBrowse = { sources: ModuleSource[]; nodes: ModuleNode[] };
 export type ModuleHead = { root_key: string; name: string; location: string; snapshot_id: string; sources: ModuleSource[] };
 export type ModuleSourceContent = { path: string; content: string; origin: "local" | "git"; revision: string; snapshot_id: string };
-export type ModuleQueryRow = { kind: string; root: string; symbol: string; location: string; source: string; snapshot_id: string };
+export type ModuleQueryRow = {
+  kind: string;
+  symbol: string;
+  root: string;
+  location: string;
+  source: string;
+  snapshot_id: string;
+  path?: string;
+  line?: number;
+  column?: number;
+  end_line?: number;
+  end_column?: number;
+  role?: string;
+  symbol_id?: string;
+  enclosing_id?: string;
+  enclosing_key?: string;
+  coverage?: string;
+  dispatch?: boolean;
+};
+export type ModuleQuerySymbol = {
+  id: string;
+  module_key: string;
+  package_path: string;
+  kind: string;
+  owner_id?: string;
+  owner?: string;
+  name: string;
+  visibility: string;
+  parameter_types: unknown;
+};
+export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: number };
+export type ModuleQueryResult = {
+  operation: unknown;
+  total: number;
+  matches: ModuleQueryRow[];
+  declarations: ModuleQueryRow[];
+  symbols: ModuleQuerySymbol[];
+  coverage: ModuleQueryCoverage[];
+  stages: { name: string; value: string }[];
+};
 export type ModuleIndexResult = {
   root_key: string;
   location: string;
@@ -131,8 +170,16 @@ export function readModuleSource(snapshot: string, path: string): Promise<Module
   return request(moduleURL("content", { snapshot, path }));
 }
 
-export function runModuleQuery(expression: string, root: string, snapshot: string): Promise<ModuleQueryRow[]> {
-  return request(moduleURL("query"), { method: "POST", body: JSON.stringify({ args: [expression], root, snapshot }) });
+export async function runModuleQuery(expression: string, root: string, snapshot: string): Promise<ModuleQueryResult> {
+  const result = await request<unknown>(moduleURL("query"), { method: "POST", body: JSON.stringify({ args: [expression], root, snapshot }) });
+  if (!isQueryResult(result)) throw new Error(`Query response is not a result envelope: ${JSON.stringify(result).slice(0, 200)}`);
+  return result;
+}
+
+function isQueryResult(value: unknown): value is ModuleQueryResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "stages"].every((key) => Array.isArray(result[key]));
 }
 
 export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexResult[]> {
