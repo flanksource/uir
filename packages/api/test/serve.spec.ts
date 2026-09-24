@@ -1,7 +1,23 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { addModules, browseModule, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery } from "../../../web/src/api";
+import { addModules, browseModule, getSystemInfo, listModuleHeads, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("loads every module checkout head for the explorer tree", async () => {
+  const heads = [{ root_key: "example.org/service", name: "service", location: "/checkout/service", snapshot_id: "head-1", sources: [] }];
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(heads), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(listModuleHeads()).resolves.toEqual(heads);
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/heads", expect.objectContaining({ headers: { Accept: "application/json" } }));
+});
+
+it("loads version and database details from the running backend", async () => {
+  const info = { backend_version: "v1.2.3", database_type: "SQLite", database_version: "3.50.0", database_location: "/data/uir.db", database_size_bytes: 4096 };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(info), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(getSystemInfo()).resolves.toEqual(info);
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/system/info", expect.objectContaining({ headers: { Accept: "application/json" } }));
+});
 
 it("sends the selected module snapshot to the PEG query action", async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
