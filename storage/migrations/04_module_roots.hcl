@@ -1,6 +1,6 @@
 schema "public" {}
 
-table "uir_module_roots" {
+table "modules" {
   schema = schema.public
 
   column "id" {
@@ -21,11 +21,11 @@ table "uir_module_roots" {
   }
 
   primary_key { columns = [column.id] }
-  unique "uir_module_roots_root_key_key" { columns = [column.root_key] }
-  check "uir_module_roots_root_key_nonempty" { expr = "length(root_key) > 0" }
+  unique "modules_root_key_key" { columns = [column.root_key] }
+  check "modules_root_key_check" { expr = "length(root_key) > 0" }
 }
 
-table "uir_module_locations" {
+table "locations" {
   schema = schema.public
 
   column "id" {
@@ -62,24 +62,26 @@ table "uir_module_locations" {
   }
 
   primary_key { columns = [column.id] }
-  foreign_key "uir_module_locations_root_id_fkey" {
-    columns = [column.root_id]
-    ref_columns = [table.uir_module_roots.column.id]
-    on_update = NO_ACTION
-    on_delete = CASCADE
+  foreign_key "locations_root_id_fkey" {
+    columns     = [column.root_id]
+    ref_columns = [table.modules.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
-  foreign_key "uir_module_locations_parent_id_fkey" {
-    columns = [column.parent_location_id]
-    ref_columns = [table.uir_module_locations.column.id]
-    on_update = NO_ACTION
-    on_delete = NO_ACTION
+  foreign_key "locations_parent_location_id_fkey" {
+    columns     = [column.parent_location_id]
+    ref_columns = [table.locations.column.id]
+    on_update   = NO_ACTION
+    on_delete   = NO_ACTION
   }
-  unique "uir_module_locations_root_id_id_key" { columns = [column.root_id, column.id] }
-  unique "uir_module_locations_root_path_key" { columns = [column.root_id, column.canonical_path] }
-  check "uir_module_locations_path_nonempty" { expr = "length(canonical_path) > 0" }
+  unique "locations_root_id_id_key" { columns = [column.root_id, column.id] }
+  unique "locations_root_id_canonical_path_key" { columns = [column.root_id, column.canonical_path] }
+  index "locations_parent_idx" { columns = [column.parent_location_id] }
+  check "locations_canonical_path_check" { expr = "length(canonical_path) > 0" }
+  check "locations_kind_check" { expr = "kind IN ('module', 'git', 'git-submodule')" }
 }
 
-table "uir_module_snapshots" {
+table "snapshots" {
   schema = schema.public
 
   column "id" {
@@ -98,11 +100,11 @@ table "uir_module_snapshots" {
     type = uuid
     null = true
   }
-  column "state" {
+  column "revision" {
     type = text
     null = false
   }
-  column "revision" {
+  column "worktree_state" {
     type = text
     null = false
   }
@@ -114,8 +116,20 @@ table "uir_module_snapshots" {
     type = text
     null = false
   }
-  column "extractor_version" {
+  column "context_hash" {
     type = text
+    null = false
+  }
+  column "coverage" {
+    type = text
+    null = false
+  }
+  column "package_count" {
+    type = integer
+    null = false
+  }
+  column "diagnostics" {
+    type = jsonb
     null = false
   }
   column "started_at" {
@@ -124,34 +138,41 @@ table "uir_module_snapshots" {
   }
   column "completed_at" {
     type = timestamptz
-    null = true
+    null = false
   }
 
   primary_key { columns = [column.id] }
-  foreign_key "uir_module_snapshots_root_id_fkey" {
-    columns = [column.root_id]
-    ref_columns = [table.uir_module_roots.column.id]
-    on_update = NO_ACTION
-    on_delete = CASCADE
+  foreign_key "snapshots_root_id_fkey" {
+    columns     = [column.root_id]
+    ref_columns = [table.modules.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
-  foreign_key "uir_module_snapshots_location_fkey" {
-    columns = [column.root_id, column.location_id]
-    ref_columns = [table.uir_module_locations.column.root_id, table.uir_module_locations.column.id]
-    on_update = NO_ACTION
-    on_delete = CASCADE
+  foreign_key "snapshots_location_fkey" {
+    columns     = [column.root_id, column.location_id]
+    ref_columns = [table.locations.column.root_id, table.locations.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
-  foreign_key "uir_module_snapshots_base_fkey" {
-    columns = [column.root_id, column.base_snapshot_id]
-    ref_columns = [table.uir_module_snapshots.column.root_id, table.uir_module_snapshots.column.id]
-    on_update = NO_ACTION
-    on_delete = NO_ACTION
+  foreign_key "snapshots_base_fkey" {
+    columns     = [column.root_id, column.base_snapshot_id]
+    ref_columns = [table.snapshots.column.root_id, table.snapshots.column.id]
+    on_update   = NO_ACTION
+    on_delete   = NO_ACTION
   }
-  unique "uir_module_snapshots_root_id_id_key" { columns = [column.root_id, column.id] }
-  index "uir_module_snapshots_location_started_idx" { columns = [column.location_id, column.started_at] }
-  check "uir_module_snapshots_state_check" { expr = "state IN ('building', 'ready', 'failed')" }
+  unique "snapshots_root_id_id_key" { columns = [column.root_id, column.id] }
+  unique "snapshots_location_id_id_key" { columns = [column.location_id, column.id] }
+  index "snapshots_location_started_idx" { columns = [column.location_id, column.started_at] }
+  index "snapshots_base_idx" { columns = [column.base_snapshot_id] }
+  index "snapshots_root_revision_idx" { columns = [column.root_id, column.revision] }
+  check "snapshots_worktree_state_check" { expr = "worktree_state IN ('clean', 'dirty', 'unknown')" }
+  check "snapshots_revision_check" { expr = "(worktree_state = 'unknown') OR length(revision) > 0" }
+  check "snapshots_context_hash_check" { expr = "length(context_hash) = 64" }
+  check "snapshots_coverage_check" { expr = "coverage IN ('indexed', 'partial', 'syntax', 'excluded')" }
+  check "snapshots_package_count_check" { expr = "package_count >= 0" }
 }
 
-table "uir_module_location_heads" {
+table "location_heads" {
   schema = schema.public
 
   column "root_id" {
@@ -172,22 +193,22 @@ table "uir_module_location_heads" {
   }
 
   primary_key { columns = [column.location_id] }
-  foreign_key "uir_module_location_heads_location_fkey" {
-    columns = [column.root_id, column.location_id]
-    ref_columns = [table.uir_module_locations.column.root_id, table.uir_module_locations.column.id]
-    on_update = NO_ACTION
-    on_delete = CASCADE
+  foreign_key "location_heads_location_fkey" {
+    columns     = [column.root_id, column.location_id]
+    ref_columns = [table.locations.column.root_id, table.locations.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
-  foreign_key "uir_module_location_heads_snapshot_fkey" {
-    columns = [column.root_id, column.snapshot_id]
-    ref_columns = [table.uir_module_snapshots.column.root_id, table.uir_module_snapshots.column.id]
-    on_update = NO_ACTION
-    on_delete = NO_ACTION
+  foreign_key "location_heads_snapshot_fkey" {
+    columns     = [column.location_id, column.snapshot_id]
+    ref_columns = [table.snapshots.column.location_id, table.snapshots.column.id]
+    on_update   = NO_ACTION
+    on_delete   = NO_ACTION
   }
-  check "uir_module_location_heads_version_check" { expr = "version >= 1" }
+  check "location_heads_version_check" { expr = "version >= 1" }
 }
 
-table "uir_module_primaries" {
+table "primary_locations" {
   schema = schema.public
 
   column "root_id" {
@@ -200,10 +221,10 @@ table "uir_module_primaries" {
   }
 
   primary_key { columns = [column.root_id] }
-  foreign_key "uir_module_primaries_location_fkey" {
-    columns = [column.root_id, column.location_id]
-    ref_columns = [table.uir_module_locations.column.root_id, table.uir_module_locations.column.id]
-    on_update = NO_ACTION
-    on_delete = CASCADE
+  foreign_key "primary_locations_location_fkey" {
+    columns     = [column.root_id, column.location_id]
+    ref_columns = [table.locations.column.root_id, table.locations.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
 }

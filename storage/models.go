@@ -76,15 +76,7 @@ func invalidJSONError(value []byte) error {
 	return fmt.Errorf("invalid UIR JSON (%d bytes)", len(value))
 }
 
-type SnapshotState string
-
-const (
-	SnapshotBuilding SnapshotState = "building"
-	SnapshotReady    SnapshotState = "ready"
-	SnapshotFailed   SnapshotState = "failed"
-)
-
-// Field is a serialized Go field projection inside SourceRevision, not a table model.
+// Field is a serialized Go field projection inside a document symbol entry, not a table model.
 type Field struct {
 	NodeID          uuid.UUID
 	Role            string

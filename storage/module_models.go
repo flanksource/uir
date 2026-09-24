@@ -13,7 +13,7 @@ type ModuleRoot struct {
 	CreatedAt time.Time `gorm:"column:created_at"`
 }
 
-func (ModuleRoot) TableName() string { return "uir_module_roots" }
+func (ModuleRoot) TableName() string { return "modules" }
 
 type ModuleLocation struct {
 	ID               uuid.UUID  `gorm:"column:id;primaryKey"`
@@ -26,23 +26,46 @@ type ModuleLocation struct {
 	CreatedAt        time.Time  `gorm:"column:created_at"`
 }
 
-func (ModuleLocation) TableName() string { return "uir_module_locations" }
+func (ModuleLocation) TableName() string { return "locations" }
 
+// WorktreeState records whether a snapshot's bytes are exactly its Git revision's bytes.
+type WorktreeState string
+
+const (
+	WorktreeClean   WorktreeState = "clean"
+	WorktreeDirty   WorktreeState = "dirty"
+	WorktreeUnknown WorktreeState = "unknown"
+)
+
+// Coverage is the one extraction-coverage vocabulary shared by snapshots, packages, and documents.
+type Coverage string
+
+const (
+	CoverageIndexed  Coverage = "indexed"
+	CoveragePartial  Coverage = "partial"
+	CoverageSyntax   Coverage = "syntax"
+	CoverageExcluded Coverage = "excluded"
+)
+
+// ModuleSnapshot is a published index run; a row exists only once its publication committed.
 type ModuleSnapshot struct {
 	ID                uuid.UUID     `gorm:"column:id;primaryKey"`
 	RootID            uuid.UUID     `gorm:"column:root_id"`
 	LocationID        uuid.UUID     `gorm:"column:location_id"`
 	BaseSnapshotID    *uuid.UUID    `gorm:"column:base_snapshot_id"`
-	State             SnapshotState `gorm:"column:state"`
 	Revision          string        `gorm:"column:revision"`
+	WorktreeState     WorktreeState `gorm:"column:worktree_state"`
 	ContentSetHash    string        `gorm:"column:content_set_hash"`
 	ConfigurationHash string        `gorm:"column:configuration_hash"`
-	ExtractorVersion  string        `gorm:"column:extractor_version"`
+	ContextHash       string        `gorm:"column:context_hash"`
+	Coverage          Coverage      `gorm:"column:coverage"`
+	PackageCount      int           `gorm:"column:package_count"`
+	Diagnostics       JSON          `gorm:"column:diagnostics"`
 	StartedAt         time.Time     `gorm:"column:started_at"`
-	CompletedAt       *time.Time    `gorm:"column:completed_at"`
+	CompletedAt       time.Time     `gorm:"column:completed_at"`
 }
 
-func (ModuleSnapshot) TableName() string { return "uir_module_snapshots" }
+func (ModuleSnapshot) TableName() string { return "snapshots" }
 
 type ModuleLocationHead struct {
 	RootID     uuid.UUID `gorm:"column:root_id"`
@@ -51,27 +74,25 @@ type ModuleLocationHead struct {
 	Version    int64     `gorm:"column:version"`
 }
 
-func (ModuleLocationHead) TableName() string { return "uir_module_location_heads" }
+func (ModuleLocationHead) TableName() string { return "location_heads" }
 
 type ModulePrimary struct {
 	RootID     uuid.UUID `gorm:"column:root_id;primaryKey"`
 	LocationID uuid.UUID `gorm:"column:location_id"`
 }
 
-func (ModulePrimary) TableName() string { return "uir_module_primaries" }
+func (ModulePrimary) TableName() string { return "primary_locations" }
 
 type SourceRevision struct {
-	ID               uuid.UUID `gorm:"column:id;primaryKey"`
-	RootID           uuid.UUID `gorm:"column:root_id"`
-	PathKey          string    `gorm:"column:path_key"`
-	ContentHash      string    `gorm:"column:content_hash"`
-	PackagePath      string    `gorm:"column:package_path"`
-	ExtractorVersion string    `gorm:"column:extractor_version"`
-	SizeBytes        int64     `gorm:"column:size_bytes"`
-	Projection       JSON      `gorm:"column:projection"`
+	ID          uuid.UUID `gorm:"column:id;primaryKey"`
+	RootID      uuid.UUID `gorm:"column:root_id"`
+	PathKey     string    `gorm:"column:path_key"`
+	ContentHash string    `gorm:"column:content_hash"`
+	PackagePath string    `gorm:"column:package_path"`
+	SizeBytes   int64     `gorm:"column:size_bytes"`
 }
 
-func (SourceRevision) TableName() string { return "uir_source_revisions" }
+func (SourceRevision) TableName() string { return "source_revisions" }
 
 type SourceOperation string
 
@@ -88,4 +109,4 @@ type SourceDelta struct {
 	Operation  SourceOperation `gorm:"column:operation"`
 }
 
-func (SourceDelta) TableName() string { return "uir_source_deltas" }
+func (SourceDelta) TableName() string { return "source_deltas" }
