@@ -19,13 +19,48 @@ it("loads version and database details from the running backend", async () => {
   expect(fetcher).toHaveBeenCalledWith("/api/v1/system/info", expect.objectContaining({ headers: { Accept: "application/json" } }));
 });
 
-it("sends the selected module snapshot to the PEG query action", async () => {
-  const fetcher = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
+const snapshot = "11111111-1111-1111-1111-111111111111";
+const scope = { root: "example.org/refs", location: "/checkout/refs", snapshot_id: snapshot };
+const saveID = "f22a813c22bc61f6b25e5838892b700742c88875bc2ef83f0c61f9543d877ee9";
+const brokenPartial = { root_key: scope.root, location: scope.location, snapshot_id: snapshot, package_path: "example.org/refs/broken", coverage: "partial" };
+const saveDeclaration = {
+  kind: "definition", ...scope, symbol: "method:example.org/refs/store.Store:Save#()", source: "store/store.go:5:14",
+  path: "store/store.go", line: 5, column: 14, end_line: 5, end_column: 18, role: "definition", symbol_id: saveID, coverage: "indexed",
+};
+
+it.each([
+  {
+    name: "references with declarations, symbols, and a partial package",
+    expression: 'references of node where type = "Store" and method = "Save"',
+    envelope: {
+      operation: "references", total: 1,
+      matches: [{
+        kind: "reference", ...scope, symbol: "method:example.org/refs/app:Run#()", source: "app/app.go:5:28",
+        path: "app/app.go", line: 5, column: 28, end_line: 5, end_column: 32, role: "call", symbol_id: saveID,
+        enclosing_id: "d7e469f71d728df80c44c3f76b4408fbeeeebfc9753a23029f712fd8817ec05d",
+        enclosing_key: 'v1:["method","","example.org/refs/app","","Run","","()"]', coverage: "indexed",
+      }],
+      declarations: [saveDeclaration],
+      symbols: [{ id: saveID, module_key: scope.root, package_path: "example.org/refs/store", kind: "method", owner: "Store", name: "Save", visibility: "exported", parameter_types: [] }],
+      coverage: [brokenPartial],
+      stages: [{ name: "parse", value: "references" }, { name: "coverage", value: "incomplete: 1 package is not fully indexed (1 partial)" }],
+    },
+  },
+  {
+    name: "search rows in the same envelope",
+    expression: 'search "Store.Sa"',
+    envelope: {
+      operation: "search", total: 1, matches: [{ ...saveDeclaration, kind: "symbol" }], declarations: [], symbols: [], coverage: [brokenPartial],
+      stages: [{ name: "search", value: 'prefix "sa": 1 declared symbols' }],
+    },
+  },
+])("posts the scoped PEG query and returns the $name", async ({ expression, envelope }) => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
-  await runModuleQuery('nodes where method = "Run"', "example.org/service", "11111111-1111-1111-1111-111111111111");
+  await expect(runModuleQuery(expression, scope.root, snapshot)).resolves.toEqual(envelope);
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
     method: "POST",
-    body: JSON.stringify({ args: ['nodes where method = "Run"'], root: "example.org/service", snapshot: "11111111-1111-1111-1111-111111111111" }),
+    body: JSON.stringify({ args: [expression], root: scope.root, snapshot }),
   }));
 });
 

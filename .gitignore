@@ -5,6 +5,7 @@ node_modules
 hack/
 coverage.out
 coverage.html
+*.test
 
 # Python
 __pycache__/

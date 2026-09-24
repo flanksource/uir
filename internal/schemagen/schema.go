@@ -31,7 +31,7 @@ const (
 	statementUnion = "Statement"
 
 	// The fields uir's registries key on when reading a polymorphic document.
-	nodeDiscriminator      = "node_type"
+	nodeDiscriminator      = "node_kind"
 	statementDiscriminator = "statement_type"
 )
 
@@ -100,16 +100,25 @@ func (g *generator) build(root reflect.Type) (*Schema, error) {
 		return nil, err
 	}
 
+	nodes, err := membersOf(uir.Nodes, uir.NodeMarshaler)
+	if err != nil {
+		return nil, err
+	}
+	statements, err := membersOf(uir.Statements, uir.StatementMarshaler)
+	if err != nil {
+		return nil, err
+	}
 	unions := []struct {
-		name    string
-		key     string
-		members []unionMember
+		name       string
+		key        string
+		refinement string
+		members    []unionMember
 	}{
-		{nodeUnion, nodeDiscriminator, membersOf(uir.Nodes, func(n uir.Node) string { return string(n.GetType()) })},
-		{statementUnion, statementDiscriminator, membersOf(uir.Statements, func(s uir.Statement) string { return string(s.GetStatementType()) })},
+		{nodeUnion, nodeDiscriminator, uir.NodeMarshaler.RefinementField(), nodes},
+		{statementUnion, statementDiscriminator, uir.StatementMarshaler.RefinementField(), statements},
 	}
 	for _, u := range unions {
-		union, err := g.union(u.key, u.members)
+		union, err := g.union(u.key, u.refinement, u.members)
 		if err != nil {
 			return nil, fmt.Errorf("%s union: %w", u.name, err)
 		}
@@ -136,14 +145,20 @@ type unionMember struct {
 // that registering a node or statement is the only step needed to describe it.
 //
 // Each member's discriminator is pinned to its own value. Without that every
-// branch would accept every kind, since the field's type is the shared enum.
+// branch would accept every kind. The marshaler stamps the discriminator itself,
+// so a member need not declare it as a field: node_kind never is one, and a
+// ScopedVariableRef has no statementBase to carry statement_type.
 //
 // The choice is anyOf rather than oneOf because the discriminator is optional:
-// a node nested in a UIR document routinely omits node_type, and since every
-// other property is optional too, such a node matches several branches at once.
-// oneOf demands exactly one match and would reject it — anyOf says what is
-// actually true, that the node is shaped like one of the registered kinds.
-func (g *generator) union(key string, members []unionMember) (*Schema, error) {
+// a node nested in a UIR document through a concrete field carries no node_kind,
+// and since every other property is optional too, such a node matches several
+// branches at once. oneOf demands exactly one match and would reject it — anyOf
+// says what is actually true, that the node is shaped like one of the registered
+// kinds.
+//
+// A registry that accepts refinements stamps a refined kind under refinement
+// beside the discriminator, so every member declares that field too.
+func (g *generator) union(key, refinement string, members []unionMember) (*Schema, error) {
 	refs := make([]*Schema, 0, len(members))
 	for _, member := range members {
 		r, err := g.define(member.typ)
@@ -151,14 +166,26 @@ func (g *generator) union(key string, members []unionMember) (*Schema, error) {
 			return nil, err
 		}
 		def := g.defs[member.typ.Name()]
-		declared, ok := def.Properties[key]
-		if !ok {
-			return nil, fmt.Errorf("%s is registered under %q but has no such field to carry it", member.typ.Name(), key)
-		}
 		if member.value == "" {
 			return nil, fmt.Errorf("%s is registered with an empty %s", member.typ.Name(), key)
 		}
-		def.Properties[key] = &Schema{Description: declared.Description, Type: "string", Const: member.value}
+		description := fmt.Sprintf("The kind uir's registry stamps under %s so a polymorphic slot can be decoded.", key)
+		if declared, ok := def.Properties[key]; ok {
+			description = declared.Description
+		}
+		if def.Properties == nil {
+			def.Properties = map[string]*Schema{}
+		}
+		def.Properties[key] = &Schema{Description: description, Type: "string", Const: member.value}
+		if refinement != "" {
+			if _, declared := def.Properties[refinement]; declared {
+				return nil, fmt.Errorf("%s declares %s, which its registry stamps itself", member.typ.Name(), refinement)
+			}
+			def.Properties[refinement] = &Schema{
+				Description: fmt.Sprintf("The statement's type when it is refined past the kind under %s — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.", key),
+				Type:        "string",
+			}
+		}
 		refs = append(refs, r)
 	}
 	return &Schema{AnyOf: refs}, nil
@@ -325,13 +352,17 @@ func (g *generator) checkMarshaler(t reflect.Type) error {
 }
 
 // membersOf reads the concrete type and discriminator behind each member of a
-// registry — the same pair uir's own marshaler registers.
-func membersOf[T any](members []T, discriminator func(T) string) []unionMember {
+// registry — the kind uir's own marshaler registered it under.
+func membersOf[T any](members []T, registry *uir.Registry[T]) ([]unionMember, error) {
 	out := make([]unionMember, 0, len(members))
 	for i := range members {
-		out = append(out, unionMember{typ: elem(reflect.TypeOf(members[i])), value: discriminator(members[i])})
+		kind, err := registry.KindOf(members[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, unionMember{typ: elem(reflect.TypeOf(members[i])), value: kind})
 	}
-	return out
+	return out, nil
 }
 
 func ref(name string) *Schema {

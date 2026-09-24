@@ -85,14 +85,22 @@ func TestEveryReferenceResolves(t *testing.T) {
 // that can be unmarshaled but has no definition is a document nobody can validate.
 func TestEveryRegisteredTypeIsDescribed(t *testing.T) {
 	schema := load(t)
+	nodes, err := membersOf(uir.Nodes, uir.NodeMarshaler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements, err := membersOf(uir.Statements, uir.StatementMarshaler)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, union := range []struct {
 		name    string
 		key     string
 		members []unionMember
 	}{
-		{nodeUnion, nodeDiscriminator, membersOf(uir.Nodes, func(n uir.Node) string { return string(n.GetType()) })},
-		{statementUnion, statementDiscriminator, membersOf(uir.Statements, func(s uir.Statement) string { return string(s.GetStatementType()) })},
+		{nodeUnion, nodeDiscriminator, nodes},
+		{statementUnion, statementDiscriminator, statements},
 	} {
 		if got, want := len(branches(schema.Defs[union.name])), len(union.members); got != want {
 			t.Errorf("%s union has %d members, registry has %d", union.name, got, want)
@@ -128,6 +136,32 @@ func TestSchemaAcceptsMarshaledStatements(t *testing.T) {
 			encoded, err := uir.MarshalStatement(stmt)
 			if err != nil {
 				t.Fatalf("MarshalStatement: %v", err)
+			}
+			for _, problem := range check(decode(t, encoded), ref(name), schema.Defs, name) {
+				t.Error(problem)
+			}
+		})
+	}
+}
+
+// TestSchemaAcceptsRefinedStatements checks statements whose Type is refined past
+// their kind, which MarshalStatement moves under the registry's refinement field
+// while statement_type stays the kind the definition pins.
+func TestSchemaAcceptsRefinedStatements(t *testing.T) {
+	schema := load(t)
+	call := uir.NewMethodCall("Println", uir.Identifier{Package: "fmt"}).Build()
+	call.Type = uir.ASTStatementTypeCallPackage
+	body := uir.BlockStmt{}
+	body.Type = uir.ASTStatementTypeDoc
+
+	for name, stmt := range map[string]uir.Statement{"MethodCallStmt": call, "BlockStmt": body} {
+		t.Run(name, func(t *testing.T) {
+			encoded, err := uir.MarshalStatement(stmt)
+			if err != nil {
+				t.Fatalf("MarshalStatement: %v", err)
+			}
+			if !bytes.Contains(encoded, []byte(uir.StatementMarshaler.RefinementField())) {
+				t.Fatalf("%s was encoded without its refinement: %s", name, encoded)
 			}
 			for _, problem := range check(decode(t, encoded), ref(name), schema.Defs, name) {
 				t.Error(problem)
