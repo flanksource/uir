@@ -2,16 +2,18 @@
 
 import json
 from dataclasses import fields, is_dataclass
-from typing import Any
+from typing import Any, Optional, get_args
 from datetime import datetime
 from enum import Enum
 
 try:
     from .uir_types import *
     from .enums import *
+    from .statement_kinds import REGISTERED_KINDS, CROSS_HIERARCHY
 except ImportError:
     from uir_types import *
     from enums import *
+    from statement_kinds import REGISTERED_KINDS, CROSS_HIERARCHY
 
 
 def _pop_present(d: dict, moves: dict) -> dict:
@@ -54,6 +56,51 @@ _WIRE_SHAPES = {
 }
 
 
+def _registered_kind(cls) -> Optional[str]:
+    """The kind Go registers a statement dataclass under: its type field's default."""
+    for f in fields(cls):
+        if f.name == "type" and isinstance(f.default, ASTStatementType):
+            return f.default.value
+    return None
+
+
+# Refinements resolve against every kind Go registers (statement_kinds.py is
+# generated from its registry), not only the kinds these dataclasses model, so a
+# type that names a Go-only kind such as assignment:object is refused here as Go
+# would refuse it. A dataclass whose kind Go does not register could never decode.
+_UNREGISTERED = sorted(
+    kind
+    for kind in (_registered_kind(globals()[ref.__forward_arg__]) for ref in get_args(Statement))
+    if kind not in REGISTERED_KINDS
+)
+if _UNREGISTERED:
+    raise ImportError(f"statement kinds {_UNREGISTERED} are not registered in Go; regenerate statement_kinds.py")
+
+
+def _stamp_statement_type(d: dict, kind: str, carried: Optional[str]) -> dict:
+    """Stamp the registered kind under statement_type, and a Type refined past it
+    under statement_refinement, as Go's statement registry writes them."""
+    if carried and carried != kind:
+        _check_refinement(kind, carried)
+        d["statement_refinement"] = carried
+    d["statement_type"] = kind
+    return d
+
+
+def _check_refinement(kind: str, refined: str) -> None:
+    """Refuse a Type the Go decoder would not read back as a statement of kind."""
+    if refined in CROSS_HIERARCHY.get(kind, ()):
+        return
+    resolved = refined
+    while resolved and resolved not in REGISTERED_KINDS:
+        resolved = resolved.rpartition(":")[0]
+    if resolved != kind:
+        raise ValueError(
+            f"statement_refinement {refined!r} does not refine {kind!r}: "
+            f"it resolves to {resolved or 'no registered kind'!r}"
+        )
+
+
 class UIREncoder(json.JSONEncoder):
     """Custom JSON encoder for UIR types."""
 
@@ -65,9 +112,14 @@ class UIREncoder(json.JSONEncoder):
     def _encode(self, value):
         """Encode a value bottom-up, keeping each dataclass's type for _WIRE_SHAPES."""
         if is_dataclass(value) and not isinstance(value, type):
-            d = self._convert_dataclass({f.name: self._encode(getattr(value, f.name)) for f in fields(value)})
+            raw = {f.name: self._encode(getattr(value, f.name)) for f in fields(value)}
+            kind = _registered_kind(type(value))
+            carried = raw.pop("type") if kind else None
+            d = self._convert_dataclass(raw)
             shape = _WIRE_SHAPES.get(type(value).__name__)
-            return shape(d) if shape else d
+            if shape:
+                d = shape(d)
+            return _stamp_statement_type(d, kind, carried) if kind else d
         if isinstance(value, list):
             return [self._encode(item) for item in value]
         if isinstance(value, dict):
@@ -91,27 +143,8 @@ class UIREncoder(json.JSONEncoder):
             if isinstance(value, str) and value == "" and key not in ['name', 'id']:
                 continue
 
-            # Convert key name
-            json_key = self._to_camel_case(key)
-
-            # Map statement 'type' field to 'statement_type' for Go compatibility
-            if key == 'type' and isinstance(value, str) and self._is_statement_type(value):
-                json_key = 'statement_type'
-
-            d[json_key] = value
+            d[self._to_camel_case(key)] = value
         return d
-
-    # Statement type values that should be serialized as "statement_type" key
-    _STATEMENT_TYPE_PREFIXES = frozenset([
-        'call', 'decl', 'ref', 'control', 'assignment', 'other', 'doc', 'test',
-        'raw', 'foreign_key',
-    ])
-
-    @classmethod
-    def _is_statement_type(cls, value: str) -> bool:
-        """Check if a value is a statement type enum value."""
-        prefix = value.split(':')[0] if ':' in value else value
-        return prefix in cls._STATEMENT_TYPE_PREFIXES
 
     @staticmethod
     def _to_camel_case(snake_str: str) -> str:
