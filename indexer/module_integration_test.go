@@ -42,6 +42,51 @@ var _ = Describe("module indexing", func() {
 		var deltaCount int64
 		Expect(database.Model(&storage.SourceDelta{}).Where("snapshot_id = ?", snapshot.ID).Count(&deltaCount).Error).To(Succeed())
 		Expect(deltaCount).To(BeZero())
+		Expect(snapshot.WorktreeState).To(Equal(storage.WorktreeClean))
+		Expect(snapshot.Revision).To(HaveLen(40))
+
+		writeFile(filepath.Join(workspace, "main.go"), "package revisions\n\nfunc Run() { Run() }\n")
+		dirty, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		Expect(err).ToNot(HaveOccurred())
+		var dirtySnapshot storage.ModuleSnapshot
+		Expect(database.Where("id = ?", dirty[0].SnapshotID).First(&dirtySnapshot).Error).To(Succeed())
+		Expect(dirtySnapshot.WorktreeState).To(Equal(storage.WorktreeDirty))
+		Expect(dirtySnapshot.Revision).To(Equal(snapshot.Revision))
+	})
+
+	It("records a snapshot that indexes a Git-ignored Go file as dirty until the file is tracked", func(ctx SpecContext) {
+		database := openIndexerSQLite(ctx)
+		workspace := GinkgoT().TempDir()
+		Expect(os.MkdirAll(filepath.Join(workspace, "hack"), 0o755)).To(Succeed())
+		writeFile(filepath.Join(workspace, "go.mod"), "module example.org/ignored\n\ngo 1.26\n")
+		writeFile(filepath.Join(workspace, ".gitignore"), "hack/\n")
+		writeFile(filepath.Join(workspace, "main.go"), "package ignored\n\nfunc Run() {}\n")
+		writeFile(filepath.Join(workspace, "hack", "tool.go"), "package hack\n\nfunc Tool() {}\n")
+		commit := []string{"-C", workspace, "-c", "user.name=Example", "-c", "user.email=example@example.org", "commit", "-qm"}
+		for _, args := range [][]string{
+			{"-C", workspace, "init", "-q"},
+			{"-C", workspace, "add", ".gitignore", "go.mod", "main.go"},
+			append(commit, "initial"),
+		} {
+			Expect(exec.Command("git", args...).Run()).To(Succeed())
+		}
+		Expect(exec.Command("git", "-C", workspace, "status", "--porcelain").Output()).To(BeEmpty(), "Git reports no change for an ignored file")
+		engine, err := New(database)
+		Expect(err).ToNot(HaveOccurred())
+		indexedState := func() storage.WorktreeState {
+			GinkgoHelper()
+			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results[0].Files).To(Equal(2), "discovery indexes the ignored file")
+			var snapshot storage.ModuleSnapshot
+			Expect(database.Where("id = ?", results[0].SnapshotID).First(&snapshot).Error).To(Succeed())
+			return snapshot.WorktreeState
+		}
+		Expect(indexedState()).To(Equal(storage.WorktreeDirty))
+
+		Expect(exec.Command("git", "-C", workspace, "add", "-f", "hack/tool.go").Run()).To(Succeed())
+		Expect(exec.Command("git", append(commit, "track the tool")...).Run()).To(Succeed())
+		Expect(indexedState()).To(Equal(storage.WorktreeClean))
 	})
 
 	It("infers an enclosing go.mod when adding a package directory", func(ctx SpecContext) {
@@ -58,6 +103,10 @@ var _ = Describe("module indexing", func() {
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].RootKey).To(Equal("example.org/enclosing"))
 		Expect(result[0].Files).To(Equal(1))
+		var snapshot storage.ModuleSnapshot
+		Expect(database.Where("id = ?", result[0].SnapshotID).First(&snapshot).Error).To(Succeed())
+		Expect(snapshot.WorktreeState).To(Equal(storage.WorktreeUnknown), "a module outside Git has no known worktree state")
+		Expect(snapshot.Revision).To(BeEmpty())
 	})
 
 	It("rejects reindexing an unregistered module without creating a root", func(ctx SpecContext) {
@@ -125,11 +174,17 @@ var _ = Describe("module indexing", func() {
 		second, err := engine.IndexModules(ctx, ModuleOptions{Path: secondPath})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(second).To(HaveLen(1))
-		Expect(second[0].ParsedFiles).To(Equal(0))
-		Expect(second[0].ReusedFiles).To(Equal(1))
+		// service.go's bytes are shared, but its package lost obsolete.go, so the package input hash
+		// changed and the file gets a fresh document over the same source revision.
+		Expect(second[0].ParsedFiles).To(Equal(1))
+		Expect(second[0].ReusedFiles).To(Equal(0))
 		Expect(second[0].HeadVersion).To(Equal(int64(1)))
 		var root storage.ModuleRoot
 		Expect(database.Where("root_key = ?", "example.org/service").First(&root).Error).To(Succeed())
+		var serviceRevisions, serviceDocuments int64
+		Expect(database.Model(&storage.SourceRevision{}).Where("root_id = ? AND path_key = ?", root.ID, "service.go").Count(&serviceRevisions).Error).To(Succeed())
+		Expect(database.Model(&storage.Document{}).Where("root_id = ? AND path_key = ?", root.ID, "service.go").Count(&serviceDocuments).Error).To(Succeed())
+		Expect([]int64{serviceRevisions, serviceDocuments}).To(Equal([]int64{1, 2}))
 		var primary storage.ModulePrimary
 		Expect(database.Where("root_id = ?", root.ID).First(&primary).Error).To(Succeed())
 		var firstLocation storage.ModuleLocation
