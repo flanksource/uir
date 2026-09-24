@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/commons-db/dbtest"
 	"github.com/flanksource/uir/indexer"
+	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
 	uiweb "github.com/flanksource/uir/web"
 	. "github.com/onsi/ginkgo/v2"
@@ -18,6 +20,105 @@ import (
 )
 
 var _ = Describe("serve", func() {
+	It("lists files from every module checkout head without sending symbol payloads", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		workspace := GinkgoT().TempDir()
+		for _, fixture := range []struct{ directory, module, file string }{
+			{"service-a", "example.org/service", "first.go"},
+			{"service-b", "example.org/service", "second.go"},
+			{"worker", "example.org/worker", "worker.go"},
+		} {
+			path := filepath.Join(workspace, fixture.directory)
+			Expect(os.Mkdir(path, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(path, "go.mod"), []byte("module "+fixture.module+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(path, fixture.file), []byte("package sample\n\nfunc Run() {}\n"), 0o644)).To(Succeed())
+			_, err := addModules(ctx, database, path, false)
+			Expect(err).To(Succeed())
+		}
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/heads", nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var heads []query.ModuleHeadFiles
+		Expect(json.Unmarshal(response.Body.Bytes(), &heads)).To(Succeed())
+		Expect(heads).To(HaveLen(3))
+		filesByHead := make(map[string][]string, len(heads))
+		for _, head := range heads {
+			Expect(head.SnapshotID).ToNot(BeEmpty())
+			for _, source := range head.Sources {
+				Expect(source.RootKey).To(Equal(head.RootKey))
+				Expect(source.Location).To(Equal(head.Location))
+				Expect(source.SnapshotID).To(Equal(head.SnapshotID))
+				filesByHead[head.RootKey+"@"+head.Location] = append(filesByHead[head.RootKey+"@"+head.Location], source.Path)
+			}
+		}
+		canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
+		Expect(err).To(Succeed())
+		Expect(filesByHead).To(Equal(map[string][]string{
+			"example.org/service@" + filepath.Join(canonicalWorkspace, "service-a"): {"first.go"},
+			"example.org/service@" + filepath.Join(canonicalWorkspace, "service-b"): {"second.go"},
+			"example.org/worker@" + filepath.Join(canonicalWorkspace, "worker"):     {"worker.go"},
+		}))
+		Expect(response.Body.String()).ToNot(ContainSubstring(`"nodes"`))
+		spec := httptest.NewRecorder()
+		handler.ServeHTTP(spec, httptest.NewRequest(http.MethodGet, "/api/openapi.json", nil))
+		Expect(spec.Body.String()).To(ContainSubstring(`"/api/v1/modules/heads"`))
+	})
+	It("reports the running backend and active SQLite database without connection secrets", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		runtime := &commandRuntime{database: database, DSN: "sqlite://user:secret@unused/should-not-appear.db"}
+		root := newRootCommand(runtime)
+		root.Version = "v1.2.3"
+		handler, err := newServeHandler(root, runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/info", nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var info struct {
+			BackendVersion    string `json:"backend_version"`
+			DatabaseType      string `json:"database_type"`
+			DatabaseVersion   string `json:"database_version"`
+			DatabaseLocation  string `json:"database_location"`
+			DatabaseSizeBytes int64  `json:"database_size_bytes"`
+		}
+		Expect(json.Unmarshal(response.Body.Bytes(), &info)).To(Succeed())
+		Expect(info.BackendVersion).To(Equal("v1.2.3"))
+		Expect(info.DatabaseType).To(Equal("SQLite"))
+		Expect(info.DatabaseVersion).To(MatchRegexp(`^\d+\.\d+\.\d+`))
+		Expect(info.DatabaseLocation).To(HaveSuffix("command.db"))
+		Expect(info.DatabaseSizeBytes).To(BeNumerically(">", 0))
+		Expect(response.Body.String()).ToNot(ContainSubstring("secret"))
+		spec := httptest.NewRecorder()
+		handler.ServeHTTP(spec, httptest.NewRequest(http.MethodGet, "/api/openapi.json", nil))
+		Expect(spec.Body.String()).To(ContainSubstring(`"/api/v1/system/info"`))
+	})
+
+	It("reports the active PostgreSQL server, database, schema, and size", func(ctx SpecContext) {
+		database, err := storage.UirDB(ctx, storage.DBOptions{DSN: dbtest.ForGinkgo(dbtest.Options{Name: "uir_info"}).DSN(), Schema: "uir_info"})
+		Expect(err).To(Succeed())
+		DeferCleanup(func() {
+			connection, err := database.DB()
+			Expect(err).To(Succeed())
+			Expect(connection.Close()).To(Succeed())
+		})
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/info", nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var info systemInfo
+		Expect(json.Unmarshal(response.Body.Bytes(), &info)).To(Succeed())
+		Expect(info.DatabaseType).To(Equal("PostgreSQL"))
+		Expect(info.DatabaseVersion).ToNot(BeEmpty())
+		var databaseName string
+		Expect(database.Raw("SELECT current_database()").Scan(&databaseName).Error).To(Succeed())
+		Expect(info.DatabaseLocation).To(ContainSubstring(databaseName + " (schema uir_info)"))
+		Expect(info.DatabaseLocation).ToNot(ContainSubstring("/128"))
+		Expect(info.DatabaseSizeBytes).To(BeNumerically(">", 0))
+	})
 	It("exposes module-root browsing and query operations", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
 		workspace := GinkgoT().TempDir()
@@ -100,6 +201,21 @@ var _ = Describe("serve", func() {
 			Expect(results[0].RootKey).To(Equal("example.org/browser"))
 			Expect(results[0].Unchanged).To(Equal(operation == "reindex"))
 		}
+		tasks := httptest.NewRecorder()
+		handler.ServeHTTP(tasks, httptest.NewRequest(http.MethodGet, "/api/v1/tasks?kind=module-index", nil))
+		Expect(tasks.Code).To(Equal(http.StatusOK), tasks.Body.String())
+		var runs []struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+		}
+		Expect(json.Unmarshal(tasks.Body.Bytes(), &runs)).To(Succeed())
+		Expect(runs).To(ContainElement(And(HaveField("Name", ContainSubstring("Reindex "+workspace)), HaveField("Kind", "module-index"), HaveField("Status", "success"))))
+		detail := httptest.NewRecorder()
+		handler.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+runs[0].ID, nil))
+		Expect(detail.Code).To(Equal(http.StatusOK), detail.Body.String())
+		Expect(detail.Body.String()).To(ContainSubstring("root=example.org/browser"))
 	})
 
 	It("serves the browser and omits removed project routes", func(ctx SpecContext) {

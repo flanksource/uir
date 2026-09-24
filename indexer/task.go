@@ -18,7 +18,12 @@ func RunModulesTask(ctx context.Context, indexer *Indexer, options ModuleOptions
 	if path == "" {
 		path = "."
 	}
-	running := clicky.StartTask(fmt.Sprintf("Reindex %s", path), func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
+	action := "Index"
+	if options.ExistingOnly {
+		action = "Reindex"
+	}
+	group := clicky.StartGroup[[]ModuleResult](fmt.Sprintf("%s %s", action, path), clickytask.WithKind("module-index"), clickytask.WithLabels(map[string]string{"path": path}))
+	running := group.Add(fmt.Sprintf("%s Go modules under %s", action, path), func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
 		progress.Infof("discovering Go modules under %s", path)
 		results, err := indexer.IndexModules(taskContext, options)
 		if err != nil {
