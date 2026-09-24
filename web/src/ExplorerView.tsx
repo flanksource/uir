@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Select, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
-import { Tree } from "@flanksource/clicky-ui/data";
+import { ServerTimingBadge, Tree } from "@flanksource/clicky-ui/data";
 import { UiFolder, UiListTree } from "@flanksource/clicky-ui/icons";
 import { MonacoProvider } from "@flanksource/clicky-ui/monaco";
 import { readModuleSource, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleSource, type ModuleSourceContent } from "./api";
-import { moduleHeadTree, symbolTree, type HeadFileItem, type SymbolItem } from "./explorer-model";
+import { moduleHeadTree, scopedHeads, symbolTree, type HeadFileItem, type SymbolItem } from "./explorer-model";
 import { fileSelectionPatch } from "./explorer-navigation";
 import { FileTypeIcon, FolderTypeIcon } from "./file-icons";
 import { getMonacoWorker } from "./monaco-workers";
@@ -13,7 +13,7 @@ import type { Route } from "./route";
 import { SymbolDetails } from "./SymbolDetails";
 import { SymbolIcon } from "./symbol-icons";
 import { ErrorMessage, Field, Muted, TextInput } from "./ui";
-import { useLoad, type Load } from "./use-load";
+import { useLoad, type Load, type TimedLoad } from "./use-load";
 
 type OutlineItem = SymbolItem | { id: string; label: string; children: SymbolItem[]; source: ModuleSource };
 type EditorInstance = Parameters<OnMount>[0];
@@ -106,13 +106,13 @@ function OutlinePane({ items, selected, route, onRoute }: { items: OutlineItem[]
     empty={<div className="p-3 text-sm text-muted-foreground">No indexed symbols for this file.</div>} /></div>;
 }
 
-export function ExplorerView({ route, heads, browse, locations, onRoute }: { route: Route; heads: Load<ModuleHead[]>; browse: Load<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
+export function ExplorerView({ route, heads, browse, locations, onRoute }: { route: Route; heads: Load<ModuleHead[]>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
   const sources = browse.data?.sources ?? EMPTY_SOURCES;
   const nodes = browse.data?.nodes ?? EMPTY_NODES;
   const selectedNode = nodes.find((node) => node.id === route.node);
   const selectedSource = sources.find((source) => source.id === route.source);
-  const files = useMemo(() => moduleHeadTree(heads.data ?? EMPTY_HEADS), [heads.data]);
-  const selectedFile = selectedSource && findItem(files, JSON.stringify(["file", route.module, route.location, route.snapshot, selectedSource.path]));
+  const files = useMemo(() => moduleHeadTree(scopedHeads(heads.data ?? EMPTY_HEADS, route.module)), [heads.data, route.module]);
+  const selectedFile = selectedSource && findItem(files, JSON.stringify(["file", selectedSource.root_key, route.location, route.snapshot, selectedSource.path]));
   const items = useMemo<OutlineItem[]>(() => {
     if (!route.symbolSearch) return symbolTree(nodes.filter((node) => node.source_id === route.source), nodes);
     const bySource = new Map<string, ModuleNode[]>();
@@ -144,10 +144,11 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
 
   return <div className="flex h-full min-h-0 flex-col">
     <div className="flex shrink-0 items-end gap-3 border-b border-border px-3 py-2">
-      <Field label="Checkout"><Select value={route.location} onChange={(event) => {
+      {route.module && <Field label="Checkout"><Select value={route.location} onChange={(event) => {
         const next = locations.data?.find((item) => item.canonical_path === event.target.value);
         onRoute({ location: event.target.value, snapshot: next?.head_snapshot_id ?? "", source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 });
-      }} options={(locations.data ?? []).map((item) => ({ value: item.canonical_path, label: item.canonical_path }))} /></Field>
+      }} options={(locations.data ?? []).map((item) => ({ value: item.canonical_path, label: item.canonical_path }))} /></Field>}
+      <ServerTimingBadge metrics={browse.timing} />
     </div>
     {browse.loading && <div className="p-3"><Muted>Loading snapshot…</Muted></div>}
     {browse.error && <div className="p-3"><ErrorMessage error={browse.error} /></div>}

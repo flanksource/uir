@@ -1,3 +1,9 @@
+import type { ModuleRoot } from "./api";
+
+export const ALL_MODULES = "*";
+
+export type ScopeRoot = Pick<ModuleRoot, "root_key" | "location" | "snapshot_id">;
+
 export type Route = {
   view: "overview" | "explorer" | "query" | "tasks";
   module: string;
@@ -49,4 +55,17 @@ export function routeURL(route: Route): string {
 export function applyRoutePatch(current: Route, patch: Partial<Route>): Route {
   const moved = ("source" in patch || "node" in patch) && !("line" in patch);
   return { ...current, ...(moved ? { line: 0, column: 0 } : {}), ...patch };
+}
+
+// scopeValue names every module with a sentinel, since the scope picker treats "" as no selection.
+export function scopeValue(route: Pick<Route, "module">): string {
+  return route.module || ALL_MODULES;
+}
+
+// scopePatch widens to every module without disturbing the open selection, since it still belongs to
+// the scope; a root scope resets to that root's primary head because the selection may not.
+export function scopePatch(root: ScopeRoot | null): Partial<Route> {
+  if (!root) return { module: "" };
+  return { module: root.root_key, location: root.location, snapshot: root.snapshot_id,
+    source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 };
 }

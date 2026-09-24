@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import type { ServerTimingMetric } from "@flanksource/clicky-ui/data";
+import type { TimedResponse } from "./api";
 
 export type Load<T> = { data?: T; error?: string; loading: boolean };
+export type TimedLoad<T> = Load<T> & { timing?: ServerTimingMetric[] };
 
 export function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T> {
   const [result, setResult] = useState<Load<T> & { key: string }>({ key, loading: Boolean(load) });
@@ -19,4 +22,9 @@ export function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   return result.key === key ? result : { loading: Boolean(load) };
+}
+
+export function useTimedLoad<T>(load: (() => Promise<TimedResponse<T>>) | null, key: string): TimedLoad<T> {
+  const result = useLoad(load, key);
+  return { data: result.data?.data, timing: result.data?.timing, error: result.error, loading: result.loading };
 }

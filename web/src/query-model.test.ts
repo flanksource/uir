@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModuleNode, ModuleQueryRow } from "./api";
-import { groupRowsByFile, identityLabel, nodeIdentityKey, paletteExpression, parseIdentityKey, queryExamples, symbolSelector } from "./query-model";
+import { groupRowsByFile, identityLabel, nodeIdentityKey, paletteExpression, parseIdentityKey, queryExamples, queryScope, symbolSelector } from "./query-model";
 
 const pkg = "example.org/service/store";
 const root = "example.org/service";
@@ -51,23 +51,23 @@ describe("identity keys", () => {
 
 describe("symbolSelector", () => {
   it.each([
-    ["a method", key("method", "Store", "Save"), `package = "${pkg}" and type = "Store" and method = "Save"`],
-    ["a function extracted as a method without an owner", key("method", "", "Open"), `package = "${pkg}" and method = "Open" and kind = "func"`],
-    ["a function node", key("function", "", "Open"), `package = "${pkg}" and method = "Open" and kind = "func"`],
-    ["a method on a nested owner", key("method", "Store.cache", "Get"), `package = "${pkg}" and owner = "cache" and method = "Get"`],
-    ["a struct field", key("record_field", "Store", "", "db"), `package = "${pkg}" and type = "Store" and field = "db"`],
-    ["a field of a literal struct field", key("record_field", "Store", "", "options.Timeout"), `package = "${pkg}" and owner = "options" and field = "Timeout"`],
-    ["a type", key("class", "Store"), `package = "${pkg}" and type = "Store"`],
-    ["a nested type", key("class", "Store.cache"), `package = "${pkg}" and name = "cache" and kind = "type"`],
-    ["an interface", key("interface", "Saver"), `package = "${pkg}" and type = "Saver"`],
-    ["a package variable", key("package_variable", "", "", "DefaultTimeout"), `package = "${pkg}" and name = "DefaultTimeout"`],
-    ["a value with quotes", key("package_variable", "", "", 'say"hi'), `package = "${pkg}" and name = "say\\"hi"`],
+    ["a method", key("method", "Store", "Save"), `${pkg}.Store.Save`],
+    ["a function extracted as a method without an owner", key("method", "", "Open"), `${pkg}.Open`],
+    ["a function node", key("function", "", "Open"), `${pkg}.Open`],
+    ["a method on a nested owner", key("method", "Store.cache", "Get"), `${pkg}.Store.cache.Get`],
+    ["a struct field", key("record_field", "Store", "", "db"), `${pkg}.Store.db`],
+    ["a field of a literal struct field", key("record_field", "Store", "", "options.Timeout"), `${pkg}.Store.options.Timeout`],
+    ["a type", key("class", "Store"), `${pkg}.Store`],
+    ["a nested type", key("class", "Store.cache"), `${pkg}.Store.cache`],
+    ["an interface", key("interface", "Saver"), `${pkg}.Saver`],
+    ["a package variable", key("package_variable", "", "", "DefaultTimeout"), `${pkg}.DefaultTimeout`],
+    ["a package", key("package", "", "", "", "", pkg), pkg],
   ])("selects %s", (_, identity, expected) => {
     expect(symbolSelector(parseIdentityKey(identity))).toBe(expected);
   });
 
   it.each([
-    ["a package", key("package", "", "", "", "", pkg), /package identity names no symbol/],
+    ["a member with invalid punctuation", key("package_variable", "", "", 'say"hi'), /cannot be spelled/],
     ["an identity without a package", key("method", "Store", "Save", "", "", ""), /has no package/],
   ])("rejects %s", (_, identity, error) => {
     expect(() => symbolSelector(parseIdentityKey(identity))).toThrow(error);
@@ -79,46 +79,63 @@ describe("queryExamples", () => {
   const unexported = node("method", key("method", "Store", "flush"));
   const save = node("method", key("method", "Store", "Save"));
   const saver = node("interface", key("interface", "Saver"));
-  const method = `package = "${pkg}" and type = "Store" and method = "Save"`;
+  const method = `${pkg}.Store.Save`;
 
-  it("builds one example per operation from an exported method and an interface in the snapshot", () => {
+  it("builds compact examples from an exported method and an interface in the snapshot", () => {
     expect(queryExamples(root, [helper, unexported, save, saver]).map((example) => [example.id, example.expression])).toEqual([
-      ["nodes", `nodes where root = "${root}" and node_type = "method"`],
-      ["unresolved", `unresolved calls where root = "${root}"`],
-      ["references", `references of node where ${method}`],
-      ["definitions", `definitions of node where ${method}`],
-      ["implementations", `implementations of node where package = "${pkg}" and type = "Saver"`],
-      ["callers", `callers of node where ${method}`],
-      ["dispatch", `callers of node where ${method} including dispatch`],
-      ["callees", `callees of node where ${method}`],
-      ["search", `search "Sav" where root = "${root}"`],
-      ["member-search", `search "Store.Sa" where root = "${root}"`],
+      ["resolve", method],
+      ["incoming", `${method} <`],
+      ["definitions", `${method} =`],
+      ["outgoing", `${method} >`],
+      ["transitive", `${method} <<3`],
+      ["methods", `${pkg}.Store :methods`],
+      ["implementations", `${pkg}.Saver :impl`],
     ]);
   });
 
-  it("uses the method's owner type for implementations when the snapshot declares no interface", () => {
-    expect(queryExamples(root, [save]).find((example) => example.id === "implementations")?.expression)
-      .toBe(`implementations of node where package = "${pkg}" and type = "Store"`);
+  it("omits implementers when the snapshot declares no interface", () => {
+    expect(queryExamples(root, [save]).find((example) => example.id === "implementations")).toBeUndefined();
   });
 
   it("falls back to an unexported method only when no exported method exists", () => {
-    expect(queryExamples(root, [unexported]).find((example) => example.id === "references")?.expression)
-      .toBe(`references of node where package = "${pkg}" and type = "Store" and method = "flush"`);
+    expect(queryExamples(root, [unexported]).find((example) => example.id === "incoming")?.expression)
+      .toBe(`${pkg}.Store.flush <`);
   });
 
-  it("keeps only the root-scoped examples when the snapshot has no method", () => {
-    expect(queryExamples(root, [helper, saver]).map((example) => example.id)).toEqual(["nodes", "unresolved"]);
+  it("omits examples when no owner-qualified method can be selected", () => {
+    expect(queryExamples(root, [helper, saver])).toEqual([]);
+  });
+
+  it("has no fabricated examples when the scope has no indexed methods", () => {
+    expect(queryExamples("", [])).toEqual([]);
+  });
+
+  it("uses the request scope rather than embedding a root predicate", () => {
+    const expressions = Object.fromEntries(queryExamples("", [save, saver]).map((example) => [example.id, example.expression]));
+    expect(expressions).toMatchObject({
+      incoming: `${method} <`,
+      implementations: `${pkg}.Saver :impl`,
+    });
+  });
+});
+
+describe("queryScope", () => {
+  it.each([
+    ["every module for an empty module", { module: "", snapshot: "" }, { root: "", snapshot: "" }],
+    ["nothing while a chosen module has no snapshot", { module: root, snapshot: "" }, null],
+    ["the chosen module snapshot", { module: root, snapshot: "snapshot-1" }, { root, snapshot: "snapshot-1" }],
+  ])("queries %s", (_, route, expected) => {
+    expect(queryScope(route)).toEqual(expected);
   });
 });
 
 describe("paletteExpression", () => {
   it.each([
-    [">nodes where method = \"Run\"", "nodes where method = \"Run\""],
-    [">  unresolved calls ", "unresolved calls"],
-    ["references of node where type = \"Store\"", "references of node where type = \"Store\""],
-    ["callers of node where method = \"Run\" including dispatch", "callers of node where method = \"Run\" including dispatch"],
-    ["search \"Store.Sa\"", "search \"Store.Sa\""],
-    ["  search Sav", "search Sav"],
+    [">sub.Thing.Do <", "sub.Thing.Do <"],
+    [">  main.* >> sub.Thing.Do ", "main.* >> sub.Thing.Do"],
+    ["sub.Thing.Do <", "sub.Thing.Do <"],
+    ["example.org/service/store.Store.Save =", "example.org/service/store.Store.Save ="],
+    ["main.* >> sub.Thing.Do", "main.* >> sub.Thing.Do"],
   ])("runs %s as %s", (input, expression) => {
     expect(paletteExpression(input)).toBe(expression);
   });

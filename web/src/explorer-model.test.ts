@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ModuleHead, ModuleNode, ModuleSource } from "./api";
-import { fileTree, moduleHeadTree, symbolTree } from "./explorer-model";
+import { fileTree, moduleHeadTree, scopedHeads, symbolTree } from "./explorer-model";
 
 function source(id: string, path: string): ModuleSource {
   return { id, path, root_key: "example.org/service", location: "/checkout/service", snapshot_id: "snapshot-1",
@@ -39,6 +39,18 @@ it("groups every checkout head under its module and keeps reused source IDs dist
   expect(first).toMatchObject({ kind: "file", label: "run.go", head: heads[0] });
   expect(second).toMatchObject({ kind: "file", label: "run.go", head: heads[1] });
   expect(first.id).not.toBe(second.id);
+});
+
+it.each([
+  ["every head for the every-module scope", "", ["head-a", "head-b", "head-c"]],
+  ["only the scoped root's heads for a module scope", "example.org/worker", ["head-c"]],
+])("keeps %s", (_, scope, expected) => {
+  const heads: ModuleHead[] = [
+    { root_key: "example.org/service", name: "service", location: "/work/service-a", snapshot_id: "head-a", sources: [] },
+    { root_key: "example.org/service", name: "service", location: "/work/service-b", snapshot_id: "head-b", sources: [] },
+    { root_key: "example.org/worker", name: "worker", location: "/work/worker", snapshot_id: "head-c", sources: [] },
+  ];
+  expect(scopedHeads(heads, scope).map((head) => head.snapshot_id)).toEqual(expected);
 });
 
 it("rejects source metadata from a different checkout head", () => {
