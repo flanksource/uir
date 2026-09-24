@@ -168,6 +168,7 @@ var _ = Describe("serve", func() {
 		handler.ServeHTTP(browsed, httptest.NewRequest(http.MethodGet,
 			"/api/v1/modules/browse?snapshot="+snapshotPage.Data[0].ID.String(), nil))
 		Expect(browsed.Code).To(Equal(http.StatusOK), browsed.Body.String())
+		Expect(browsed.Header().Get("Server-Timing")).To(And(ContainSubstring("total;dur="), ContainSubstring("command;dur="), ContainSubstring("format;dur=")))
 		Expect(browsed.Body.String()).To(ContainSubstring("main.go"))
 		Expect(browsed.Body.String()).To(ContainSubstring("Run"))
 		content := httptest.NewRecorder()
@@ -177,16 +178,66 @@ var _ = Describe("serve", func() {
 		Expect(content.Body.String()).To(ContainSubstring("func Run()"))
 
 		queried := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/query", strings.NewReader(`{"args":["nodes where method = \"Run\""],"root":"example.org/browser"}`))
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/query", strings.NewReader(`{"args":["browser.Run ="],"root":"example.org/browser"}`))
 		request.Header.Set("Content-Type", "application/json")
 		handler.ServeHTTP(queried, request)
 		Expect(queried.Code).To(Equal(http.StatusOK), queried.Body.String())
+		Expect(queried.Header().Get("Server-Timing")).To(And(ContainSubstring("total;dur="), ContainSubstring("command;dur="), ContainSubstring("format;dur=")))
 		var queryResult moduleQueryResult
 		Expect(json.Unmarshal(queried.Body.Bytes(), &queryResult)).To(Succeed())
-		Expect(queryResult.Operation).To(Equal(query.OperationNodes))
+		Expect(queryResult.Operation).To(Equal(query.OperationDefinition))
 		Expect(queryResult.Total).To(Equal(1))
 		Expect(queryResult.Matches).To(HaveLen(1))
 		Expect(queryResult.Matches[0].Symbol).To(ContainSubstring("Run"))
+	})
+
+	It("queries every indexed module root when neither root nor snapshot is sent", func(ctx SpecContext) {
+		const (
+			libraryRoot  = "example.org/greeter"
+			consumerRoot = "example.org/consumer"
+			function     = "Greet"
+		)
+		database := openCommandDatabase(ctx)
+		workspace := GinkgoT().TempDir()
+		for _, fixture := range []struct{ directory, goMod, file, source string }{
+			{"greeter", "module " + libraryRoot + "\n\ngo 1.26\n", "greeter.go",
+				"package greeter\n\nfunc " + function + "() {}\n\nfunc Twice() { " + function + "(); " + function + "() }\n"},
+			{"consumer", "module " + consumerRoot + "\n\ngo 1.26\n\nrequire " + libraryRoot + " v0.0.0\n\nreplace " + libraryRoot + " => ../greeter\n", "main.go",
+				"package consumer\n\nimport \"" + libraryRoot + "\"\n\nfunc Run() { greeter." + function + "() }\n"},
+		} {
+			path := filepath.Join(workspace, fixture.directory)
+			Expect(os.Mkdir(path, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(path, "go.mod"), []byte(fixture.goMod), 0o644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(path, fixture.file), []byte(fixture.source), 0o644)).To(Succeed())
+			_, err := addModules(ctx, database, path, false)
+			Expect(err).To(Succeed())
+		}
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		matchedRoots := func(body map[string]any) []string {
+			GinkgoHelper()
+			encoded, err := json.Marshal(body)
+			Expect(err).To(Succeed())
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/query", strings.NewReader(string(encoded)))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+			var result moduleQueryResult
+			Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
+			Expect(result.Operation).To(Equal(query.OperationIncoming))
+			roots := make([]string, 0, len(result.Matches))
+			for _, match := range result.Matches {
+				roots = append(roots, match.Root)
+			}
+			return roots
+		}
+		expression := libraryRoot + `.` + function + ` <`
+
+		Expect(matchedRoots(map[string]any{"args": []string{expression}})).To(ConsistOf(libraryRoot, libraryRoot, consumerRoot))
+		Expect(matchedRoots(map[string]any{"args": []string{expression + ` -pkg ` + libraryRoot}})).To(ConsistOf(consumerRoot))
+		Expect(matchedRoots(map[string]any{"args": []string{expression}, "root": consumerRoot})).To(ConsistOf(consumerRoot))
 	})
 
 	It("serves the query envelope with snake_case row fields for references and search", func(ctx SpecContext) {
@@ -211,8 +262,8 @@ var _ = Describe("serve", func() {
 			return envelope
 		}
 
-		references := post(`references of node where type = "Store" and method = "Save"`)
-		Expect(references).To(HaveKeyWithValue("operation", "references"))
+		references := post(`store.Store.Save <`)
+		Expect(references).To(HaveKeyWithValue("operation", "incoming"))
 		Expect(references).To(HaveKeyWithValue("total", 1.0))
 		Expect(references).To(HaveKey("stages"))
 		reference := references["matches"].([]any)[0].(map[string]any)
@@ -237,10 +288,37 @@ var _ = Describe("serve", func() {
 			HaveKeyWithValue("package_path", referencesRoot+"/broken"), HaveKeyWithValue("coverage", "partial"),
 		)))
 
-		search := post(`search "Store.Sa"`)
-		Expect(search).To(HaveKeyWithValue("operation", "search"))
+		search := post(`store.Store.Save`)
+		Expect(search).To(HaveKeyWithValue("operation", "resolve"))
 		Expect(search["matches"]).To(ConsistOf(And(HaveKeyWithValue("kind", "symbol"), HaveKeyWithValue("path", "store/store.go"))))
 		Expect(search).To(HaveKeyWithValue("declarations", BeEmpty()))
+		path := post(`app.Run >> store.Store.Save`)
+		Expect(path).To(HaveKeyWithValue("operation", "path"))
+		witness := path["path"].(map[string]any)
+		Expect(witness["symbols"]).To(HaveLen(2))
+		Expect(witness["calls"]).To(HaveLen(1))
+	})
+
+	It("suggests active qualified Go symbols for a partial expression", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		_, err := addModules(ctx, database, writeReferencesModule(), false)
+		Expect(err).ToNot(HaveOccurred())
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/suggest?prefix=store.Store.S&root="+referencesRoot, nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var symbols []query.ModuleSymbol
+		Expect(json.Unmarshal(response.Body.Bytes(), &symbols)).To(Succeed())
+		Expect(symbols).To(HaveLen(1))
+		Expect(symbols[0].QueryName).To(Equal(referencesRoot + "/store.Store.Save"))
+		response = httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/suggest-selectors?prefix=pkg:"+referencesRoot+":st&root="+referencesRoot, nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var selectors []string
+		Expect(json.Unmarshal(response.Body.Bytes(), &selectors)).To(Succeed())
+		Expect(selectors).To(Equal([]string{"pkg:" + referencesRoot + ":store"}))
 	})
 
 	It("adds and reindexes module roots through structured API operations", func(ctx SpecContext) {

@@ -44,9 +44,9 @@ var _ = Describe("root-level module commands", func() {
 		workspace := writeReferencesModule()
 		indexed, err := addModules(ctx, database, workspace, false)
 		Expect(err).ToNot(HaveOccurred())
-		result, err := queryModules(ctx, database, moduleQueryOptions{Expression: `references of node where type = "Store" and method = "Save"`, RootKey: referencesRoot})
+		result, err := queryModules(ctx, database, moduleQueryOptions{Expression: `store.Store.Save <`, RootKey: referencesRoot})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(result.Operation).To(Equal(query.OperationReferences))
+		Expect(result.Operation).To(Equal(query.OperationIncoming))
 		Expect(result.Total).To(Equal(1))
 		Expect(result.Matches).To(HaveLen(1))
 		match := result.Matches[0]
@@ -77,9 +77,9 @@ var _ = Describe("root-level module commands", func() {
 		database := openCommandDatabase(ctx)
 		_, err := addModules(ctx, database, writeReferencesModule(), false)
 		Expect(err).ToNot(HaveOccurred())
-		result, err := queryModules(ctx, database, moduleQueryOptions{Expression: `search "Store.Sa"`, RootKey: referencesRoot})
+		result, err := queryModules(ctx, database, moduleQueryOptions{Expression: `store.Store.Save`, RootKey: referencesRoot})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(result.Operation).To(Equal(query.OperationSearch))
+		Expect(result.Operation).To(Equal(query.OperationResolve))
 		Expect(result.Total).To(Equal(1))
 		Expect(result.Matches).To(ConsistOf(And(
 			HaveField("Kind", "symbol"), HaveField("Path", "store/store.go"), HaveField("Role", "definition"), HaveField("Source", "store/store.go:5:14"),

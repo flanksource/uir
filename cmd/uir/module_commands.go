@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
@@ -50,6 +51,7 @@ type moduleQueryRow struct {
 	Source       string `json:"source"`
 	SnapshotID   string `json:"snapshot_id"`
 	Path         string `json:"path,omitempty"`
+	PackagePath  string `json:"package_path,omitempty"`
 	Line         *int   `json:"line,omitempty"`
 	Column       *int   `json:"column,omitempty"`
 	EndLine      *int   `json:"end_line,omitempty"`
@@ -60,6 +62,12 @@ type moduleQueryRow struct {
 	EnclosingKey string `json:"enclosing_key,omitempty"`
 	Coverage     string `json:"coverage,omitempty"`
 	Dispatch     bool   `json:"dispatch,omitempty"`
+	Depth        int    `json:"depth,omitempty"`
+}
+
+type moduleCallPath struct {
+	Symbols []query.ModuleSymbol `json:"symbols"`
+	Calls   []moduleQueryRow     `json:"calls"`
 }
 
 // moduleQueryResult is the query envelope. It is clicky.Paged, so JSON and YAML responses carry every
@@ -72,6 +80,7 @@ type moduleQueryResult struct {
 	Symbols      []query.ModuleSymbol    `json:"symbols"`
 	Coverage     []query.ModuleCoverage  `json:"coverage"`
 	Stages       []query.ResolutionStage `json:"stages"`
+	Path         *moduleCallPath         `json:"path,omitempty"`
 	limit        int
 }
 
@@ -79,7 +88,16 @@ func (result moduleQueryResult) PageMetadata() clicky.PageInfo {
 	return clicky.PageInfo{Limit: result.limit, Total: int64(result.Total)}
 }
 
-func (result moduleQueryResult) PageRows() any { return result.Matches }
+func (result moduleQueryResult) PageRows() any {
+	if result.Path == nil {
+		return result.Matches
+	}
+	names := make([]string, 0, len(result.Path.Symbols))
+	for _, symbol := range result.Path.Symbols {
+		names = append(names, symbol.QueryName)
+	}
+	return []map[string]any{{"path": strings.Join(names, " -> "), "hops": len(result.Path.Calls)}}
+}
 
 type moduleGetOptions struct {
 	Root string `args:"true" required:"true"`
@@ -116,6 +134,14 @@ type moduleQueryOptions struct {
 	Location   string `flag:"location" help:"Registered checkout path"`
 	SnapshotID string `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
 	Limit      int    `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
+}
+
+type moduleSuggestOptions struct {
+	Prefix     string `flag:"prefix" help:"Partial Go symbol spelling" required:"true"`
+	RootKey    string `flag:"root" help:"Module path to query"`
+	Location   string `flag:"location" help:"Registered checkout path"`
+	SnapshotID string `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
+	Limit      int    `flag:"limit" help:"Maximum suggestions from 1 through 100" default:"20"`
 }
 
 func (moduleQueryRow) Columns() []api.ColumnDef {
@@ -201,9 +227,41 @@ func registerModuleCommands(root *cobra.Command) {
 		return queryModules(ctx, database, options)
 	})
 	queryCommand.Use = "query <expression>"
-	queryCommand.Short = "Run a PEG query against indexed modules"
+	queryCommand.Short = "Run a compact symbol query against indexed modules"
 	queryCommand.Args = cobra.ExactArgs(1)
 	setModuleRoute(queryCommand, "modules/query")
+	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]query.ModuleSymbol, error) {
+		database, err := databaseFor(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pipeline, err := query.NewPipeline(database)
+		if err != nil {
+			return nil, err
+		}
+		return pipeline.SuggestSymbols(ctx, options.Prefix, query.ModuleScopeOptions{
+			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
+		})
+	})
+	suggest.Short = "Complete a Go symbol name from indexed snapshots"
+	setModuleRoute(suggest, "modules/suggest")
+	suggest.Annotations["clicky/operation-method"] = http.MethodGet
+	selectors := clicky.AddNamedCommandWithContext("suggest-selectors", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]string, error) {
+		database, err := databaseFor(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pipeline, err := query.NewPipeline(database)
+		if err != nil {
+			return nil, err
+		}
+		return pipeline.SuggestSelectors(ctx, options.Prefix, query.ModuleScopeOptions{
+			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
+		})
+	})
+	selectors.Short = "Complete typed selectors from indexed snapshots"
+	setModuleRoute(selectors, "modules/suggest-selectors")
+	selectors.Annotations["clicky/operation-method"] = http.MethodGet
 	locations := clicky.AddNamedCommandWithContext("locations", root, moduleLocationOptions{}, func(ctx context.Context, options moduleLocationOptions) ([]storage.ModuleLocationView, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
@@ -263,10 +321,14 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 	if symbols == nil {
 		symbols = []query.ModuleSymbol{}
 	}
+	var path *moduleCallPath
+	if result.Path != nil {
+		path = &moduleCallPath{Symbols: result.Path.Symbols, Calls: moduleQueryRows(result.Path.Calls)}
+	}
 	return moduleQueryResult{
 		Operation: result.Operation, Total: result.Total, Matches: moduleQueryRows(result.Matches),
 		Declarations: moduleQueryRows(result.Declarations), Symbols: symbols, Coverage: result.Coverage,
-		Stages: result.Stages, limit: options.Limit,
+		Stages: result.Stages, Path: path, limit: options.Limit,
 	}, nil
 }
 
@@ -284,6 +346,7 @@ func moduleQueryRows(matches []query.ModuleMatch) []moduleQueryRow {
 			Kind: match.Kind, Root: match.RootKey, Symbol: match.Identifier.SymbolKey(),
 			Location: match.Location, Source: source, SnapshotID: match.SnapshotID,
 			Path: match.Path, Line: match.Line, Column: match.Column, EndLine: match.EndLine, EndColumn: match.EndColumn,
+			PackagePath: match.PackagePath, Depth: match.Depth,
 			Role: match.Role, SymbolID: match.SymbolID, EnclosingID: match.EnclosingID, EnclosingKey: match.EnclosingKey,
 			Coverage: match.Coverage, Dispatch: match.Dispatch,
 		})
