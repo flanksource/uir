@@ -1,5 +1,27 @@
-import { expect, it } from "vitest";
-import { applyRoutePatch, readRoute, routeURL } from "./route";
+import { describe, expect, it } from "vitest";
+import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue } from "./route";
+
+const root = { root_key: "example.org/service", location: "/checkout/service", snapshot_id: "head-1" };
+const selectionReset = { source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 };
+
+describe("scope", () => {
+  it.each([
+    ["every module for an empty module", "", ALL_MODULES],
+    ["the module root key for a chosen module", root.root_key, root.root_key],
+  ])("selects %s", (_, module, expected) => {
+    expect(scopeValue({ module })).toBe(expected);
+  });
+
+  it("scopes to the root's primary checkout head and resets the selection", () => {
+    expect(scopePatch(root)).toEqual({ module: root.root_key, location: root.location, snapshot: root.snapshot_id, ...selectionReset });
+  });
+
+  it("keeps the view, expression and open selection when the scope widens to every module", () => {
+    const current = readRoute({ pathname: "/query", search: `?module=${root.root_key}&location=${root.location}&snapshot=${root.snapshot_id}&source=src-1&expression=nodes` });
+    expect(scopePatch(null)).toEqual({ module: "" });
+    expect(applyRoutePatch(current, scopePatch(null))).toMatchObject({ view: "query", expression: "nodes", module: "", location: root.location, snapshot: root.snapshot_id, source: "src-1" });
+  });
+});
 
 it("opens the task manager at its own route", () => {
   const route = readRoute({ pathname: "/tasks", search: "?module=example.org%2Fservice" });

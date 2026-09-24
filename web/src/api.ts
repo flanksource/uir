@@ -1,3 +1,7 @@
+import { parseServerTiming, type ServerTimingMetric } from "@flanksource/clicky-ui/data";
+
+export type TimedResponse<T> = { data: T; timing: ServerTimingMetric[] };
+
 export type ModuleRoot = {
   root_key: string;
   name: string;
@@ -80,6 +84,7 @@ export type ModuleQueryRow = {
   source: string;
   snapshot_id: string;
   path?: string;
+  package_path?: string;
   line?: number;
   column?: number;
   end_line?: number;
@@ -90,6 +95,7 @@ export type ModuleQueryRow = {
   enclosing_key?: string;
   coverage?: string;
   dispatch?: boolean;
+  depth?: number;
 };
 export type ModuleQuerySymbol = {
   id: string;
@@ -99,6 +105,7 @@ export type ModuleQuerySymbol = {
   owner_id?: string;
   owner?: string;
   name: string;
+  query_name: string;
   visibility: string;
   parameter_types: unknown;
 };
@@ -111,6 +118,7 @@ export type ModuleQueryResult = {
   symbols: ModuleQuerySymbol[];
   coverage: ModuleQueryCoverage[];
   stages: { name: string; value: string }[];
+  path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
 };
 export type ModuleIndexResult = {
   root_key: string;
@@ -131,10 +139,21 @@ export type SystemInfo = {
   database_size_bytes: number;
 };
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function requestResponse(path: string, options?: RequestInit): Promise<Response> {
   const response = await fetch(path, { headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) }, ...options });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-  return response.json() as Promise<T>;
+  return response;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  return (await requestResponse(path, options)).json() as Promise<T>;
+}
+
+async function timedRequest<T>(path: string, options?: RequestInit): Promise<TimedResponse<T>> {
+  const response = await requestResponse(path, options);
+  const header = response.headers.get("Server-Timing");
+  if (!header) throw new Error(`Server-Timing header missing from ${path}`);
+  return { data: await response.json() as T, timing: parseServerTiming(header) };
 }
 
 function moduleURL(operation: string, params?: Record<string, string>): string {
@@ -162,18 +181,26 @@ export function listModuleSnapshots(root: string, location: string, offset: numb
   return request(moduleURL("snapshots", { root, location, offset: String(offset), limit: "100" }));
 }
 
-export function browseModule(snapshot: string): Promise<ModuleBrowse> {
-  return request(moduleURL("browse", { snapshot }));
+export function browseModule(snapshot: string): Promise<TimedResponse<ModuleBrowse>> {
+  return timedRequest(moduleURL("browse", { snapshot }));
 }
 
 export function readModuleSource(snapshot: string, path: string): Promise<ModuleSourceContent> {
   return request(moduleURL("content", { snapshot, path }));
 }
 
-export async function runModuleQuery(expression: string, root: string, snapshot: string): Promise<ModuleQueryResult> {
-  const result = await request<unknown>(moduleURL("query"), { method: "POST", body: JSON.stringify({ args: [expression], root, snapshot }) });
-  if (!isQueryResult(result)) throw new Error(`Query response is not a result envelope: ${JSON.stringify(result).slice(0, 200)}`);
-  return result;
+export async function runModuleQuery(expression: string, root: string, snapshot: string): Promise<TimedResponse<ModuleQueryResult>> {
+  const result = await timedRequest<unknown>(moduleURL("query"), { method: "POST", body: JSON.stringify({ args: [expression], root, snapshot }) });
+  if (!isQueryResult(result.data)) throw new Error(`Query response is not a result envelope: ${JSON.stringify(result.data).slice(0, 200)}`);
+  return { data: result.data, timing: result.timing };
+}
+
+export function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
+  return request(moduleURL("suggest", { prefix, root, snapshot }), { signal });
+}
+
+export function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<string[]> {
+  return request(moduleURL("suggest-selectors", { prefix, root, snapshot }), { signal });
 }
 
 function isQueryResult(value: unknown): value is ModuleQueryResult {

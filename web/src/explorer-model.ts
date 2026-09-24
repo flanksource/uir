@@ -4,6 +4,11 @@ export type FileItem = { id: string; label: string; path: string; children: File
 export type SymbolItem = { id: string; label: string; children: SymbolItem[]; node: ModuleNode };
 export type HeadFileItem = { id: string; label: string; path: string; kind: "module" | "checkout" | "folder" | "file"; children: HeadFileItem[]; head?: ModuleHead; source?: ModuleSource };
 
+// scopedHeads applies the module scope as a filter: an empty scope keeps every head.
+export function scopedHeads(heads: ModuleHead[], scope: string): ModuleHead[] {
+  return scope ? heads.filter((head) => head.root_key === scope) : heads;
+}
+
 export function moduleHeadTree(heads: ModuleHead[]): HeadFileItem[] {
   const modules = new Map<string, { name: string; heads: ModuleHead[] }>();
   for (const head of heads) {

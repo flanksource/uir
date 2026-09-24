@@ -15,6 +15,7 @@ it("only opens a file when an Explorer tree row is selected", () => {
   const file = folder.children[0];
 
   expect([fileSelectionPatch(module), fileSelectionPatch(checkout), fileSelectionPatch(folder)]).toEqual([undefined, undefined, undefined]);
-  expect(fileSelectionPatch(file)).toEqual({ module: head.root_key, location: head.location, snapshot: head.snapshot_id,
+  expect(fileSelectionPatch(file)).toEqual({ location: head.location, snapshot: head.snapshot_id,
     source: source.id, node: "", fileSearch: "", symbolSearch: "", offset: 0 });
+  expect(fileSelectionPatch(file)).not.toHaveProperty("module");
 });

@@ -9,18 +9,20 @@ import { CodeBlock, Detail, DetailGrid, ErrorMessage, Muted } from "./ui";
 import { useLoad } from "./use-load";
 
 type ReferenceRow = { row: ModuleQueryRow; sourceId: string; enclosing: string };
-type References = { result: ModuleQueryResult; candidates: { row: ModuleQueryRow; symbolId: string }[]; files: { path: string; rows: ReferenceRow[] }[] };
+type References = { result: ModuleQueryResult; candidates: { row: ModuleQueryRow; queryName: string }[]; files: { path: string; rows: ReferenceRow[] }[] };
 type OnRoute = (patch: Partial<Route>, replace?: boolean) => void;
 
 // loadReferences runs the query and resolves every occurrence to a source of the explorer snapshot,
 // so a row that cannot be opened fails the tab instead of failing on click.
 async function loadReferences(expression: string, route: Route, sources: ModuleSource[]): Promise<References> {
-  const result = await runModuleQuery(expression, route.module, route.snapshot);
+  const { data: result } = await runModuleQuery(expression, route.module, route.snapshot);
   const { candidates, files } = groupRowsByFile(result.matches);
   const sourceIDs = new Map(sources.map((source) => [source.path, source.id]));
   return { result, candidates: candidates.map((row) => {
     if (!row.symbol_id) throw new Error(`Candidate ${row.symbol} has no symbol_id to select`);
-    return { row, symbolId: row.symbol_id };
+    const symbol = result.symbols.find((candidate) => candidate.id === row.symbol_id);
+    if (!symbol?.query_name) throw new Error(`Candidate ${row.symbol_id} has no compact query spelling`);
+    return { row, queryName: symbol.query_name };
   }), files: files.map((file) => ({ path: file.path, rows: file.rows.map((row) => {
     if (row.snapshot_id !== route.snapshot) throw new Error(`Reference in ${row.path} is from snapshot ${row.snapshot_id}, not ${route.snapshot}`);
     const sourceId = sourceIDs.get(file.path);
@@ -29,17 +31,17 @@ async function loadReferences(expression: string, route: Route, sources: ModuleS
   }) })) };
 }
 
-function useReferences(node: ModuleNode, route: Route, sources: ModuleSource[], symbolId: string) {
+function useReferences(node: ModuleNode, route: Route, sources: ModuleSource[], queryName: string) {
   const selector = useMemo<{ expression?: string; error?: string }>(() => {
-    if (symbolId) return { expression: referencesExpression(`symbol_id = ${JSON.stringify(symbolId)}`) };
+    if (queryName) return { expression: referencesExpression(queryName) };
     try { return { expression: referencesExpression(symbolSelector(parseIdentityKey(nodeIdentityKey(node)))) }; } catch (error) { return { error: `Cannot select ${node.symbol}: ${String(error)}` }; }
-  }, [node, symbolId]);
+  }, [node, queryName]);
   const expression = selector.expression;
   const load = useLoad<References>(expression ? () => loadReferences(expression, route, sources) : null, `references:${route.module}:${route.snapshot}:${expression}`);
   return { expression, loading: load.loading, error: selector.error ?? load.error, data: load.data };
 }
 
-function ReferencesPanel({ references, onRoute, onCandidate }: { references: ReturnType<typeof useReferences>; onRoute: OnRoute; onCandidate: (symbolId: string) => void }) {
+function ReferencesPanel({ references, onRoute, onCandidate }: { references: ReturnType<typeof useReferences>; onRoute: OnRoute; onCandidate: (queryName: string) => void }) {
   const { expression, data } = references;
   return <div className="flex flex-col gap-2 text-sm">
     {expression && <div className="flex items-start gap-2"><code className="min-w-0 flex-1 break-all text-xs text-muted-foreground">{expression}</code>
@@ -49,8 +51,8 @@ function ReferencesPanel({ references, onRoute, onCandidate }: { references: Ret
     {data && <CoverageWarning coverage={data.result.coverage} />}
     {data && data.candidates.length > 0 && <section aria-label="Candidates" className="flex flex-col gap-1">
       <Muted>{data.candidates.length} symbols match this selector. Choose one:</Muted>
-      {data.candidates.map(({ row, symbolId }) => <Button key={`${symbolId}:${row.source}`} type="button" size="sm" variant="outline" className="justify-start"
-        onClick={() => onCandidate(symbolId)}>{row.symbol} <Muted>{row.source}</Muted></Button>)}
+      {data.candidates.map(({ row, queryName }) => <Button key={`${queryName}:${row.source}`} type="button" size="sm" variant="outline" className="justify-start"
+        onClick={() => onCandidate(queryName)}>{queryName} <Muted>{row.source}</Muted></Button>)}
     </section>}
     {data && !data.candidates.length && !data.files.length && <Muted>No references in this snapshot</Muted>}
     {data && data.result.total > data.result.matches.length && <Muted>Showing {data.result.matches.length} of {data.result.total} references</Muted>}
@@ -74,8 +76,8 @@ export function SymbolDetails({ node, route, sources, onRoute }: { node?: Module
 
 function SelectedSymbol({ node, route, sources, onRoute }: { node: ModuleNode; route: Route; sources: ModuleSource[]; onRoute: OnRoute }) {
   const [tab, setTab] = useState("overview");
-  const [candidate, setCandidate] = useState({ node: "", symbolId: "" });
-  const references = useReferences(node, route, sources, candidate.node === node.id ? candidate.symbolId : "");
+  const [candidate, setCandidate] = useState({ node: "", queryName: "" });
+  const references = useReferences(node, route, sources, candidate.node === node.id ? candidate.queryName : "");
   return <div className="flex min-w-0 flex-col gap-3 p-3">
     <strong className="break-all text-sm">{node.symbol || node.id}</strong>
     <Tabs value={tab} onChange={setTab} tabs={[
@@ -93,7 +95,7 @@ function SelectedSymbol({ node, route, sources, onRoute }: { node: ModuleNode; r
     </>}
     {tab === "field" && (node.field ? <CodeBlock>{JSON.stringify(node.field, null, 2)}</CodeBlock> : <Muted>No field projection</Muted>)}
     {tab === "calls" && (node.calls.length ? <CodeBlock>{JSON.stringify(node.calls, null, 2)}</CodeBlock> : <Muted>No outgoing calls</Muted>)}
-    {tab === "references" && <ReferencesPanel references={references} onRoute={onRoute} onCandidate={(symbolId) => setCandidate({ node: node.id, symbolId })} />}
+    {tab === "references" && <ReferencesPanel references={references} onRoute={onRoute} onCandidate={(queryName) => setCandidate({ node: node.id, queryName })} />}
     {tab === "raw" && <CodeBlock>{JSON.stringify(node, null, 2)}</CodeBlock>}
   </div>;
 }
