@@ -14,6 +14,7 @@ import (
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/route"
 	"github.com/flanksource/clicky/rpc"
+	rpchttp "github.com/flanksource/clicky/rpc/http"
 	"github.com/flanksource/clicky/task"
 	uiweb "github.com/flanksource/uir/web"
 	"github.com/spf13/cobra"
@@ -121,8 +122,8 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		}
 		ui.ServeHTTP(w, r)
 	}))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return rpchttp.TimingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), runtimeContextKey{}, runtime)
 		mux.ServeHTTP(w, r.WithContext(ctx))
-	}), nil
+	})), nil
 }

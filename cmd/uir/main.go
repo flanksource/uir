@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/clicky/shutdown"
 	"github.com/flanksource/uir/storage"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
@@ -45,9 +46,10 @@ func execute() int {
 
 func run(ctx context.Context, args []string) (returnErr error) {
 	runtime := &commandRuntime{}
+	defer func() { returnErr = errors.Join(returnErr, runtime.Close()) }()
+	defer shutdown.Shutdown()
 	root := newRootCommand(runtime)
 	root.SetArgs(args)
-	defer func() { returnErr = errors.Join(returnErr, runtime.Close()) }()
 	return root.ExecuteContext(context.WithValue(ctx, runtimeContextKey{}, runtime))
 }
 
@@ -58,7 +60,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 		Version:      version,
 		SilenceUsage: true,
 	}
-	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path")
+	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path (default ~/.config/uir/uir.db)")
 	root.PersistentFlags().StringVar(&runtime.Schema, "schema", "", "PostgreSQL schema")
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)
@@ -87,11 +89,11 @@ func (runtime *commandRuntime) Database(ctx context.Context) (*gorm.DB, error) {
 		return runtime.database, nil
 	}
 	if runtime.DSN == "" {
-		configDir, err := os.UserConfigDir()
+		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, fmt.Errorf("find UIR configuration directory: %w", err)
+			return nil, fmt.Errorf("find home directory for UIR database: %w", err)
 		}
-		directory := filepath.Join(configDir, "uir")
+		directory := filepath.Join(home, ".config", "uir")
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("create UIR data directory %q: %w", directory, err)
 		}
