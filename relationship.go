@@ -56,14 +56,14 @@ func (r UIRRelationship) GetRelationshipType() RelationshipType {
 	return r.RelationshipType
 }
 
+// NewRelationship builds a relationship from from to to. A nil from leaves From
+// nil rather than pointing at a nil Node, which is the one form it decodes back to.
 func NewRelationship(relType RelationshipType, from, to Node) *RelationshipBuilder {
-	return &RelationshipBuilder{
-		rel: UIRRelationship{
-			RelationshipType: relType,
-			From:             &from,
-			To:               to,
-		},
+	rel := UIRRelationship{RelationshipType: relType, To: to}
+	if from != nil {
+		rel.From = &from
 	}
+	return &RelationshipBuilder{rel: rel}
 }
 
 type ASTRelationship = UIRRelationship

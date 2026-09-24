@@ -293,7 +293,11 @@ const (
 	NodeTypeImport           NodeType = "import"
 	NodeTypeAnnotation       NodeType = "annotation"
 	NodeTypeComment          NodeType = "comment"
-	NodeTypeUnknown          NodeType = ""
+	// A ref is a NodeRef: a pointer to another node by identifier. It is the kind a
+	// reference is encoded under, never the kind of the node it points at, which
+	// stays on the reference's own Identifier.NodeType.
+	NodeTypeRef     NodeType = "ref"
+	NodeTypeUnknown NodeType = ""
 )
 
 func (n NodeType) Color() string {

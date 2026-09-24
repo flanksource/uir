@@ -342,6 +342,7 @@ func hashRecordReadStmt(s RecordReadStmt) string {
 	if s.Record != nil {
 		h.AddString("record", s.Record.GetIdentifier().SymbolKey())
 	}
+	h.AddString("record_type", string(s.RecordType))
 	h.AddString("arguments", hashArguments(s.Arguments))
 	h.AddString("expression_type", string(s.ExpressionType))
 	h.AddString("expression", s.Expression.Expression)
@@ -353,6 +354,7 @@ func hashRecordWriteStmt(s RecordWriteStmt) string {
 	if s.Record != nil {
 		h.AddString("record", s.Record.GetIdentifier().SymbolKey())
 	}
+	h.AddString("record_type", string(s.RecordType))
 	h.AddString("arguments", hashArguments(s.Arguments))
 	h.AddString("expression_type", string(s.ExpressionType))
 	h.AddString("expression", s.Expression.Expression)

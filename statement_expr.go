@@ -217,8 +217,10 @@ type RawStmt struct {
 	statementBase `json:",inline"`
 	// The raw source code text
 	Source string `json:"source"`
-	// The language this raw source is from
-	Language string `json:"language,omitempty"`
+	// The language this raw source is from. It is keyed "source_language" because
+	// "language" is the statement's own (statementBase.Language), which it used to
+	// shadow.
+	Language string `json:"source_language,omitempty"`
 }
 
 func (s RawStmt) GetStatementType() StatementType {

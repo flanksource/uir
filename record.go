@@ -198,15 +198,15 @@ func (r *ASTRecord) Normalize() ASTRecord {
 }
 
 // PersistentBodyMixin implementation for ASTRecord
-func (r ASTRecord) GetPersistentBody() json.RawMessage {
+func (r ASTRecord) GetPersistentBody() (json.RawMessage, error) {
 	if len(r.Fields) == 0 {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(r.Fields)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to marshal ASTRecord fields: %w", err)
 	}
-	return data
+	return data, nil
 }
 
 func (r *ASTRecord) LoadPersistentBody(data json.RawMessage) error {

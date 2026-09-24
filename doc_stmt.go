@@ -31,8 +31,10 @@ func (d DocType) GetStatementType() StatementType {
 
 type DocStmt struct {
 	statementBase
-	DocType  DocType   `json:"doc_type,omitempty"`
-	Content  string    `json:"content,omitempty"`
+	DocType DocType `json:"doc_type,omitempty"`
+	// Content is the documentation text. It is keyed "text" because "content" is
+	// the statement's own source (statementBase.Content), which it used to shadow.
+	Content  string    `json:"text,omitempty"`
 	Style    string    `json:"style,omitempty"`
 	Children []DocStmt `json:"children,omitempty" gorm:"serializer:json"`
 }

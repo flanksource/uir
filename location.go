@@ -166,7 +166,7 @@ type ScopedVariableRef struct {
 }
 
 // GetStatementType implements Statement.
-func (v *ScopedVariableRef) GetStatementType() StatementType {
+func (v ScopedVariableRef) GetStatementType() StatementType {
 	return ASTStatementRefScopeVar
 }
 

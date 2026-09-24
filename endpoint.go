@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
+// ID's source is keyed "idSourceCode" because ASTError, which embeds it, keeps its
+// own under "sourceCode"; sharing the key dropped the ID's.
 type ID struct {
 	ID         string `json:"id,omitempty"`
 	Name       string `json:"name"`
-	SourceCode `json:"sourceCode,omitempty"`
+	SourceCode `json:"idSourceCode,omitempty"`
 }
 
 type ASTFunction struct {
@@ -37,8 +39,9 @@ const (
 
 type ASTEndpoint struct {
 	nodeBase
-	// HTTP Method e.g. "GET", "POST" or "PUT"
-	Method       EndpointPointMethod `json:"method,omitempty"`
+	// HTTP Method e.g. "GET", "POST" or "PUT". It is keyed "httpMethod" because
+	// "method" is Identifier.Method, the endpoint's name, which it used to shadow.
+	Method       EndpointPointMethod `json:"httpMethod,omitempty"`
 	EndpointType EndpointType        `json:"endpointType,omitempty"`
 	Input        ASTRecord           `json:"input,omitempty"`
 	Output       ASTRecord           `json:"output,omitempty"`
@@ -70,15 +73,15 @@ func (e ASTEndpoint) GetPath() string {
 }
 
 // PersistentBodyMixin implementation for ASTEndpoint
-func (e ASTEndpoint) GetPersistentBody() json.RawMessage {
+func (e ASTEndpoint) GetPersistentBody() (json.RawMessage, error) {
 	if len(e.Errors) == 0 {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(e.Errors)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to marshal ASTEndpoint errors: %w", err)
 	}
-	return data
+	return data, nil
 }
 
 func (e *ASTEndpoint) LoadPersistentBody(data json.RawMessage) error {

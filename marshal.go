@@ -6,58 +6,62 @@ import (
 	"reflect"
 )
 
-var NodeMarshaler = NewRegistry[Node]("node_type")
+const (
+	// statementTypeField is the discriminator the statement registry keys on.
+	statementTypeField = "statement_type"
+	// statementRefinementField carries a statement's Type when it is refined past
+	// the kind stamped under statement_type.
+	statementRefinementField = "statement_refinement"
+)
 
-var StatementMarshaler = NewRegistry[Statement]("statement_type")
+var StatementMarshaler = NewRegistry[Statement](statementTypeField)
+
+// crossHierarchyRefinements are the refinements a statement kind accepts from
+// outside its own ':'-hierarchy: the markdown extractor marks a section's body
+// block as doc, which as a kind of its own names a DocStmt.
+var crossHierarchyRefinements = map[StatementType][]StatementType{
+	ASTStatementTypeBlock: {ASTStatementTypeDoc},
+}
 
 func init() {
 	for _, stmt := range Statements {
-		t := reflect.TypeOf(stmt)
-		StatementMarshaler.Register(string(stmt.GetStatementType()),
-			func() Statement {
-				instancePtr := reflect.New(t)
-				instance, ok := instancePtr.Interface().(Statement)
-				if !ok {
-					panic("type does not implement Statement: " + t.Name())
-				}
-				return instance
-			},
-		)
+		registerPrototype(StatementMarshaler, string(stmt.GetStatementType()), stmt)
 	}
-
 	for _, node := range Nodes {
-		t := reflect.TypeOf(node)
-		NodeMarshaler.Register(string(node.GetType()),
-			func() Node {
-				instancePtr := reflect.New(t)
-				instance, ok := instancePtr.Interface().(Node)
-				if !ok {
-					panic("type does not implement Node: " + t.Name())
-				}
-				return instance
-			},
-		)
+		registerPrototype(NodeMarshaler, string(registeredNodeKind(node)), node)
 	}
+	crossHierarchy := map[string][]string{}
+	for kind, refinements := range crossHierarchyRefinements {
+		for _, refinement := range refinements {
+			crossHierarchy[string(kind)] = append(crossHierarchy[string(kind)], string(refinement))
+		}
+	}
+	StatementMarshaler.acceptRefinements(statementRefinementField, crossHierarchy)
 }
 
-// statementTypeField is the discriminator both statement registries key on.
-const statementTypeField = "statement_type"
+// registerPrototype registers the concrete type behind prototype; the registry
+// always builds the pointer form, so a decoded value is addressable.
+func registerPrototype[T any](r *Registry[T], kind string, prototype T) {
+	t := concreteType(prototype)
+	r.Register(kind, func() T {
+		instance, ok := reflect.New(t).Interface().(T)
+		if !ok {
+			panic(fmt.Sprintf("*%s does not implement %s", t, reflect.TypeFor[T]()))
+		}
+		return instance
+	})
+}
 
 // MarshalStatement encodes a statement with its concrete kind stamped under
-// statement_type. The kind comes from GetStatementType rather than the embedded
-// statementBase.Type, because statements are routinely built as plain struct literals
-// (uir.RawStmt{Source: src}) that leave the field unset — JSON written from those
-// carries no discriminator and cannot be read back.
+// statement_type. The kind comes from the concrete type rather than the embedded
+// statementBase.Type, because statements are routinely built as plain struct
+// literals (uir.RawStmt{Source: src}) that leave the field unset — JSON written
+// from those carries no discriminator and cannot be read back. An unset Type
+// decodes as the kind; a Type refined past it (call:package) travels under
+// statement_refinement and decodes back exactly; any other Type is refused (see
+// Registry.stamp).
 func MarshalStatement(stmt Statement) ([]byte, error) {
-	raw, err := json.Marshal(stmt)
-	if err != nil {
-		return nil, err
-	}
-	fields := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, err
-	}
-	out, err := encodeStatementFields(fields, stmt.GetStatementType())
+	out, err := StatementMarshaler.Marshal(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("%T: %w", stmt, err)
 	}
@@ -87,18 +91,9 @@ func marshalBlock(shadow any, children []Statement, kind StatementType) ([]byte,
 			return nil, err
 		}
 	}
-	return encodeStatementFields(fields, kind)
-}
-
-func encodeStatementFields(fields map[string]json.RawMessage, kind StatementType) ([]byte, error) {
-	if kind == "" {
-		return nil, fmt.Errorf("statement has no statement type")
+	if err := StatementMarshaler.stamp(fields, string(kind)); err != nil {
+		return nil, fmt.Errorf("%s: %w", kind, err)
 	}
-	encoded, err := json.Marshal(string(kind))
-	if err != nil {
-		return nil, err
-	}
-	fields[statementTypeField] = encoded
 	return json.Marshal(fields)
 }
 
@@ -107,6 +102,52 @@ func (b BlockStmt) MarshalJSON() ([]byte, error) {
 	shadow := alias(b)
 	shadow.Children = nil
 	return marshalBlock(shadow, b.Children, b.GetStatementType())
+}
+
+func (s *BlockStmt) UnmarshalJSON(data []byte) error {
+	return s.decodeBlock(data, s.GetStatementType())
+}
+
+// decodeBlock decodes a block-shaped statement of the given kind. Its Type is a
+// refinement when one travelled beside the kind (a block in a concrete slot, as
+// marshalBlock writes it) or when the statement registry already moved it back
+// under statement_type. A document stamped as, or refined to, anything that does
+// not resolve to kind is refused rather than read as a block, and JSON null leaves
+// the block as it is, as encoding/json does for every other struct.
+func (s *BlockStmt) decodeBlock(data []byte, kind StatementType) error {
+	if isJSONNull(data) {
+		return nil
+	}
+	type alias BlockStmt
+	aux := struct {
+		*alias
+		Children []json.RawMessage `json:"children,omitempty"`
+		// Refinement is keyed statementRefinementField.
+		Refinement *StatementType `json:"statement_refinement,omitempty"`
+	}{alias: (*alias)(s)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Refinement != nil {
+		if s.Type != kind {
+			return fmt.Errorf("a %s cannot be decoded from %s %q", kind, statementTypeField, s.Type)
+		}
+		s.Type = *aux.Refinement
+	}
+	if s.Type != "" && s.Type != kind {
+		if err := StatementMarshaler.checkRefinement(string(kind), string(s.Type)); err != nil {
+			return fmt.Errorf("a %s cannot be decoded: %w", kind, err)
+		}
+	}
+	s.Children = nil
+	for i, childData := range aux.Children {
+		stmt, err := StatementMarshaler.UnmarshalByType(childData)
+		if err != nil {
+			return fmt.Errorf("children[%d]: %w", i, err)
+		}
+		s.Children = append(s.Children, stmt)
+	}
+	return nil
 }
 
 // TestStmt embeds BlockStmt, which would otherwise promote BlockStmt.MarshalJSON and
@@ -122,10 +163,13 @@ func (t TestStmt) MarshalJSON() ([]byte, error) {
 }
 
 // TestStmt likewise shadows the promoted BlockStmt.UnmarshalJSON, which knows nothing
-// about Name.
+// about Name and would refuse the test kind.
 func (t *TestStmt) UnmarshalJSON(data []byte) error {
-	if err := t.BlockStmt.UnmarshalJSON(data); err != nil {
+	if err := t.decodeBlock(data, t.GetStatementType()); err != nil {
 		return err
+	}
+	if isJSONNull(data) {
+		return nil
 	}
 	var aux struct {
 		Name string `json:"name,omitempty"`
@@ -137,65 +181,71 @@ func (t *TestStmt) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type untypedNode map[string]json.RawMessage
-type untypedNodes []untypedNode
+// FunctionDeclStmt nests its method under "function": the statement and the method
+// both carry Metadata, and flattened into one object the method's was shadowed
+// and lost. It also shadows the MethodNode.UnmarshalJSON it would otherwise
+// promote, which decoded the whole statement as a bare method.
+func (f *FunctionDeclStmt) UnmarshalJSON(data []byte) error {
+	if isJSONNull(data) {
+		return nil
+	}
+	var aux struct {
+		Function json.RawMessage `json:"function"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &f.statementBase); err != nil {
+		return err
+	}
+	if isJSONNull(aux.Function) {
+		return nil
+	}
+	if err := json.Unmarshal(aux.Function, &f.MethodNode); err != nil {
+		return fmt.Errorf("function: %w", err)
+	}
+	return nil
+}
 
-// UnmarshalJSON unmarshals JSON data into a slice of ModuleNodes
+func isJSONNull(data []byte) bool {
+	return len(data) == 0 || string(data) == "null"
+}
+
+// MarshalNodes encodes nodes as the flat array UnmarshalJSON reads, each stamped
+// with its node_kind.
+func MarshalNodes(nodes []Node) ([]byte, error) {
+	encoded := make([]json.RawMessage, len(nodes))
+	for i, node := range nodes {
+		data, err := MarshalNode(node)
+		if err != nil {
+			return nil, fmt.Errorf("nodes[%d]: %w", i, err)
+		}
+		encoded[i] = data
+	}
+	return json.Marshal(encoded)
+}
+
+// UnmarshalJSON decodes the flat node array MarshalNodes writes into a UIR.
 func UnmarshalJSON(data []byte) (*UIR, error) {
 	var out = UIR{}
 
-	var nodes untypedNodes
+	var nodes []json.RawMessage
 	if err := json.Unmarshal(data, &nodes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal nodes: %w", err)
 	}
 
-	for _, n := range nodes {
-		node, err := NodeMarshaler.Unmarshal(n)
+	for i, raw := range nodes {
+		if isJSONNull(raw) {
+			return nil, fmt.Errorf("nodes[%d] is null", i)
+		}
+		node, err := UnmarshalNode(raw)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal node: %w", err)
+			return nil, fmt.Errorf("nodes[%d]: %w", i, err)
 		}
 		out.Add(node)
 	}
 
 	return &out, nil
-}
-
-// unmarshalStatement unmarshals a JSON-encoded statement by reading its type field
-// and using the typeMap to determine the concrete type to unmarshal into
-func unmarshalStatement(data []byte) (Statement, error) {
-
-	return StatementMarshaler.UnmarshalByType(data)
-}
-
-func (s *BlockStmt) UnmarshalJSON(data []byte) error {
-	// First unmarshal into a temporary struct to get all fields except Children
-	type Alias BlockStmt
-	aux := &struct {
-		Type     StatementType     `json:"statement_type"`
-		Children []json.RawMessage `json:"children,omitempty"`
-		*Alias
-	}{
-		Alias: (*Alias)(s),
-	}
-
-	if err := json.Unmarshal(data, aux); err != nil {
-		return err
-	}
-
-	// Set the type
-	s.Type = aux.Type
-
-	// Unmarshal each child statement using the helper function
-	s.Children = make([]Statement, 0, len(aux.Children))
-	for i, childData := range aux.Children {
-		stmt, err := unmarshalStatement(childData)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal child statement %d: %w", i, err)
-		}
-		s.Children = append(s.Children, stmt)
-	}
-
-	return nil
 }
 
 func (n ASTRecord) GetType() NodeType {

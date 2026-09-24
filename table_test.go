@@ -106,12 +106,12 @@ func TestUIRTablesSurviveStructJSONRoundTrip(t *testing.T) {
 	}
 }
 
-// Plugin extractors hand back a JSON array of nodes, which UnmarshalJSON decodes
+// Plugin extractors hand back a JSON array of nodes (MarshalNodes), which UnmarshalJSON decodes
 // through the polymorphic registry and routes into UIR.Add. A node type missing
 // from either the registry seed (var Nodes) or Add's type switch is dropped
 // without an error, so this asserts the whole path rather than the decode alone.
 func TestRecordTableSurvivesNodeRegistryRoundTrip(t *testing.T) {
-	data, err := json.Marshal([]any{sampleTable()})
+	data, err := MarshalNodes([]Node{sampleTable()})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestUnmarshalJSONKeepsPointerNodesOfEveryType(t *testing.T) {
 	endpoint := NewEndpoint("getPolicy").Build()
 	table := sampleTable()
 
-	data, err := json.Marshal([]any{record, endpoint, table})
+	data, err := MarshalNodes([]Node{record, endpoint, table})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
