@@ -26,11 +26,11 @@ binary: | $(LOCALBIN) ## Link the UIR CLI into .bin/uir (requires built web/dist
 
 .PHONY: install
 install: web-build ## Install the UIR CLI with embedded browser assets
-	go install ./cmd/uir
+	go install -ldflags "-X main.version=$(VERSION)" ./cmd/uir
 
 .PHONY: web-build
 web-build: ## Build embedded browser assets
-	pnpm --dir web run build
+	VITE_UIR_VERSION=$(VERSION) pnpm --dir web run build
 
 .PHONY: schema
 schema: ## Regenerate schema/uir.schema.json from the Go model

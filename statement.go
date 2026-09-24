@@ -111,11 +111,11 @@ func (s statementBase) WithFile(file string) statementBase {
 }
 
 func (s statementBase) WithLine(start, end int) statementBase {
-	s.StartLine = new(start)
+	s.StartLine = &start
 	if end == 0 {
 		end = start
 	}
-	s.EndLine = new(end)
+	s.EndLine = &end
 	return s
 }
 
