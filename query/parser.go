@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const grammarUsage = `expected "nodes [where field = \"value\"]", "callers of node where ...", "callees of node where ...", or "unresolved calls"; predicate values must be quoted`
+const grammarUsage = `expected "nodes [where field = \"value\"]", "references|definitions|implementations|callees of node where ...", "callers of node where ... [including dispatch]", "search \"prefix\"", or "unresolved calls"; predicate values must be quoted`
 
 type parserState struct {
 	result       Query
@@ -31,6 +31,14 @@ func (state *parserState) setValue(raw string) {
 		return
 	}
 	state.currentValue = value
+}
+
+func (state *parserState) setDispatch() {
+	state.result.Dispatch = true
+}
+
+func (state *parserState) setSearch() {
+	state.result.Search = state.currentValue
 }
 
 func (state *parserState) addPredicate() {

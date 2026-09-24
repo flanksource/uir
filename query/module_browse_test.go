@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -9,6 +10,48 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+// assertBrowseContract pins the browse JSON the web explorer reads: every key of a source and of the
+// Caller node, with its navigation position (the name's line and UTF-16 column) and its outgoing call.
+func assertBrowseContract(result query.ModuleBrowseResult) {
+	GinkgoHelper()
+	encoded, err := json.Marshal(result)
+	Expect(err).ToNot(HaveOccurred())
+	var decoded struct {
+		Sources []map[string]any `json:"sources"`
+		Nodes   []map[string]any `json:"nodes"`
+	}
+	Expect(json.Unmarshal(encoded, &decoded)).To(Succeed())
+	Expect(decoded.Sources).To(HaveLen(1))
+	Expect(decoded.Sources[0]).To(HaveLen(8))
+	Expect(decoded.Sources[0]).To(HaveKeyWithValue("path", "browse.go"))
+	Expect(decoded.Sources[0]).To(HaveKeyWithValue("package_path", "example.org/browse"))
+	sourceID := decoded.Sources[0]["id"]
+	var caller map[string]any
+	for _, node := range decoded.Nodes {
+		if node["identifier"].(map[string]any)["method"] == "Caller" {
+			caller = node
+		}
+	}
+	Expect(caller).ToNot(BeNil())
+	Expect(caller["payload"]).To(HaveKeyWithValue("method", "Caller"))
+	Expect(caller["payload"]).To(HaveKeyWithValue("sourceCode", map[string]any{"path": "browse.go", "start_line": 4.0, "end_line": 4.0}))
+	Expect(caller["semantic_hash"]).To(HaveLen(64))
+	delete(caller, "payload")
+	delete(caller, "semantic_hash")
+	identity := `v1:[\"method\",\"\",\"example.org/browse\",\"\",\"Caller\",\"\",\"()\"]`
+	actual, err := json.Marshal(caller)
+	Expect(err).ToNot(HaveOccurred())
+	Expect(actual).To(MatchJSON(`{
+		"id": "` + sourceID.(string) + `:` + identity + `", "source_id": "` + sourceID.(string) + `", "path": "browse.go",
+		"symbol": "method:example.org/browse:Caller#()", "node_type": "method",
+		"identifier": {"package": "example.org/browse", "method": "Caller", "signature": "()", "node_type": "method"},
+		"parent_identity": "v1:[\"package\",\"\",\"example.org/browse\",\"\",\"\",\"\",\"\"]",
+		"child_slot": "methods", "ordinal": 1, "line": 4, "end_line": 4, "column": 6,
+		"calls": [{"to_identifier": {"package": "example.org/browse", "method": "Target", "node_type": "method"},
+			"resolvable": true, "statement_path": "calls/000000", "line": 4, "text": "Target"}]
+	}`))
+}
 
 var _ = Describe("module browsing", func() {
 	DescribeTable("reads immutable source and node projections", func(ctx SpecContext, backend string) {
@@ -30,6 +73,7 @@ var _ = Describe("module browsing", func() {
 		Expect(result.Sources[0].ContentHash).ToNot(BeEmpty())
 		Expect(result.Nodes).To(ContainElement(And(HaveField("Symbol", ContainSubstring("Target")), HaveField("Path", "browse.go"))))
 		Expect(result.Nodes).To(ContainElement(HaveField("Calls", HaveLen(1))))
+		assertBrowseContract(result)
 		content, err := pipeline.ReadModuleSource(ctx, published[0].SnapshotID, "browse.go")
 		Expect(err).To(Succeed())
 		Expect(content.Content).To(ContainSubstring("func Target()"))

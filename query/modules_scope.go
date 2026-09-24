@@ -138,9 +138,6 @@ func (pipeline *Pipeline) scopesFromHeads(ctx context.Context, heads []storage.M
 }
 
 func (pipeline *Pipeline) moduleScopeForSnapshot(ctx context.Context, snapshot storage.ModuleSnapshot) (moduleScope, error) {
-	if snapshot.State != storage.SnapshotReady {
-		return moduleScope{}, fmt.Errorf("snapshot %s is %q, expected ready", snapshot.ID, snapshot.State)
-	}
 	var root storage.ModuleRoot
 	if err := pipeline.database.WithContext(ctx).Where("id = ?", snapshot.RootID).First(&root).Error; err != nil {
 		return moduleScope{}, lookupError(err, fmt.Sprintf("root for snapshot %s", snapshot.ID))
