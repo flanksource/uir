@@ -12,7 +12,7 @@ import (
 const (
 	bodyHashVersion          = "uir-body-hash-v1"
 	shapeHashVersion         = "uir-shape-hash-v1"
-	packageInputHashVersion  = "uir-package-input-v2"
+	packageInputHashVersion  = "uir-package-input-v3"
 	contextHashVersion       = "uir-context-hash-v1"
 	contentSetHashVersion    = "uir-content-set-v1"
 	configurationHashVersion = "uir-configuration-v1"

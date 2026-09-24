@@ -57,6 +57,8 @@ func typedWorkerDocument() (storage.Document, storage.SourceRevision, storage.Do
 		id := digest("symbol " + content.Symbols[index].Kind)
 		content.Symbols[index].ID, content.Symbols[index].ShapeHash = &id, digest("shape "+content.Symbols[index].Kind)
 	}
+	content.Symbols[0].TypeForm = "struct"
+	content.Symbols[0].Shape = "type Service struct{}"
 	content.Symbols[0].Implements = []string{digest("interface")}
 	target, method := digest("Stop"), *content.Symbols[2].ID
 	content.Occurrences[0].Symbol, content.Occurrences[0].Enclosing = &target, &method
@@ -75,6 +77,22 @@ func encodeDocument(document storage.Document, content storage.DocumentContent) 
 }
 
 var _ = Describe("DecodeDocument", func() {
+	DescribeTable("classifies immutable v1 type shapes", func(shape, expected string) {
+		id := digest("legacy type")
+		form, err := storage.TypeForm(1, storage.DocumentSymbol{ID: &id, Kind: "type", Key: "legacy", Shape: shape})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(form).To(Equal(expected))
+	},
+		Entry("empty struct", "type Entity struct{}", "struct"),
+		Entry("interface", "type Entity interface{ M() }", "interface"),
+		Entry("alias", "type Entity = struct{}", "alias"),
+		Entry("other defined type", "type Entity int", "other"),
+	)
+	It("rejects a malformed immutable v1 type shape", func() {
+		id := digest("legacy type")
+		_, err := storage.TypeForm(1, storage.DocumentSymbol{ID: &id, Kind: "type", Key: "legacy", Shape: "type Entity ???"})
+		Expect(err).To(HaveOccurred())
+	})
 	It("round-trips a valid syntax document", func() {
 		document, source, content := workerDocument()
 		decoded, err := storage.DecodeDocument(encodeDocument(document, content), source)
@@ -124,7 +142,7 @@ var _ = Describe("DecodeDocument", func() {
 		Entry("an undeclared enclosing key", func(_ *storage.Document, content *storage.DocumentContent) {
 			content.Occurrences[0].EnclosingKey = "v1:[]"
 		}, "is not declared"),
-		Entry("an unsupported format version", func(_ *storage.Document, content *storage.DocumentContent) { content.Version = 2 }, "format version 2"),
+		Entry("an unsupported format version", func(_ *storage.Document, content *storage.DocumentContent) { content.Version = 3 }, "format version 3"),
 	)
 
 	It("round-trips a valid typed document", func() {
@@ -145,6 +163,9 @@ var _ = Describe("DecodeDocument", func() {
 		Entry("an unproven declaration in an indexed document", storage.CoverageIndexed, func(content *storage.DocumentContent) {
 			content.Symbols[1].ID, content.Symbols[1].ShapeHash = nil, ""
 		}, "only a partial document keeps an unproven declaration"),
+		Entry("a type form that disagrees with its shape", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Symbols[0].TypeForm = "interface"
+		}, "shape is \"struct\""),
 		Entry("an unproven declaration with a shape hash in a partial document", storage.CoveragePartial, func(content *storage.DocumentContent) {
 			content.Symbols[1].ID = nil
 		}, "only a partial document keeps an unproven declaration"),

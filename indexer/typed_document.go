@@ -145,8 +145,24 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 		return storage.DocumentSymbol{}, false, err
 	}
 	row, id := builder.resolver.rows[resolved.ID], resolved.ID
+	typeForm := ""
+	if typeName, ok := declared.object.(*types.TypeName); ok {
+		switch {
+		case typeName.IsAlias():
+			typeForm = "alias"
+		default:
+			switch typeName.Type().Underlying().(type) {
+			case *types.Struct:
+				typeForm = "struct"
+			case *types.Interface:
+				typeForm = "interface"
+			default:
+				typeForm = "other"
+			}
+		}
+	}
 	return storage.DocumentSymbol{
-		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shape, ShapeHash: shapeHash(shape), Implements: implements,
+		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shape, TypeForm: typeForm, ShapeHash: shapeHash(shape), Implements: implements,
 	}, true, nil
 }
 
