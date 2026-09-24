@@ -20,7 +20,7 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/*.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl
 var migrations embed.FS
 
 func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
@@ -53,7 +53,18 @@ func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if err := ping(ctx, database); err != nil {
 		return nil, err
 	}
+	if err := discardLegacyTables(ctx, database); err != nil {
+		return nil, errors.Join(err, closeDatabase(database))
+	}
 	return database, nil
+}
+
+func closeDatabase(database *gorm.DB) error {
+	sqlDB, err := database.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func ping(ctx context.Context, database *gorm.DB) error {

@@ -2,7 +2,6 @@ package uir
 
 import (
 	"github.com/google/uuid"
-	"github.com/samber/lo"
 )
 
 type RelationshipBuilder struct {
@@ -14,8 +13,8 @@ func (b *RelationshipBuilder) Build() UIRRelationship {
 }
 
 func (b *RelationshipBuilder) Source(path string, start, end int) *RelationshipBuilder {
-	b.rel.StartLine = lo.ToPtr(start)
-	b.rel.EndLine = lo.ToPtr(end)
+	b.rel.StartLine = new(start)
+	b.rel.EndLine = new(end)
 	b.rel.Path = path
 	return b
 }
@@ -26,7 +25,7 @@ func (b *RelationshipBuilder) Comments(comments string) *RelationshipBuilder {
 }
 
 func (b *RelationshipBuilder) Text(text string) *RelationshipBuilder {
-	b.rel.Content = lo.ToPtr(text)
+	b.rel.Content = new(text)
 	return b
 }
 
@@ -57,14 +56,14 @@ func (r UIRRelationship) GetRelationshipType() RelationshipType {
 	return r.RelationshipType
 }
 
+// NewRelationship builds a relationship from from to to. A nil from leaves From
+// nil rather than pointing at a nil Node, which is the one form it decodes back to.
 func NewRelationship(relType RelationshipType, from, to Node) *RelationshipBuilder {
-	return &RelationshipBuilder{
-		rel: UIRRelationship{
-			RelationshipType: relType,
-			From:             &from,
-			To:               to,
-		},
+	rel := UIRRelationship{RelationshipType: relType, To: to}
+	if from != nil {
+		rel.From = &from
 	}
+	return &RelationshipBuilder{rel: rel}
 }
 
 type ASTRelationship = UIRRelationship

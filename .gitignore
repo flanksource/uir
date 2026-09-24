@@ -5,6 +5,7 @@ node_modules
 hack/
 coverage.out
 coverage.html
+*.test
 
 # Python
 __pycache__/
@@ -25,3 +26,4 @@ target/
 docs/uir-gorm-erd.html
 go.work
 go.work.sum
+dist/

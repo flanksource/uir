@@ -15,25 +15,27 @@ import "github.com/flanksource/uir"
 | `.` (`package uir`) | The model: node and statement types, enums, identifiers, fluent builders, pretty printers, semantic hashing, polymorphic JSON, and tree traversal. |
 | `diff/` | Structural diffing. `DiffNode` compares two nodes; `DiffTree` compares whole documents and classifies renames and moves. |
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
-| `indexer/` | Incremental Go AST indexing into immutable, root-aware relational snapshots, exposed as a context-bound Clicky task. |
-| `query/` | PEG query grammar plus the project, snapshot, root, symbol, and call resolution pipeline. |
+| `indexer/` | Incremental Go AST indexing into immutable module-root snapshots, exposed as a context-bound Clicky task. |
+| `query/` | PEG query grammar plus module, checkout, snapshot, symbol, and call resolution. |
+| `symboldiff/` | Commit-to-commit symbol diff over two snapshots' documents, with per-symbol line counts from hash-verified Git blobs. |
 | `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
-| [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and in-memory or relational call queries. |
+| [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and call projection queries. |
 | [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
+| [`docs/diff.md`](docs/diff.md) | `uir diff`: commit selection, symbol classification, shape diff rendering, line attribution, and failure modes. |
 | [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
-| `cmd/uir` | Clicky entity CLI for listing projects, querying snapshots, and incrementally reindexing Go workspaces. |
+| `cmd/uir` | CLI for adding module directories, querying snapshots, and incrementally reindexing Go workspaces. |
 | `web/` | Vite and Clicky UI browser for saved snapshots, embedded in `uir serve`. |
 | `python/` | A parallel Python port of the model (pure stdlib). |
 | `java/` | A parallel Java port of the model (Jackson-based, source only — no build file is checked in). |
 
 ## Schema
 
-`schema/uir.schema.json` is generated, never hand-edited. Run `make schema` after changing a model type, an enum constant or a doc comment; `TestSchemaIsUpToDate` fails the build when the checked-in file no longer matches the Go types.
+`schema/uir.schema.json` is generated, never hand-edited. Run `make schema` after changing a model type, an enum constant or a doc comment; `TestSchemaIsUpToDate` fails the build when the checked-in file no longer matches the Go types. The same command writes `python/statement_kinds.py` from the statement registry, guarded by `TestPythonStatementKindsIsUpToDate`.
 
 The generator (`internal/schemagen`, driven by `cmd/genschema`) reflects over the same fields `encoding/json` marshals, and reads the package source for the two things reflection cannot see: doc comments, which become `description`, and the values of typed string constants, which become `enum` — most `StatementType` values are concatenations of other constants rather than literals, so they only resolve under a type check.
 
-The document root is `oneOf` a `UIR` object and the flat array of nodes that `uir.UnmarshalJSON` reads. `#/$defs/Node` and `#/$defs/Statement` are the polymorphic unions, driven by the `uir.Nodes` and `uir.Statements` registries: registering a type is all it takes to describe it. Each member pins its own discriminator (`node_type`, `statement_type`) with `const`, so a validator can name the kind it failed on.
+The document root is `oneOf` a `UIR` object and the flat array of nodes that `uir.UnmarshalJSON` reads. `#/$defs/Node` and `#/$defs/Statement` are the polymorphic unions, driven by the `uir.Nodes` and `uir.Statements` registries: registering a type is all it takes to describe it. Each member pins its own discriminator (`node_kind`, `statement_type`) with `const`, so a validator can name the kind it failed on, and every statement member also declares the optional `statement_refinement`.
 
 ## Building a document
 
@@ -85,13 +87,18 @@ Identity classification stays separate from hash equality, which is what lets a 
 
 ## Serialization
 
-Nodes and statements are polymorphic, discriminated by `node_type` and `statement_type`:
+Nodes and statements are polymorphic, discriminated by `node_kind` and `statement_type`:
 
 ```go
+data, err := uir.MarshalNodes(nodes)
 doc, err := uir.UnmarshalJSON(data)
 ```
 
-`uir.NodeMarshaler` and `uir.StatementMarshaler` are the registries; concrete variants register themselves from the `Nodes` and `Statements` prototype slices. The discriminator is derived from `GetStatementType()`, not from the embedded cache field, so struct literals that leave it unset still round-trip.
+`uir.NodeMarshaler` and `uir.StatementMarshaler` are the registries; concrete variants register themselves from the `Nodes` and `Statements` prototype slices. Each discriminator is the kind the concrete Go type is registered under, stamped by the codec, so struct literals that leave the embedded type fields unset still round-trip.
+
+- `node_kind` is the node discriminator, written whenever a node crosses an interface-typed `Node` slot (the flat node array, `MethodCallStmt.Method`, `RecordReadStmt.Record`, …). It is the node's static `GetType()` for every registered node, and `ref` for a `NodeRef`. A node nested through a concrete field carries none, and decoding a `Node` slot without one is an error.
+- `node_type` is `Identifier` data, not a discriminator: a `MethodNode` may be a `constructor`, and a `NodeRef` carries the `node_type` of the node it points at, so a reference to a method is `{"node_kind": "ref", "node_type": "method", …}` and decodes as a `NodeRef`.
+- `statement_type` is the statement's registered kind (`GetStatementType()`). When the statement's `Type` is refined past that kind, the refined value travels under `statement_refinement` — `{"statement_type": "call", "statement_refinement": "call:package"}` — and decodes back exactly. A refinement is accepted only when its longest registered `:`-prefix is the statement's own kind, or the kind lists it explicitly (`control:block` accepts `doc`); anything else is refused on both encode and decode. The Python port checks refinements against the same registered kinds (`python/statement_kinds.py`, generated by `make schema`).
 
 ## Python and Java
 
@@ -105,13 +112,13 @@ The Java port under `java/com/flanksource/uir/` is source only; no `pom.xml` or 
 
 ## Snapshot browser
 
-`uir serve` opens the saved UIR database in a local web browser. It lists projects and snapshots, explores roots, sources and nodes, runs PEG queries against the selected snapshot, and reindexes local workspaces.
+`uir serve` opens the saved UIR database in a local web browser. It lists Go module roots, their checkout locations and snapshots, explores sources and nodes, runs PEG queries, and adds or reindexes local directories.
 
 ```sh
 go run ./cmd/uir --dsn "$UIR_DSN" serve --host localhost --port 8080
 ```
 
-Set `UIR_DSN` to a PostgreSQL DSN and open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `go run ./cmd/uir --dsn "$UIR_DSN" serve --dev`. See [serve documentation](docs/serve.md) for source behavior, API routes, and the current SQLite dependency limit.
+Set `UIR_DSN` to a PostgreSQL DSN or SQLite `.db` path and open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `go run ./cmd/uir --dsn "$UIR_DSN" serve --dev`. See [serve documentation](docs/serve.md) for source behavior and API routes. Opening an older database discards legacy project snapshots; back it up first if that history matters.
 
 ## Development
 

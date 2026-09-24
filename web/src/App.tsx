@@ -1,257 +1,195 @@
-import { useEffect, useState } from "react";
-import { AppShell, Button, Select, Tabs } from "@flanksource/clicky-ui/components";
-import { DataTable, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { getRow, getSourceContent, listProjects, listRows, runQuery, runReindex, type BrowseRow, type NodeDetails, type Page, type Project, type QueryRow, type SourceContent } from "./api";
-import { readRoute, routeURL, type Route } from "./route";
-import { repositoryURL } from "./repository";
-import { Card, CodeBlock, Detail, DetailGrid, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { AppShell, Button, Combobox, CommandPalette, CommandPaletteTrigger, type CommandGroup } from "@flanksource/clicky-ui/components";
+import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
+import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
+import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
+import { paletteExpression, queryExamples, queryScope, type QueryExample } from "./query-model";
+import { QueryView } from "./QueryView";
+import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue, type Route } from "./route";
+import { SystemDetails } from "./SystemDetails";
+import { Card, ErrorMessage, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
+import { useLoad, useTimedLoad } from "./use-load";
 
-type Load<T> = { data?: T; error?: string; loading: boolean };
+const ExplorerView = lazy(() => import("./ExplorerView").then((module) => ({ default: module.ExplorerView })));
 
-function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T> {
-  const [result, setResult] = useState<Load<T>>({ loading: Boolean(load) });
-  useEffect(() => {
-    if (!load) {
-      setResult({ loading: false });
-      return;
-    }
-    let active = true;
-    setResult({ loading: true });
-    load().then((data) => { if (active) setResult({ data, loading: false }); }, (error: unknown) => {
-      if (active) setResult({ error: String(error), loading: false });
-    });
-    return () => { active = false; };
-    // key names every input that changes the request.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return result;
-}
-
-function ErrorMessage({ error }: { error?: string }) {
-  return error ? <div role="alert" className="whitespace-pre-wrap rounded-md border border-destructive p-3 text-destructive">{error}</div> : null;
-}
-
-function DataList({ rows, loading, error, columns, onClick, page, onPage }: {
-  rows: BrowseRow[];
+function DataList<T extends { id: string }>({ rows, loading, error, columns, onClick, total, offset, onPage }: {
+  rows: T[];
   loading: boolean;
   error?: string;
-  columns: DataTableColumn<BrowseRow>[];
-  onClick?: (row: BrowseRow) => void;
-  page?: Page<BrowseRow>["page"];
+  columns: DataTableColumn<T>[];
+  onClick?: (row: T) => void;
+  total?: number;
+  offset?: number;
   onPage?: (offset: number) => void;
 }) {
   return <>
     <ErrorMessage error={error} />
     <DataTable className="min-h-40 max-h-[28rem]" data={rows} columns={columns} loading={loading} getRowId={(row) => row.id} onRowClick={onClick}
       emptyMessage="No saved records match this view"
-      pagination={page && onPage ? { page: Math.floor(page.offset / page.limit), pageSize: page.limit, total: page.total,
-        onPageChange: (next) => onPage(next * page.limit), onPageSizeChange: () => onPage(0), pageSizeOptions: [100] } : undefined} />
+      pagination={total !== undefined && onPage ? { page: Math.floor((offset ?? 0) / 100), pageSize: 100, total,
+        onPageChange: (next) => onPage(next * 100), onPageSizeChange: () => onPage(0), pageSizeOptions: [100] } : undefined} />
   </>;
 }
 
-const snapshotColumns: DataTableColumn<BrowseRow>[] = [
+const locationColumns: DataTableColumn<ModuleLocation>[] = [
+  { key: "canonical_path", label: "Checkout", sortable: true, grow: true },
+  { key: "kind", label: "Kind" },
+  { key: "primary", label: "Primary", render: (_, row) => row.primary ? "Yes" : "" },
+  { key: "head_version", label: "Head", render: (_, row) => `v${row.head_version}` },
+];
+const snapshotColumns: DataTableColumn<ModuleSnapshot>[] = [
   { key: "id", label: "Snapshot", render: (_, row) => row.id.slice(0, 12), sortable: true },
-  { key: "state", label: "State", sortable: true },
-  { key: "head", label: "Published", render: (_, row) => row.head ? `Head v${row.version}` : "", sortable: true },
+  { key: "head", label: "Published", render: (_, row) => row.head ? `Head v${row.head_version}` : "" },
+  { key: "revision", label: "Git revision", render: (_, row) => row.revision?.slice(0, 12) ?? "" },
   { key: "started_at", label: "Started", sortable: true },
 ];
-const rootColumns: DataTableColumn<BrowseRow>[] = [
-  { key: "name", label: "Root", sortable: true, grow: true },
-  { key: "kind", label: "Kind" },
-  { key: "revision", label: "Revision", render: (_, row) => row.revision?.slice(0, 12) ?? "" },
-  { key: "local_path", label: "Local path", grow: true },
-];
-const sourceColumns: DataTableColumn<BrowseRow>[] = [
-  { key: "path", label: "Source", sortable: true, grow: true },
-  { key: "language", label: "Language" },
-  { key: "kind", label: "Kind" },
-];
-const nodeColumns: DataTableColumn<BrowseRow>[] = [
-  { key: "name", label: "Symbol", sortable: true, grow: true },
-  { key: "node_type", label: "Kind", sortable: true },
-  { key: "language", label: "Language" },
-  { key: "root_id", label: "Root", render: (_, row) => row.root_id?.slice(0, 8) ?? "" },
-];
-
-function ReindexForm({ project, defaultPath, onSuccess }: { project: string; defaultPath: string; onSuccess: (snapshot: string, project: string) => void }) {
-  const [projectKey, setProjectKey] = useState(project);
+function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath: string; onSuccess: (results: ModuleIndexResult[]) => void }) {
   const [path, setPath] = useState(defaultPath);
-  const [root, setRoot] = useState("");
-  const [name, setName] = useState("");
   const [includeTests, setIncludeTests] = useState(false);
   const [force, setForce] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => setProjectKey(project), [project]);
-  useEffect(() => { if (!path) setPath(defaultPath); }, [defaultPath, path]);
+  const [message, setMessage] = useState("");
+  useEffect(() => setPath(defaultPath), [defaultPath]);
 
-  async function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent, action: "add" | "reindex") {
     event.preventDefault();
     setPending(true);
     setError("");
+    setMessage("");
     try {
-      const result = await runReindex(projectKey.trim(), { path: path.trim(), root: root.trim(), name: name.trim(), "include-tests": includeTests, force });
-      onSuccess(result.snapshot_id, projectKey.trim());
+      const results = action === "add" ? await addModules(path.trim(), includeTests) : await reindexModules(path.trim(), includeTests, force);
+      if (!results.length) throw new Error(`No Go modules found under ${path}`);
+      setMessage(`${action === "add" ? "Added" : "Reindexed"} ${results.length} module ${results.length === 1 ? "root" : "roots"}`);
+      onSuccess(results);
     } catch (reason) { setError(String(reason)); }
     finally { setPending(false); }
   }
 
-  return <PanelForm onSubmit={submit}>
-    <h2>Reindex a workspace</h2>
-    <Muted>Publish an updated snapshot from a local checkout. The selected snapshot changes when indexing succeeds.</Muted>
-    <Row>
-      <Field label="Project key"><TextInput required value={projectKey} onChange={(event) => setProjectKey(event.target.value)} /></Field>
-      <Field label="Local path"><TextInput required value={path} onChange={(event) => setPath(event.target.value)} /></Field>
-    </Row>
-    <Row>
-      <Field label="Root key (optional)"><TextInput value={root} onChange={(event) => setRoot(event.target.value)} /></Field>
-      <Field label="Project name (optional)"><TextInput value={name} onChange={(event) => setName(event.target.value)} /></Field>
-    </Row>
+  return <PanelForm onSubmit={(event) => submit(event, root ? "reindex" : "add")}>
+    <h2>{root ? "Reindex a checkout" : "Add a directory"}</h2>
+    <Muted>Discover Go modules from a local directory. Each module path becomes a root; each checkout keeps its own snapshot history.</Muted>
+    <Field label="Local path"><TextInput required value={path} onChange={(event) => setPath(event.target.value)} /></Field>
     <Row>
       <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={includeTests} onChange={(event) => setIncludeTests(event.target.checked)} />Include Go tests</label>
-      <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Force reparse</label>
-      <Button type="submit" loading={pending}>Reindex</Button>
+      {root && <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Force reparse</label>}
+      <Button type="submit" loading={pending}>{root ? "Reindex" : "Add"}</Button>
+      {root && <Button type="button" variant="outline" disabled={pending} onClick={(event: React.MouseEvent<HTMLButtonElement>) => submit(event, "add")}>Add another directory</Button>}
     </Row>
     <ErrorMessage error={error} />
+    {message && <Muted>{message}</Muted>}
   </PanelForm>;
-}
-
-function SourceView({ source }: { source: string }) {
-  const content = useLoad<SourceContent>(source ? () => getSourceContent(source) : null, source);
-  if (!source) return <Muted>Select a source to view its saved reference.</Muted>;
-  if (content.loading) return <Muted>Loading source…</Muted>;
-  if (content.error) return <ErrorMessage error={content.error} />;
-  if (!content.data) return null;
-  const item = content.data;
-  return <Card>
-    <strong>{item.path}</strong>
-    <div><Muted>{item.origin === "git" ? `Git revision ${item.revision}` : item.origin === "local" ? "Current local file; no hash verification" : "Remote Git source"}</Muted></div>
-    {item.origin === "remote" ? <div className="break-all">
-      <p>Source content is unavailable locally. Open the repository to inspect this revision.</p>
-      {item.repository && repositoryURL(item.repository) ? <a className="break-all text-primary underline" href={repositoryURL(item.repository)!} target="_blank" rel="noreferrer">{item.repository}</a> : <span>{item.repository}</span>}
-      <p>Revision: {item.revision}</p>
-    </div> : <CodeBlock>{item.content}</CodeBlock>}
-  </Card>;
-}
-
-function NodeView({ node, onSource }: { node: string; onSource: (source: string) => void }) {
-  const details = useLoad<NodeDetails>(node ? () => getRow("node", node) as Promise<NodeDetails> : null, node);
-  const [tab, setTab] = useState("overview");
-  if (!node) return <Muted>Select a node for fields, locations, and relationships.</Muted>;
-  if (details.loading) return <Muted>Loading node…</Muted>;
-  if (details.error) return <ErrorMessage error={details.error} />;
-  if (!details.data) return null;
-  const { node: record, fields, locations, relationships } = details.data;
-  return <Card>
-    <strong>{String(record.SymbolKey || record.IdentityKey || node)}</strong>
-    <Tabs value={tab} onChange={setTab} tabs={[
-      { id: "overview", label: "Overview" }, { id: "fields", label: "Fields", count: fields.length },
-      { id: "relationships", label: "Relationships", count: relationships.length }, { id: "raw", label: "Raw" },
-    ]} />
-    {tab === "overview" && <>
-      <DetailGrid>
-        <Detail label="Kind">{String(record.NodeType || "")}</Detail>
-        <Detail label="Language">{String(record.Language || "")}</Detail>
-        <Detail label="Package">{String(record.Package || "")}</Detail>
-        <Detail label="Signature">{String(record.Signature || "")}</Detail>
-      </DetailGrid>
-      <h3>Locations</h3>
-      {locations.length ? <ul>{locations.map((location, index) => <li key={String(location.ID || index)}>
-        <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-primary underline" onClick={() => onSource(String(location.SourceID))}>Source {String(location.SourceID).slice(0, 8)}</button>
-        {location.StartLine ? `:${String(location.StartLine)}` : ""}{location.EndLine && location.EndLine !== location.StartLine ? `–${String(location.EndLine)}` : ""}
-      </li>)}</ul> : <Muted>No source locations</Muted>}
-    </>}
-    {tab === "fields" && (fields.length ? <CodeBlock>{JSON.stringify(fields, null, 2)}</CodeBlock> : <Muted>No fields</Muted>)}
-    {tab === "relationships" && (relationships.length ? <CodeBlock>{JSON.stringify(relationships, null, 2)}</CodeBlock> : <Muted>No relationships</Muted>)}
-    {tab === "raw" && <CodeBlock>{JSON.stringify(details.data, null, 2)}</CodeBlock>}
-  </Card>;
 }
 
 export function App() {
   const [route, setRouteState] = useState(readRoute);
   const [refresh, setRefresh] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
   useEffect(() => {
     const onPop = () => setRouteState(readRoute());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  function setRoute(patch: Partial<Route>, replace = false) {
-    const next = { ...route, ...patch };
-    window.history[replace ? "replaceState" : "pushState"]({}, "", routeURL(next));
-    setRouteState(next);
-  }
-
-  const projects = useLoad<Project[]>(listProjects, String(refresh));
-  const project = projects.data?.find((item) => item.key === route.project);
+  const setRoute = useCallback((patch: Partial<Route>, replace = false) => {
+    setRouteState((current) => {
+      const next = applyRoutePatch(current, patch);
+      window.history[replace ? "replaceState" : "pushState"]({}, "", routeURL(next));
+      return next;
+    });
+  }, []);
   useEffect(() => {
-    if (!route.project && projects.data?.length) setRoute({ project: projects.data[0].key, snapshot: projects.data[0].snapshot_id ?? "" }, true);
-    // The route is updated only when no project is selected.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects.data, route.project]);
-  useEffect(() => {
-    if (route.project && !route.snapshot && project?.snapshot_id) setRoute({ snapshot: project.snapshot_id }, true);
-    // A project head is resolved only when the URL does not name a snapshot.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.project, route.snapshot, project?.snapshot_id]);
-  const snapshots = useLoad<Page<BrowseRow>>(route.project ? () => listRows("snapshot", { project: route.project, offset: String(route.offset) }) : null, `snapshots:${route.project}:${route.offset}:${refresh}`);
-  const snapshot = route.snapshot || project?.snapshot_id || "";
-  const roots = useLoad<Page<BrowseRow>>(snapshot ? () => listRows("root", { snapshot }) : null, `roots:${snapshot}:${refresh}`);
-  const sources = useLoad<Page<BrowseRow>>(snapshot && route.view === "explorer" ? () => listRows("source", { snapshot, ...(route.root ? { root: route.root } : {}), ...(route.search ? { search: route.search } : {}), offset: String(route.offset) }) : null, `sources:${snapshot}:${route.root}:${route.search}:${route.offset}:${refresh}:${route.view}`);
-  const nodes = useLoad<Page<BrowseRow>>(snapshot && route.view === "nodes" ? () => listRows("node", { snapshot, ...(route.root ? { root: route.root } : {}), ...(route.source ? { source: route.source } : {}), ...(route.search ? { search: route.search } : {}), offset: String(route.offset) }) : null, `nodes:${snapshot}:${route.root}:${route.source}:${route.search}:${route.offset}:${refresh}:${route.view}`);
-  const query = useLoad<QueryRow[]>(snapshot && route.view === "query" && route.expression ? () => runQuery(route.project, route.expression, snapshot) : null, `query:${route.project}:${snapshot}:${route.expression}:${route.view}`);
-  const [queryDraft, setQueryDraft] = useState(route.expression);
-  useEffect(() => setQueryDraft(route.expression), [route.expression]);
-  const selectedRoot = roots.data?.data.find((item) => item.id === route.root) ?? roots.data?.data[0];
-  const nav = ["overview", "explorer", "nodes", "query"] as const;
+    if (window.location.pathname === "/nodes" || window.location.search.includes("search=")) {
+      window.history.replaceState({}, "", routeURL(route));
+    }
+  }, [route]);
 
-  return <AppShell brand={<strong>UIR</strong>} contentWidth="full"
-    navSections={[{ label: "Snapshot browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
-    sidebarHeader={<Field label="Project"><Select aria-label="Project" value={route.project} onChange={(event) => {
-      const next = projects.data?.find((item) => item.key === event.target.value);
-      setRoute({ project: event.target.value, snapshot: next?.snapshot_id ?? "", root: "", source: "", node: "", offset: 0 });
-    }} options={(projects.data ?? []).map((item) => ({ value: item.key, label: item.name || item.key }))} /></Field>}
-    bodyHeader={<span>{project?.name || route.project || "Projects"} {snapshot && <Muted>/ {snapshot.slice(0, 12)}</Muted>}</span>}
-    bodyActions={<Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button>}>
-    <PageLayout>
-      {projects.loading && <Muted>Loading projects…</Muted>}
-      <ErrorMessage error={projects.error} />
+  const roots = useLoad<ModuleRoot[]>(listModuleRoots, String(refresh));
+  const selectedRoot = roots.data?.find((item) => item.root_key === route.module);
+  const selectScope = (value: string) => {
+    if (value === ALL_MODULES) return setRoute(scopePatch(null));
+    const root = roots.data?.find((item) => item.root_key === value);
+    if (!root) throw new Error(`Scope ${value} is not an indexed module root`);
+    setRoute(scopePatch(root));
+  };
+  const locations = useLoad<ModuleLocation[]>(route.module ? () => listModuleLocations(route.module) : null, `locations:${route.module}:${refresh}`);
+  useEffect(() => {
+    if (route.module && !route.location && selectedRoot) setRoute({ location: selectedRoot.location, snapshot: selectedRoot.snapshot_id }, true);
+    // The root's primary checkout is the default URL location.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.module, route.location, selectedRoot]);
+  const selectedLocation = locations.data?.find((item) => item.canonical_path === route.location);
+  useEffect(() => {
+    if (route.location && !route.snapshot && selectedLocation) setRoute({ snapshot: selectedLocation.head_snapshot_id }, true);
+    // A selected checkout resolves to its current head only without an explicit snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.location, route.snapshot, selectedLocation]);
+  const snapshots = useLoad<Page<ModuleSnapshot>>(route.module && route.location ? () => listModuleSnapshots(route.module, route.location, route.offset) : null,
+    `snapshots:${route.module}:${route.location}:${route.offset}:${refresh}`);
+  const heads = useLoad<ModuleHead[]>(route.view === "explorer" ? listModuleHeads : null, `heads:${route.view}:${refresh}`);
+  const browseActive = route.view === "explorer" || route.view === "query" || searchOpen;
+  const browse = useTimedLoad<ModuleBrowse>(route.snapshot && browseActive ? () => browseModule(route.snapshot) : null,
+    `browse:${route.snapshot}:${browseActive ? "active" : "idle"}:${refresh}`);
+  const scope = queryScope(route);
+  const query = useTimedLoad<ModuleQueryResult>(scope && route.view === "query" && route.expression ? () => runModuleQuery(route.expression, scope.root, scope.snapshot) : null,
+    `query:${route.module}:${route.snapshot}:${route.expression}:${route.view}`);
+  const examples = useMemo<{ items: QueryExample[]; error?: string }>(() => {
+    if (route.module && !browse.data) return { items: [] };
+    try { return { items: queryExamples(route.module, browse.data?.nodes ?? []) }; } catch (error) { return { items: [], error: `Cannot build query examples: ${String(error)}` }; }
+  }, [browse.data, route.module]);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const typedExpression = paletteExpression(paletteQuery);
+
+  const nav = ["overview", "explorer", "query", "tasks"] as const;
+  const commandGroups: CommandGroup[] = [
+    ...(typedExpression ? [{ id: "expression", heading: "Run expression", items: [{ id: "expression:typed", label: `Run ${typedExpression}`, keywords: [paletteQuery.trim()], icon: commandNavigationIcons.query,
+      onSelect: () => setRoute({ view: "query", expression: typedExpression }) }] }] : []),
+    { id: "queries", heading: "Queries", items: examples.items.map((example) => ({ id: `query:${example.id}`, label: `${example.label} (example)`, description: example.expression, icon: commandNavigationIcons.query,
+      onSelect: () => setRoute({ view: "query", expression: example.expression }) })) },
+    { id: "navigation", heading: "Go to", items: nav.map((view) => ({ id: `view:${view}`, label: view[0].toUpperCase() + view.slice(1), icon: commandNavigationIcons[view], onSelect: () => setRoute({ view }) })) },
+    { id: "scope", heading: "Scope", items: [
+      { id: "scope:all", label: "All modules", description: "Every indexed root at its checkout heads", icon: commandModuleIcon, onSelect: () => setRoute(scopePatch(null)) },
+      ...(roots.data ?? []).map((item) => ({ id: `module:${item.root_key}`, label: item.name || item.root_key, description: item.root_key, icon: commandModuleIcon,
+        onSelect: () => setRoute(scopePatch(item)) })),
+    ] },
+    { id: "files", heading: "Files in selected snapshot", limit: 20, items: (browse.data?.sources ?? []).map((source) => ({ id: `file:${source.id}`, label: source.path, keywords: [source.package_path], icon: commandFileIcon(source.path),
+      onSelect: () => setRoute({ view: "explorer", source: source.id, node: "", fileSearch: "", symbolSearch: "" }) })) },
+    { id: "symbols", heading: "Symbols in selected snapshot", limit: 20, items: (browse.data?.nodes ?? []).map((node) => ({ id: `node:${node.id}`, label: node.symbol, description: node.path, icon: commandSymbolIcon(node.node_type),
+      onSelect: () => setRoute({ view: "explorer", source: node.source_id, node: node.id, fileSearch: "", symbolSearch: "" }) })) },
+  ];
+
+  return <><AppShell brand={<strong>UIR</strong>} contentWidth="full" contentClassName={route.view === "explorer" ? "overflow-hidden" : undefined}
+    navSections={[{ label: "Module browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
+    search={<CommandPaletteTrigger onClick={() => setSearchOpen(true)} open={searchOpen} label="Search modules, files, symbols…" />}
+    actions={<Combobox ariaLabel="Scope" size="sm" required allowCustomValue={false} className="w-64" value={scopeValue(route)} loading={roots.loading} onChange={selectScope} options={[
+      { value: ALL_MODULES, label: "All modules", description: "Every indexed root at its checkout heads" },
+      ...(roots.data ?? []).map((item) => ({ value: item.root_key, label: item.name || item.root_key, description: item.root_key, group: "Module roots", icon: commandModuleIcon() })),
+    ]} />}
+    sidebarFooter={<SystemDetails />}
+    bodyHeader={<span>{selectedRoot?.name || route.module || "All modules"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
+    bodyActions={<Row><TaskManagerButton basePath="/api/v1" kind="module-index" tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
+    {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} heads={heads} browse={browse} locations={locations} onRoute={setRoute} /></Suspense> : <PageLayout>
+      {roots.loading && <Muted>Loading module roots…</Muted>}
+      <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
-        <Section><Heading>Saved projects</Heading><Muted>Browse immutable UIR snapshots and their indexed code.</Muted>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(projects.data ?? []).map((item) => <Card key={item.key}><strong>{item.name || item.key}</strong><div><Muted>{item.key}</Muted></div><div className="text-2xl font-bold">{item.nodes}</div><Muted>nodes · {item.sources} sources · {item.roots} roots</Muted></Card>)}</div>
-          {projects.data?.length === 0 && <p>No projects are indexed yet. Use the form below to create the first snapshot.</p>}
+        <Section><Heading>Indexed module roots</Heading><Muted>Each Go module path has one root and can have multiple registered checkouts.</Muted>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(roots.data ?? []).map((item) => <Card key={item.root_key}><strong>{item.name || item.root_key}</strong><div><Muted>{item.root_key}</Muted></div><div>{item.location}</div><Muted>Primary head v{item.head_version}</Muted></Card>)}</div>
+          {roots.data?.length === 0 && <p>No modules are indexed yet. Add a local directory below.</p>}
         </Section>
-        {route.project && <Section><h2>Snapshots</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
-          onClick={(row) => setRoute({ snapshot: row.id, root: "", source: "", node: "", offset: 0 })} page={snapshots.data?.page} onPage={(offset) => setRoute({ offset })} /></Section>}
-        <ReindexForm project={route.project} defaultPath={selectedRoot?.local_path ?? ""} onSuccess={(nextSnapshot, nextProject) => { setRoute({ project: nextProject, snapshot: nextSnapshot, root: "", source: "", node: "", offset: 0 }); setRefresh((current) => current + 1); }} />
+        {route.module && <Section><h2>Checkouts</h2><DataList rows={locations.data ?? []} loading={locations.loading} error={locations.error} columns={locationColumns}
+          onClick={(row) => setRoute({ location: row.canonical_path, snapshot: row.head_snapshot_id, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 })} /></Section>}
+        {route.location && <Section><h2>Snapshots for {route.location}</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
+          onClick={(row) => setRoute({ snapshot: row.id, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 })} total={snapshots.data?.page.total} offset={route.offset} onPage={(offset) => setRoute({ offset })} /></Section>}
+        <IndexForm root={route.module} defaultPath={route.location} onSuccess={(results) => {
+          setRoute(scopePatch(results[0]));
+          setRefresh((current) => current + 1);
+        }} />
       </>}
-      {route.view !== "overview" && !snapshot && <Card>Select or create a project snapshot on the Overview page.</Card>}
-      {route.view === "explorer" && snapshot && <>
-        <Heading>Source explorer</Heading>
-        <Section><h2>Roots</h2><DataList rows={roots.data?.data ?? []} loading={roots.loading} error={roots.error} columns={rootColumns} onClick={(row) => setRoute({ root: row.id, source: "", offset: 0 })} /></Section>
-        <Row><Field label="Root"><Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, source: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></Field>
-          <Field label="Path search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
-        <Section><h2>Sources</h2><DataList rows={sources.data?.data ?? []} loading={sources.loading} error={sources.error} columns={sourceColumns} onClick={(row) => setRoute({ source: row.id })} page={sources.data?.page} onPage={(offset) => setRoute({ offset })} /></Section>
-        <SourceView source={route.source} />
+      {route.view === "tasks" && <><Heading>Indexing tasks</Heading><TaskManager basePath="/api/v1" kind="module-index" /></>}
+      {route.view === "query" && <>
+        <QueryView route={route} query={query} examples={examples.items} onRoute={setRoute} />
+        <ErrorMessage error={browse.error ?? examples.error} />
       </>}
-      {route.view === "nodes" && snapshot && <>
-        <Heading>Nodes</Heading>
-        <Row><Field label="Root"><Select value={route.root} onChange={(event) => setRoute({ root: event.target.value, node: "", offset: 0 })} options={[{ value: "", label: "All roots" }, ...(roots.data?.data ?? []).map((item) => ({ value: item.id, label: item.name }))]} /></Field>
-          <Field label="Symbol search"><TextInput value={route.search} onChange={(event) => setRoute({ search: event.target.value, offset: 0 })} /></Field></Row>
-        {route.source && <Button variant="outline" onClick={() => setRoute({ source: "" })}>Clear source filter</Button>}
-        <DataList rows={nodes.data?.data ?? []} loading={nodes.loading} error={nodes.error} columns={nodeColumns} onClick={(row) => setRoute({ node: row.id })} page={nodes.data?.page} onPage={(offset) => setRoute({ offset })} />
-        <NodeView node={route.node} onSource={(source) => setRoute({ view: "explorer", source, offset: 0 })} />
-      </>}
-      {route.view === "query" && snapshot && <>
-        <Heading>PEG query</Heading><Muted>Run a symbol or call query against the selected snapshot.</Muted>
-        <PanelForm layout="row" onSubmit={(event) => { event.preventDefault(); setRoute({ expression: queryDraft.trim() }); }}>
-          <Field label="Expression"><TextInput required value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} /></Field>
-          <Button type="submit">Run query</Button>
-        </PanelForm>
-        <h2>Results {query.data ? `(${query.data.length})` : ""}</h2>
-        <ErrorMessage error={query.error} />
-        <DataTable className="min-h-40 max-h-[28rem]" data={query.data ?? []} loading={query.loading} getRowId={(row) => row.id} emptyMessage={route.expression ? "No matches" : "Enter a PEG expression"}
-          columns={[{ key: "operation", label: "Operation" }, { key: "symbol", label: "Symbol", grow: true }, { key: "node_type", label: "Kind" }, { key: "root", label: "Root" }, { key: "location", label: "Location", grow: true }]} />
-      </>}
-    </PageLayout>
-  </AppShell>;
+    </PageLayout>}
+  </AppShell><CommandPalette open={searchOpen} onOpenChange={setSearchOpen} groups={commandGroups} query={paletteQuery} onQueryChange={setPaletteQuery}
+    footer={browse.loading ? "Loading snapshot files and symbols…" : browse.error ?? examples.error ?? "Start with > to run a compact expression"} /></>;
 }

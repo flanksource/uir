@@ -6,14 +6,17 @@ import (
 	"github.com/flanksource/clicky/api"
 )
 
-// NodeRef is a reference to a UIR node by its identifier, and is lazy-loaded on-demand
+// NodeRef is a leaf reference to a UIR node by its identifier. It names the node
+// without holding it, so it has no children to walk — the referenced node is
+// walked where it is declared — and no location or language, which its
+// Identifier does not carry.
 type NodeRef struct {
 	Identifier `json:",inline"`
 }
 
 // GetChildren implements Node.
 func (ref NodeRef) GetChildren() []Node {
-	return ref.GetNode().GetChildren()
+	return nil
 }
 
 // GetIdentifier implements Node.
@@ -24,12 +27,12 @@ func (ref NodeRef) GetIdentifier() Identifier {
 
 // GetLanguage implements Node.
 func (ref NodeRef) GetLanguage() string {
-	return ref.GetNode().GetLanguage()
+	return ""
 }
 
 // GetLocation implements Node.
 func (ref NodeRef) GetLocation() Location {
-	return ref.GetNode().GetLocation()
+	return Location{}
 }
 
 // GetType implements Node.
@@ -39,11 +42,6 @@ func (ref NodeRef) GetType() NodeType {
 
 func (ref NodeRef) Pretty() api.Text {
 	return ref.Identifier.Pretty()
-}
-
-func (ref NodeRef) GetNode() Node {
-	//FIXME: implement lazy loading of nodes by identifier
-	return ref
 }
 
 type NodeList []Node
@@ -75,10 +73,6 @@ func (nl NodeList) Pretty() api.Text {
 }
 
 func (nl NodeList) GetChildren() []Node {
-	return nl
-}
-
-func (nl NodeList) GetNode() Node {
 	return nl
 }
 
@@ -290,4 +284,7 @@ var Nodes = []Node{
 	RecordColumn{},
 	RecordIndex{},
 	RecordForeignKey{},
+	// NodeRef is registered so a reference round-trips as a reference; see
+	// registeredNodeKind for the kind it is encoded under.
+	NodeRef{},
 }

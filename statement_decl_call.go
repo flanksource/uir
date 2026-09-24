@@ -1,10 +1,11 @@
 package uir
 
-import "encoding/json"
-
+// The declaration statements nest their declared node under its own key: the
+// statement and the node each carry Metadata (and the node its own Identifier),
+// and flattened into one object the node's copy was shadowed and lost.
 type VariableDeclStmt struct {
 	statementBase `json:",inline"`
-	RecordField   `json:",inline"`
+	RecordField   `json:"field"`
 }
 
 func (v VariableDeclStmt) GetStatementType() StatementType {
@@ -13,7 +14,7 @@ func (v VariableDeclStmt) GetStatementType() StatementType {
 
 type FunctionDeclStmt struct {
 	statementBase `json:",inline"`
-	MethodNode    `json:",inline"`
+	MethodNode    `json:"function"`
 }
 
 func (f FunctionDeclStmt) GetStatementType() StatementType {
@@ -31,7 +32,7 @@ func (s TypeDeclStmt) GetStatementType() StatementType {
 
 type ConstDeclStmt struct {
 	statementBase `json:",inline"`
-	RecordField   `json:",inline"`
+	RecordField   `json:"field"`
 }
 
 func (s ConstDeclStmt) GetStatementType() StatementType {
@@ -54,39 +55,13 @@ func (method MethodCallStmt) GetSignature() string {
 
 type methodBase struct {
 	statementBase `json:",inline"`
-	Method        Node      `json:",inline"`
-	Receiver      *ExprStmt `json:"receiver,omitempty"` // nil if function call
+	// Method is encoded under the "Method" key by MethodCallStmt's codec.
+	Method   Node      `json:",inline"`
+	Receiver *ExprStmt `json:"receiver,omitempty"` // nil if function call
 }
 
 func (s MethodCallStmt) GetStatementType() StatementType {
 	return ASTStatementTypeCall
-}
-
-func (s *MethodCallStmt) UnmarshalJSON(data []byte) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-
-	// Method may be inlined or nested under "Method"
-	var id Identifier
-	if methodData, ok := raw["Method"]; ok {
-		_ = json.Unmarshal(methodData, &id)
-	} else {
-		_ = json.Unmarshal(data, &id)
-	}
-	s.Method = NodeRef{Identifier: id}
-
-	if v, ok := raw["statement_type"]; ok {
-		_ = json.Unmarshal(v, &s.Type)
-	}
-	if v, ok := raw["arguments"]; ok {
-		_ = json.Unmarshal(v, &s.Arguments)
-	}
-	if v, ok := raw["receiver"]; ok {
-		_ = json.Unmarshal(v, &s.Receiver)
-	}
-	return nil
 }
 
 type EndpointCallStmt struct {
@@ -118,12 +93,18 @@ func (args Arguments) GetSignature() string {
 
 type recordBase struct {
 	statementBase `json:",inline"`
-	Record        Node `json:",inline"`
+	// Record is encoded under the "Record" key by the read/write codecs.
+	Record Node `json:",inline"`
+	// RecordType is the kind of record read or written (table, view, ...), which a
+	// Record held as a bare NodeRef cannot say.
+	RecordType RecordType `json:"recordType,omitempty"`
 }
 
+// RecordReadStmt and RecordWriteStmt nest their Expression under "expression":
+// flattened, its SourceCode shadowed the statement's own location and source.
 type RecordReadStmt struct {
 	recordBase `json:",inline"`
-	Expression `json:",inline"`
+	Expression `json:"expression"`
 	Arguments  Arguments `json:"arguments,omitempty"`
 }
 
@@ -133,7 +114,7 @@ func (s RecordReadStmt) GetStatementType() StatementType {
 
 type RecordWriteStmt struct {
 	recordBase `json:",inline"`
-	Expression `json:",inline"`
+	Expression `json:"expression"`
 	Arguments  Arguments `json:"arguments,omitempty"`
 }
 

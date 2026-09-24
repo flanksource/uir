@@ -1,7 +1,6 @@
 package uir
 
 import (
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/api/icons"
 )
@@ -294,7 +293,11 @@ const (
 	NodeTypeImport           NodeType = "import"
 	NodeTypeAnnotation       NodeType = "annotation"
 	NodeTypeComment          NodeType = "comment"
-	NodeTypeUnknown          NodeType = ""
+	// A ref is a NodeRef: a pointer to another node by identifier. It is the kind a
+	// reference is encoded under, never the kind of the node it points at, which
+	// stays on the reference's own Identifier.NodeType.
+	NodeTypeRef     NodeType = "ref"
+	NodeTypeUnknown NodeType = ""
 )
 
 func (n NodeType) Color() string {
@@ -354,7 +357,7 @@ func (n NodeType) Icon() api.Textable {
 		return icons.Http
 
 	}
-	return clicky.Text("")
+	return api.Text{Content: ""}
 }
 
 var AllNodeTypes = []NodeType{

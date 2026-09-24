@@ -4,27 +4,37 @@ type queryGrammar Peg {
     parserState
 }
 
-Query <- _ (UnresolvedCalls / Callers / Callees / Nodes) _ !.
+Query <- _ Set _ !.
+Set <- Intersection (_ UnionOperator _ Intersection)*
+Intersection <- Chain (_ IntersectionOperator _ Chain)*
+Chain <- Primary (_ (PathStep / Step / Modifier))*
+Primary <- Selector / Symbol / Open _ Set _ Close
+Step <- Relation (_ Filter)* (_ Primary (_ Modifier)*)?
 
-Nodes <- 'nodes' { p.setOperation(OperationNodes) } (Spacing 'where' Spacing Predicates)?
+Selector <- <SelectorText> { p.addToken("selector", text) }
+Modifier <- <('+' / '-') SelectorText> { p.addToken("modifier", text) }
+SelectorText <- ('pkg' / 'mod' / 'func' / 'field' / 'struct') ':' SelectorValue (':' SelectorValue)?
+SelectorValue <- ([A-Za-z0-9_./*?@#$!] / '-' / '\\' .)+
+Symbol <- <[A-Za-z_]([A-Za-z0-9_./*] / '-')*> { p.addToken("symbol", text) }
+Relation <- Transitive / Implementers / Methods / Incoming / Outgoing / Definition / Writes
+Transitive <- '<<' <[0-9]*> { p.addToken("relation", "<<" + text) }
+Implementers <- ':impl' { p.addToken("relation", ":impl") }
+Methods <- ':methods' { p.addToken("relation", ":methods") }
+Incoming <- '<' { p.addToken("relation", "<") }
+Outgoing <- '>' { p.addToken("relation", ">") }
+Definition <- '=' { p.addToken("relation", "=") }
+Writes <- '~w' { p.addToken("relation", "~w") }
+Filter <- RoleFilter / ValueFilter
+RoleFilter <- <'~w'> { p.addToken("filter", text) }
+ValueFilter <- <('-f' / '+pkg' / '-pkg')> { p.addToken("filter", text) } Spacing Value
+Value <- <([A-Za-z0-9_./*] / '-')+> { p.addToken("value", text) }
 
-Callers <- 'callers' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallers) } Spacing 'where' Spacing Predicates
-
-Callees <- 'callees' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallees) } Spacing 'where' Spacing Predicates
-
-UnresolvedCalls <- 'unresolved' Spacing 'calls' { p.setOperation(OperationUnresolvedCalls) } (Spacing 'where' Spacing RootPredicate)?
-
-Predicates <- Predicate (Spacing 'and' Spacing Predicate)*
-
-Predicate <- Field _ '=' _ Quoted { p.addPredicate() }
-
-RootPredicate <- RootField _ '=' _ Quoted { p.addPredicate() }
-
-Field <- <('node_type' / 'module' / 'package' / 'type' / 'method' / 'field' / 'signature' / 'language' / 'symbol_key' / 'identity_key' / 'root')> { p.setField(text) }
-
-RootField <- <'root'> { p.setField(text) }
-
-Quoted <- '"' <(('\\' .) / [^"\\])*> '"' { p.setValue(text) }
+PathStep <- PathOperator _ Primary
+PathOperator <- '>>' <[0-9]*> { p.addToken("path", ">>" + text) }
+UnionOperator <- '|' { p.addToken("or", "|") }
+IntersectionOperator <- '&' { p.addToken("and", "&") }
+Open <- '(' { p.addToken("open", "(") }
+Close <- ')' { p.addToken("close", ")") }
 
 Spacing <- [ \t\r\n]+
 _ <- [ \t\r\n]*

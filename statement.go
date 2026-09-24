@@ -1,9 +1,9 @@
 package uir
 
 import (
-	"github.com/flanksource/clicky"
+	"reflect"
+
 	"github.com/flanksource/clicky/api"
-	"github.com/samber/lo"
 )
 
 type Statement interface {
@@ -111,11 +111,11 @@ func (s statementBase) WithFile(file string) statementBase {
 }
 
 func (s statementBase) WithLine(start, end int) statementBase {
-	s.StartLine = lo.ToPtr(start)
+	s.StartLine = &start
 	if end == 0 {
 		end = start
 	}
-	s.EndLine = lo.ToPtr(end)
+	s.EndLine = &end
 	return s
 }
 
@@ -164,7 +164,7 @@ type Stmt struct {
 }
 
 func (n Stmt) Value() Statement {
-	first, ok := lo.First([]Statement{
+	return firstStatement(
 		n.Assignment,
 		n.DocStmt,
 		n.Binary,
@@ -196,11 +196,19 @@ func (n Stmt) Value() Statement {
 		n.Raw,
 		n.Destructure,
 		n.TemplateLiteral,
-	})
-	if !ok {
-		return nil
+	)
+}
+
+// firstStatement returns the first candidate holding a statement. The
+// candidates are the pointer fields of a one-of wrapper (Stmt, ExprStmt), so an
+// unset field is a typed nil inside a non-nil interface and must be skipped.
+func firstStatement(candidates ...Statement) Statement {
+	for _, candidate := range candidates {
+		if candidate != nil && !reflect.ValueOf(candidate).IsNil() {
+			return candidate
+		}
 	}
-	return first
+	return nil
 }
 
 func (s Stmt) Pretty() api.Text {
@@ -208,7 +216,7 @@ func (s Stmt) Pretty() api.Text {
 	if val != nil {
 		return val.Pretty()
 	}
-	return clicky.Text("null", "text-gray-500")
+	return api.Text{Content: "null", Style: "text-gray-500"}
 }
 
 func (s Stmt) GetStatement() Statement {
@@ -264,6 +272,7 @@ var Statements = []Statement{
 	RawStmt{statementBase: statementBase{Type: ASTStatementTypeRaw}},
 	DestructuringStmt{statementBase: statementBase{Type: ASTStatementTypeDestructure}},
 	TemplateLiteralStmt{statementBase: statementBase{Type: ASTStatementTypeTemplateLit}},
+	ScopedVariableRef{},
 }
 
 // Basic Statement Types

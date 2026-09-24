@@ -2,16 +2,13 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type ModuleOptions struct {
@@ -40,22 +37,38 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 	if err != nil {
 		return nil, err
 	}
-	configuration, err := json.Marshal(struct {
-		ExtractorVersion string `json:"extractor_version"`
-		IncludeTests     bool   `json:"include_tests"`
-	}{ExtractorVersion: ExtractorVersion, IncludeTests: options.IncludeTests})
-	if err != nil {
-		return nil, fmt.Errorf("encode module index configuration: %w", err)
+	if options.ExistingOnly {
+		for _, root := range roots {
+			if err := requireRegisteredLocation(ctx, indexer.database, root); err != nil {
+				return nil, err
+			}
+		}
+	}
+	extractions := make([]moduleExtraction, 0, len(roots))
+	for _, root := range roots {
+		head, reusable, err := reusableHead(ctx, indexer.database, root, options.Force)
+		if err != nil {
+			return nil, fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, err)
+		}
+		if reusable {
+			extractions = append(extractions, moduleExtraction{root: root, reusedHead: head})
+			continue
+		}
+		extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
+		if err != nil {
+			return nil, fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, err)
+		}
+		extractions = append(extractions, extraction)
 	}
 	results := make([]ModuleResult, 0, len(roots))
 	err = indexer.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		locations := make(map[string]storage.ModuleLocation, len(roots))
-		for _, root := range roots {
-			result, location, indexErr := indexModule(ctx, transaction, root, locations, hashBytes(configuration), options)
+		for _, extraction := range extractions {
+			result, location, indexErr := indexModule(ctx, transaction, extraction, locations, options)
 			if indexErr != nil {
-				return fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, indexErr)
+				return fmt.Errorf("index module %q at %q: %w", extraction.root.RootKey, extraction.root.LocalPath, indexErr)
 			}
-			locations[root.LocalPath] = location
+			locations[extraction.root.LocalPath] = location
 			results = append(results, result)
 		}
 		return nil
@@ -66,156 +79,101 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 	return results, nil
 }
 
-func indexModule(ctx context.Context, database *gorm.DB, discovered discoveredRoot, locations map[string]storage.ModuleLocation, configurationHash string, options ModuleOptions) (ModuleResult, storage.ModuleLocation, error) {
-	if options.ExistingOnly {
-		var registered storage.ModuleLocation
-		err := database.WithContext(ctx).Table("uir_module_locations AS location").
-			Select("location.*").Joins("JOIN uir_module_roots AS root ON root.id = location.root_id").
-			Where("root.root_key = ? AND location.canonical_path = ?", discovered.RootKey, discovered.LocalPath).
-			First(&registered).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("module %q at %q is not registered", discovered.RootKey, discovered.LocalPath)
-		}
-		if err != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load registered module location: %w", err)
-		}
-	}
+// indexModule publishes one extracted root inside the caller's transaction, or reports it unchanged
+// when its revision, content set, configuration, and context all equal the base snapshot's. A root
+// that was not extracted because its head was reusable must still find that head in the transaction.
+func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtraction, locations map[string]storage.ModuleLocation, options ModuleOptions) (ModuleResult, storage.ModuleLocation, error) {
+	startedAt := time.Now().UTC()
+	discovered := extraction.root
 	root, location, err := ensureModuleLocation(ctx, database, discovered, locations)
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
 	result := ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(discovered.Files)}
-	var head storage.ModuleLocationHead
-	err = database.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("location_id = ?", location.ID).First(&head).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load location head: %w", err)
-	}
-	hasHead := err == nil
-	baseID := uuid.Nil
-	if hasHead {
-		baseID = head.SnapshotID
-	} else {
-		var primary storage.ModulePrimary
-		if err := database.WithContext(ctx).Where("root_id = ?", root.ID).First(&primary).Error; err != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load primary location: %w", err)
-		}
-		if primary.LocationID != location.ID {
-			var primaryHead storage.ModuleLocationHead
-			if err := database.WithContext(ctx).Where("location_id = ?", primary.LocationID).First(&primaryHead).Error; err != nil {
-				return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load primary head: %w", err)
-			}
-			baseID = primaryHead.SnapshotID
-		}
-	}
-	var base storage.ModuleSnapshot
-	if baseID != uuid.Nil {
-		if err := database.WithContext(ctx).Where("id = ?", baseID).First(&base).Error; err != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load base snapshot %s: %w", baseID, err)
-		}
-		if base.State != storage.SnapshotReady || base.RootID != root.ID {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("invalid base snapshot %s for root %s", baseID, root.ID)
-		}
-	}
-	if hasHead && !options.Force && base.Revision == discovered.Revision && base.ContentSetHash == discovered.ContentSetHash && base.ConfigurationHash == configurationHash && base.ExtractorVersion == ExtractorVersion {
-		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.ID.String(), head.Version, len(discovered.Files), true
-		return result, location, nil
-	}
-	previous := map[string]storage.SourceRevision{}
-	if baseID != uuid.Nil {
-		previous, err = storage.EffectiveSources(ctx, database, baseID)
-		if err != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, err
-		}
-	}
-	current := make(map[string]storage.SourceRevision, len(discovered.Files))
-	for _, file := range discovered.Files {
-		revision, parsed, revisionErr := sourceRevision(ctx, database, root.ID, file, previous[file.PathKey], options.Force)
-		if revisionErr != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, revisionErr
-		}
-		current[file.PathKey] = revision
-		if parsed {
-			result.ParsedFiles++
-		} else {
-			result.ReusedFiles++
-		}
-	}
-	now := time.Now().UTC()
-	snapshot := storage.ModuleSnapshot{
-		ID: uuid.New(), RootID: root.ID, LocationID: location.ID, State: storage.SnapshotBuilding,
-		Revision: discovered.Revision, ContentSetHash: discovered.ContentSetHash,
-		ConfigurationHash: configurationHash, ExtractorVersion: ExtractorVersion, StartedAt: now,
-	}
-	if baseID != uuid.Nil {
-		snapshot.BaseSnapshotID = &baseID
-	}
-	if err := database.WithContext(ctx).Create(&snapshot).Error; err != nil {
-		return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("create module snapshot: %w", err)
-	}
-	if err := createSourceDeltas(ctx, database, snapshot, previous, current); err != nil {
+	base, err := loadModuleBase(ctx, database, root, location)
+	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
-	if err := database.WithContext(ctx).Model(&snapshot).Updates(map[string]any{"state": storage.SnapshotReady, "completed_at": now}).Error; err != nil {
-		return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("complete module snapshot: %w", err)
-	}
-	version := int64(1)
-	if hasHead {
-		version = head.Version + 1
-	}
-	if hasHead {
-		updated := database.WithContext(ctx).Model(&storage.ModuleLocationHead{}).
-			Where("location_id = ? AND version = ?", location.ID, head.Version).
-			Updates(map[string]any{"snapshot_id": snapshot.ID, "version": version})
-		if updated.Error != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("publish module location head: %w", updated.Error)
+	unchanged := base.hasHead && !options.Force && base.snapshot.Revision == discovered.Revision &&
+		base.snapshot.ContentSetHash == discovered.ContentSetHash &&
+		base.snapshot.ConfigurationHash == discovered.ConfigurationHash && base.snapshot.ContextHash == extraction.contextHash
+	if extraction.reusedHead != uuid.Nil {
+		if !base.hasHead || base.snapshot.ID != extraction.reusedHead {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("location %s head moved from snapshot %s during indexing", location.ID, extraction.reusedHead)
 		}
-		if updated.RowsAffected != 1 {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("location %s head changed during indexing", location.ID)
-		}
-	} else {
-		head = storage.ModuleLocationHead{RootID: root.ID, LocationID: location.ID, SnapshotID: snapshot.ID, Version: version}
-		if err := database.WithContext(ctx).Create(&head).Error; err != nil {
-			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("publish first module location head: %w", err)
-		}
+		unchanged = true
 	}
-	result.SnapshotID, result.HeadVersion = snapshot.ID.String(), version
+	if unchanged {
+		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, len(discovered.Files), true
+		return result, location, nil
+	}
+	snapshot, err := publishSnapshot(ctx, database, snapshotPublication{
+		root: root, location: location, base: base, extraction: extraction, force: options.Force, startedAt: startedAt,
+	}, &result)
+	if err != nil {
+		return ModuleResult{}, storage.ModuleLocation{}, err
+	}
+	result.SnapshotID = snapshot.ID.String()
 	return result, location, nil
 }
 
-func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered discoveredRoot, locations map[string]storage.ModuleLocation) (storage.ModuleRoot, storage.ModuleLocation, error) {
-	now := time.Now().UTC()
-	root := storage.ModuleRoot{ID: uuid.New(), RootKey: discovered.RootKey, Name: filepath.Base(discovered.RootKey), CreatedAt: now}
-	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&root).Error; err != nil {
-		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("create module root: %w", err)
-	}
-	root = storage.ModuleRoot{}
-	if err := database.WithContext(ctx).Where("root_key = ?", discovered.RootKey).First(&root).Error; err != nil {
-		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("load module root: %w", err)
-	}
-	location := storage.ModuleLocation{
-		ID: uuid.New(), RootID: root.ID, CanonicalPath: discovered.LocalPath,
-		MountPath: discovered.MountPath, Kind: discovered.Kind, CreatedAt: now,
-	}
-	if discovered.RepositoryURI != "" {
-		location.RepositoryURI = &discovered.RepositoryURI
-	}
-	if discovered.ParentRootKey != "" {
-		parent, exists := locations[discovered.ParentRootKey]
-		if !exists {
-			return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("parent module location %q is missing", discovered.ParentRootKey)
+type snapshotPublication struct {
+	root       storage.ModuleRoot
+	location   storage.ModuleLocation
+	base       moduleBase
+	extraction moduleExtraction
+	force      bool
+	startedAt  time.Time
+}
+
+// publishSnapshot writes source revisions, symbols, documents, and postings, then the snapshot row
+// with its package coverage and source deltas, and finally advances the location head with a
+// compare-and-swap; the caller's transaction makes the whole publication atomic. Extraction is
+// already complete, so the transaction only writes rows.
+func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapshotPublication, result *ModuleResult) (storage.ModuleSnapshot, error) {
+	previous := map[string]storage.SourceRevision{}
+	if publication.base.snapshot.ID != uuid.Nil {
+		var err error
+		if previous, err = storage.EffectiveSources(ctx, database, publication.base.snapshot.ID); err != nil {
+			return storage.ModuleSnapshot{}, err
 		}
-		location.ParentLocationID = &parent.ID
 	}
-	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&location).Error; err != nil {
-		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("create module location: %w", err)
+	current, err := sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, previous)
+	if err != nil {
+		return storage.ModuleSnapshot{}, err
 	}
-	location = storage.ModuleLocation{}
-	if err := database.WithContext(ctx).Where("root_id = ? AND canonical_path = ?", root.ID, discovered.LocalPath).First(&location).Error; err != nil {
-		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("load module location: %w", err)
+	if err := publishDocuments(ctx, database, publication.extraction, current, publication.force, result); err != nil {
+		return storage.ModuleSnapshot{}, err
 	}
-	primary := storage.ModulePrimary{RootID: root.ID, LocationID: location.ID}
-	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&primary).Error; err != nil {
-		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("set primary module location: %w", err)
+	snapshot := publication.snapshot()
+	if err := database.WithContext(ctx).Create(&snapshot).Error; err != nil {
+		return storage.ModuleSnapshot{}, fmt.Errorf("create module snapshot: %w", err)
 	}
-	return root, location, nil
+	if err := createSourceDeltas(ctx, database, snapshot, previous, current); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	if err := createPackageCoverage(ctx, database, snapshot, publication.extraction.packages); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	if result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
+	discovered := publication.extraction.root
+	snapshot := storage.ModuleSnapshot{
+		ID: uuid.New(), RootID: publication.root.ID, LocationID: publication.location.ID,
+		Revision: discovered.Revision, WorktreeState: discovered.WorktreeState,
+		ContentSetHash: discovered.ContentSetHash, ConfigurationHash: discovered.ConfigurationHash,
+		ContextHash: publication.extraction.contextHash, Coverage: publication.extraction.coverage,
+		PackageCount: len(publication.extraction.packages), Diagnostics: publication.extraction.diagnostics,
+		StartedAt: publication.startedAt, CompletedAt: time.Now().UTC(),
+	}
+	if publication.base.snapshot.ID != uuid.Nil {
+		baseID := publication.base.snapshot.ID
+		snapshot.BaseSnapshotID = &baseID
+	}
+	return snapshot
 }

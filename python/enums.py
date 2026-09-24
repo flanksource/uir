@@ -202,6 +202,10 @@ class ASTStatementType(str, Enum):
     BINARY = "assignment:binary"
     UNARY = "assignment:unary"
     CAST = "assignment:cast"
+    OBJECT_LITERAL = "assignment:object"
+
+    # Documentation
+    DOC = "doc"
 
     # Other
     OTHER = "other"

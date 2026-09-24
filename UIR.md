@@ -21,9 +21,11 @@ It is written for two audiences:
 
 ### Root vs node documents
 
-- `UIR` is the root aggregate. It does not carry `node_type`.
-- Concrete node documents are identified by `node_type`.
-- Concrete statements are identified by `statement_type`.
+- `UIR` is the root aggregate. It carries neither `node_kind` nor `node_type`.
+- `node_kind` is the node discriminator. It is the kind the node's concrete Go type is registered under in `NodeMarshaler`: the node's static `GetType()` (`package`, `class`, `method`, `record_field`, …) for every registered node, and `ref` for a `NodeRef`. The codec stamps it whenever a node crosses an interface-typed (`Node`) slot — every element of the flat node array (`MarshalNodes` / `UnmarshalJSON`) and the `Node`-typed statement fields (`MethodCallStmt.Method`, `EndpointCallStmt.endpoint`, `RecordReadStmt.Record`, `RecordWriteStmt.Record`). A node nested through a concrete field (`UIR.packages`, `TypedNode.methods`, …) carries no `node_kind`, because its Go type is already known. Decoding a `Node` slot whose document has no `node_kind`, or one nothing is registered under, is an error rather than a guess.
+- `node_type` is `Identifier` data, not a discriminator. A `MethodNode` may carry `node_type: "constructor"`, and a `NodeRef` carries the `node_type` of the node it points at, so `{"node_kind": "ref", "node_type": "method", "method": "GetUser"}` decodes as a reference to a method, never as a `MethodNode`. Stamping the concrete kind over `node_type` would change the node's identity, which is why the discriminator has a key of its own.
+- Concrete statements are identified by `statement_type`, which the codec stamps from the concrete type's registered kind rather than from the embedded `Type` field.
+- A statement whose `Type` is refined past its registered kind keeps `statement_type` at the kind and carries the refined value in `statement_refinement`, e.g. `{"statement_type": "call", "statement_refinement": "call:package"}`. A refinement is accepted when its longest registered `:`-prefix is the statement's own kind, or when the kind lists it explicitly (a `control:block` may be refined to `doc`); anything else is refused on encode and decode.
 - `MethodNode.body` is always a `BlockStmt`, even when the body object omits `statement_type` in current Go builder output.
 
 ### Shared embedding model
@@ -57,8 +59,8 @@ These are part of the current emitted surface and consumers should tolerate them
 
 - `MethodCallStmt` marshals its target node under `Method`, not `method`.
 - `RecordReadStmt` and `RecordWriteStmt` marshal their target node under `Record`, not `record`.
-- `TypedNode` uses `node_type: "class"`, not `"type"`.
-- `UIR.functions` stores `MethodNode` values. In current Go output those nodes still use `node_type: "method"`.
+- `TypedNode` is registered as `node_kind: "class"` and defaults to `node_type: "class"`, not `"type"`.
+- `UIR.functions` stores `MethodNode` values. In current Go output those nodes still use `node_type: "method"`, and a `MethodNode` crossing a `Node` slot is stamped `node_kind: "method"`.
 - `SourceCode` in Go JSON inlines location fields under `sourceCode`; the proto transport nests them under `source_code.location`.
 
 ## Model map
@@ -79,9 +81,9 @@ These are part of the current emitted surface and consumers should tolerate them
 
 ### Canonical concrete node variants
 
-These are the node types currently registered in `NodeMarshaler`.
+These are the node kinds currently registered in `NodeMarshaler`, keyed by the `node_kind` a node carries across a `Node` slot. For every variant except `NodeRef` the kind equals the node's default `node_type`.
 
-| `node_type` | Go type | Typical role |
+| `node_kind` | Go type | Typical role |
 | --- | --- | --- |
 | `module` | `ModuleNode` | Highest-level grouping such as module, namespace, package scope, or tenant. |
 | `package` | `PackageNode` | Package, schema, namespace, folder-level logical grouping. |
@@ -94,10 +96,11 @@ These are the node types currently registered in `NodeMarshaler`.
 | `column` | `RecordColumn` | Column of a table, carrying the dialect's own SQL type alongside the portable `fieldType`, plus ordinal, nullability, primary-key and auto-increment as distinct facts. |
 | `index` | `RecordIndex` | Index over a table's columns, in index order. |
 | `foreign_key` | `RecordForeignKey` | Referential constraint from one table's columns to another's. |
+| `ref` | `NodeRef` | Leaf reference to a node by its `Identifier`. Its `node_type` is the referenced node's type, so it round-trips as a reference instead of decoding as the node it names. |
 
 ### Canonical concrete statement variants
 
-These are the statement types currently registered in `StatementMarshaler`.
+These are the statement kinds currently registered in `StatementMarshaler`. A statement is always stamped with one of these under `statement_type`; a finer `Type` travels under `statement_refinement`.
 
 | `statement_type` | Go type | Role |
 | --- | --- | --- |
@@ -151,7 +154,7 @@ See [`docs/symbols.md`](docs/symbols.md) for rendered formats, durable identity 
 | `method` | `string` | Method or function name. |
 | `field` | `string` | Field or variable name. |
 | `signature` | `string` | Disambiguator for overloads or statement-local identity. |
-| `node_type` | `string` | Declared node variant. |
+| `node_type` | `string` | The node's declared type (e.g. `method` or `constructor`). Identifier data, not the codec discriminator — see `node_kind`. |
 
 Notes:
 
@@ -599,6 +602,7 @@ Notes:
 All concrete statements embed:
 
 - `statement_type`
+- `statement_refinement`, only when the statement's `Type` is refined past its registered kind (see [Root vs node documents](#root-vs-node-documents))
 - inline source location fields through `SourceCode`
 
 Statements are usually nested under `MethodNode.body.children`.

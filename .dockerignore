@@ -1,0 +1,14 @@
+.git
+.tmp
+.bin
+.facet
+.captain
+.gavel
+.claude
+node_modules
+**/node_modules
+web/dist
+dist
+hack
+go.work
+go.work.sum

@@ -40,6 +40,10 @@ export function Muted({ children }: { children: ReactNode }) {
   return <span className="text-sm text-muted-foreground">{children}</span>;
 }
 
+export function ErrorMessage({ error }: { error?: string }) {
+  return error ? <div role="alert" className="whitespace-pre-wrap rounded-md border border-destructive p-3 text-destructive">{error}</div> : null;
+}
+
 export function CodeBlock({ children }: { children: ReactNode }) {
   return <pre className="max-h-[35rem] overflow-auto whitespace-pre rounded-md bg-muted p-4 font-mono text-xs">{children}</pre>;
 }

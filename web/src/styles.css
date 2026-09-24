@@ -1,2 +1,21 @@
 @config "../tailwind.config.ts";
 @import "tailwindcss";
+
+.system-details-trigger {
+  container: system-details / inline-size;
+}
+
+.system-details-trigger > button {
+  width: 100%;
+  padding-inline: 0.25rem;
+}
+
+.system-details-label {
+  display: none;
+}
+
+@container system-details (min-width: 8rem) {
+  .system-details-label {
+    display: inline;
+  }
+}

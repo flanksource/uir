@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,24 +13,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/uir/storage"
 	"golang.org/x/mod/modfile"
 )
 
-type discoveredWorkspace struct {
-	Roots           []discoveredRoot
-	RevisionSetHash string
-}
-
 type discoveredRoot struct {
-	RootKey        string
-	ParentRootKey  string
-	MountPath      string
-	LocalPath      string
-	Kind           string
-	Revision       string
-	RepositoryURI  string
-	ContentSetHash string
-	Files          []discoveredFile
+	RootKey           string
+	ParentRootKey     string
+	MountPath         string
+	LocalPath         string
+	Kind              string
+	Revision          string
+	WorktreeState     storage.WorktreeState
+	RepositoryURI     string
+	ContentSetHash    string
+	ConfigurationHash string
+	Variant           buildVariant
+	WorkFile          string
+	Files             []discoveredFile
 }
 
 type discoveredFile struct {
@@ -43,93 +41,6 @@ type discoveredFile struct {
 	ContentHash  string
 	SizeBytes    int64
 	ModifiedAt   time.Time
-}
-
-func discoverWorkspace(ctx context.Context, options Options) (discoveredWorkspace, error) {
-	workspacePath, err := filepath.Abs(options.Path)
-	if err != nil {
-		return discoveredWorkspace{}, fmt.Errorf("resolve index path %q: %w", options.Path, err)
-	}
-	info, err := os.Stat(workspacePath)
-	if err != nil {
-		return discoveredWorkspace{}, fmt.Errorf("stat index path %q: %w", workspacePath, err)
-	}
-	if !info.IsDir() {
-		return discoveredWorkspace{}, fmt.Errorf("UIR index path %q is not a directory", workspacePath)
-	}
-	rootKey := options.RootKey
-	if rootKey == "" {
-		rootKey = filepath.Base(workspacePath)
-	}
-	roots, err := discoverRoots(workspacePath, rootKey)
-	if err != nil {
-		return discoveredWorkspace{}, err
-	}
-	for i := range roots {
-		if err := populateRoot(ctx, &roots[i], roots, options.IncludeTests); err != nil {
-			return discoveredWorkspace{}, err
-		}
-	}
-	return discoveredWorkspace{Roots: roots, RevisionSetHash: hashRootSet(roots)}, nil
-}
-
-func discoverRoots(workspacePath, rootKey string) ([]discoveredRoot, error) {
-	rootPaths := []string{workspacePath}
-	err := filepath.WalkDir(workspacePath, func(current string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !entry.IsDir() || current == workspacePath {
-			return nil
-		}
-		if isGitRoot(current) {
-			rootPaths = append(rootPaths, current)
-		}
-		if shouldSkipRootDiscovery(entry.Name()) {
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("discover roots below %q: %w", workspacePath, err)
-	}
-	sort.SliceStable(rootPaths, func(i, j int) bool { return len(rootPaths[i]) < len(rootPaths[j]) })
-	roots := make([]discoveredRoot, 0, len(rootPaths))
-	for _, rootPath := range rootPaths {
-		root, err := newDiscoveredRoot(workspacePath, rootPath, rootKey, rootPaths)
-		if err != nil {
-			return nil, err
-		}
-		roots = append(roots, root)
-	}
-	return roots, nil
-}
-
-func newDiscoveredRoot(workspacePath, rootPath, rootKey string, rootPaths []string) (discoveredRoot, error) {
-	mount, err := filepath.Rel(workspacePath, rootPath)
-	if err != nil {
-		return discoveredRoot{}, fmt.Errorf("resolve mount path for %q: %w", rootPath, err)
-	}
-	if mount == "." {
-		mount = ""
-	}
-	mount = filepath.ToSlash(mount)
-	key := rootKey
-	if mount != "" {
-		key += "/" + mount
-	}
-	kind := "directory"
-	if isGitRoot(rootPath) {
-		kind = "git"
-	}
-	parentPath := parentRootPath(rootPath, rootPaths, workspacePath)
-	if rootPath != workspacePath && declaredSubmodule(parentPath, rootPath) {
-		kind = "git-submodule"
-	}
-	return discoveredRoot{
-		RootKey: key, ParentRootKey: parentRootKey(rootPath, rootPaths, rootKey, workspacePath),
-		MountPath: mount, LocalPath: rootPath, Kind: kind,
-	}, nil
 }
 
 func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, includeTests bool) error {
@@ -157,7 +68,20 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		return fmt.Errorf("discover Go sources in root %q: %w", root.RootKey, err)
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].PathKey < root.Files[j].PathKey })
-	root.ContentSetHash = hashFileSet(root.Files)
+	if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.Revision, root.Files); err != nil {
+		return err
+	}
+	environment, err := readGoEnvironment(ctx, root.LocalPath)
+	if err != nil {
+		return fmt.Errorf("root %q: %w", root.RootKey, err)
+	}
+	manifests, err := readManifests(root.LocalPath, environment.WorkFile)
+	if err != nil {
+		return fmt.Errorf("root %q: %w", root.RootKey, err)
+	}
+	root.ContentSetHash = contentSetHash(root.Files, manifests)
+	root.ConfigurationHash = configurationHash(includeTests, environment.Variant)
+	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
 	return nil
 }
 
@@ -225,31 +149,6 @@ func joinModulePath(module, moduleDirectory, packageDirectory string) string {
 	return strings.TrimSuffix(module, "/") + "/" + filepath.ToSlash(relative)
 }
 
-func parentRootKey(rootPath string, paths []string, rootKey, workspacePath string) string {
-	if rootPath == workspacePath {
-		return ""
-	}
-	parentPath := parentRootPath(rootPath, paths, workspacePath)
-	mount, _ := filepath.Rel(workspacePath, parentPath)
-	if mount == "." {
-		return rootKey
-	}
-	return rootKey + "/" + filepath.ToSlash(mount)
-}
-
-func parentRootPath(rootPath string, paths []string, workspacePath string) string {
-	parentPath := workspacePath
-	for _, candidate := range paths {
-		if candidate == rootPath || !pathWithin(rootPath, candidate) {
-			continue
-		}
-		if len(candidate) > len(parentPath) {
-			parentPath = candidate
-		}
-	}
-	return parentPath
-}
-
 func declaredSubmodule(parentPath, rootPath string) bool {
 	content, err := os.ReadFile(filepath.Join(parentPath, ".gitmodules"))
 	if err != nil {
@@ -306,49 +205,38 @@ func gitValue(ctx context.Context, directory string, args ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func hashRootSet(roots []discoveredRoot) string {
-	items := make([][7]string, len(roots))
-	for i := range roots {
-		items[i] = [7]string{
-			roots[i].RootKey, roots[i].ParentRootKey, roots[i].MountPath, roots[i].Kind,
-			roots[i].Revision, roots[i].RepositoryURI, roots[i].ContentSetHash,
+// worktreeState reports whether the module's files are exactly its revision's files: Git reports no
+// change under the directory and every indexed file is tracked, since Git's status omits the ignored
+// files discovery still indexes. Without a revision the module is not in a Git checkout (or the
+// checkout has no commit), so the state is unknown.
+func worktreeState(ctx context.Context, directory, revision string, files []discoveredFile) (storage.WorktreeState, error) {
+	if revision == "" {
+		return storage.WorktreeUnknown, nil
+	}
+	status, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", directory, "status", "--porcelain", "--", ".").Output()
+	if err != nil {
+		return "", fmt.Errorf("read Git worktree state of %q: %w", directory, err)
+	}
+	if len(strings.TrimSpace(string(status))) > 0 {
+		return storage.WorktreeDirty, nil
+	}
+	listed, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", directory, "ls-files", "-z", "--", ".").Output()
+	if err != nil {
+		return "", fmt.Errorf("list Git-tracked files of %q: %w", directory, err)
+	}
+	tracked := map[string]bool{}
+	for _, path := range strings.Split(string(listed), "\x00") {
+		tracked[path] = true
+	}
+	for _, file := range files {
+		if !tracked[file.PathKey] {
+			return storage.WorktreeDirty, nil
 		}
 	}
-	encoded, err := json.Marshal(items)
-	if err != nil {
-		panic(err)
-	}
-	return hashBytes(encoded)
-}
-
-func hashFileSet(files []discoveredFile) string {
-	hasher := sha256.New()
-	for _, file := range files {
-		_, _ = hasher.Write([]byte(file.PathKey))
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write([]byte(file.PackagePath))
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write([]byte(file.ContentHash))
-		_, _ = hasher.Write([]byte{0})
-	}
-	return hex.EncodeToString(hasher.Sum(nil))
+	return storage.WorktreeClean, nil
 }
 
 func hashBytes(content []byte) string {
 	hash := sha256.Sum256(content)
 	return hex.EncodeToString(hash[:])
-}
-
-func validateOptions(options *Options) error {
-	if options == nil {
-		return errors.New("UIR index options are required")
-	}
-	options.ProjectKey = strings.TrimSpace(options.ProjectKey)
-	if options.ProjectKey == "" {
-		return errors.New("UIR index project key is required")
-	}
-	if options.Path == "" {
-		options.Path = "."
-	}
-	return nil
 }

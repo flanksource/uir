@@ -3,7 +3,6 @@ package uir
 import (
 	"fmt"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 )
 
@@ -32,8 +31,10 @@ func (d DocType) GetStatementType() StatementType {
 
 type DocStmt struct {
 	statementBase
-	DocType  DocType   `json:"doc_type,omitempty"`
-	Content  string    `json:"content,omitempty"`
+	DocType DocType `json:"doc_type,omitempty"`
+	// Content is the documentation text. It is keyed "text" because "content" is
+	// the statement's own source (statementBase.Content), which it used to shadow.
+	Content  string    `json:"text,omitempty"`
 	Style    string    `json:"style,omitempty"`
 	Children []DocStmt `json:"children,omitempty" gorm:"serializer:json"`
 }
@@ -57,9 +58,7 @@ func (d *DocStmt) WithHeading(level int) *DocStmt {
 	return d
 }
 
-func (d DocStmt) Pretty() api.Text {
-	return clicky.Text(d.Content)
-}
+func (d DocStmt) Pretty() api.Text { return api.Text{Content: d.Content} }
 
 func (d *DocStmt) GetChildren() []Statement {
 	statements := make([]Statement, len(d.Children))

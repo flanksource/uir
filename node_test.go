@@ -301,7 +301,7 @@ func TestRoundTripAllStatementTypes(t *testing.T) {
 			}
 
 			// Unmarshal
-			unmarshaled, err := unmarshalStatement(data)
+			unmarshaled, err := StatementMarshaler.UnmarshalByType(data)
 			if err != nil {
 				t.Fatalf("failed to unmarshal: %v", err)
 			}

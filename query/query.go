@@ -4,7 +4,6 @@ package query
 import (
 	"errors"
 
-	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
 )
 
@@ -12,52 +11,66 @@ import (
 type Operation string
 
 const (
-	// OperationNodes selects nodes without traversing relationships.
-	OperationNodes Operation = "nodes"
-	// OperationCallers selects nodes with resolved call edges to one target.
-	OperationCallers Operation = "callers"
-	// OperationCallees selects nodes reached by resolved call edges from one target.
-	OperationCallees Operation = "callees"
-	// OperationUnresolvedCalls selects call edges whose target is unresolved.
-	OperationUnresolvedCalls Operation = "unresolved_calls"
+	OperationResolve           Operation = "resolve"
+	OperationIncoming          Operation = "incoming"
+	OperationOutgoing          Operation = "outgoing"
+	OperationDefinition        Operation = "definition"
+	OperationImplementers      Operation = "implementers"
+	OperationMethods           Operation = "methods"
+	OperationTransitiveCallers Operation = "transitive_callers"
+	OperationSet               Operation = "set"
+	OperationPath              Operation = "path"
 )
-
-// Predicate is one exact structured field comparison produced by the PEG parser.
-type Predicate struct {
-	Field string `json:"field"`
-	Value string `json:"value"`
-}
 
 // Query is the typed syntax tree consumed by the resolution pipeline.
 type Query struct {
-	Operation  Operation   `json:"operation"`
-	Predicates []Predicate `json:"predicates,omitempty"`
+	Expr *Expr `json:"expr"`
 }
 
-// ScopeOptions selects the project snapshot, optional root, and result bound.
-type ScopeOptions struct {
-	ProjectKey string
-	SnapshotID string
-	RootKey    string
-	Limit      int
+type ExprKind string
+
+const (
+	ExprSymbol       ExprKind = "symbol"
+	ExprSelector     ExprKind = "selector"
+	ExprModifier     ExprKind = "modifier"
+	ExprRelation     ExprKind = "relation"
+	ExprIntersection ExprKind = "intersection"
+	ExprUnion        ExprKind = "union"
+	ExprPath         ExprKind = "path"
+)
+
+type Filter struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value,omitempty"`
+}
+
+type Selector struct {
+	Kind          string `json:"kind"`
+	Pattern       string `json:"pattern"`
+	ModulePattern string `json:"module_pattern,omitempty"`
+}
+
+type TypedModifier struct {
+	Include  bool     `json:"include"`
+	Selector Selector `json:"selector"`
+}
+
+type Expr struct {
+	Kind      ExprKind        `json:"kind"`
+	Symbol    string          `json:"symbol,omitempty"`
+	Selector  *Selector       `json:"selector,omitempty"`
+	Modifiers []TypedModifier `json:"modifiers,omitempty"`
+	Relation  string          `json:"relation,omitempty"`
+	Depth     int             `json:"depth,omitempty"`
+	Filters   []Filter        `json:"filters,omitempty"`
+	Left      *Expr           `json:"left,omitempty"`
+	Right     *Expr           `json:"right,omitempty"`
 }
 
 // ResolutionStage records one successful, externally visible pipeline decision.
 type ResolutionStage struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
-}
-
-// Result contains the resolved scope and the operation-specific records.
-type Result struct {
-	Operation     Operation              `json:"operation"`
-	ProjectKey    string                 `json:"project_key"`
-	SnapshotID    string                 `json:"snapshot_id"`
-	RootKey       string                 `json:"root_key,omitempty"`
-	Target        *storage.Node          `json:"target,omitempty"`
-	Nodes         []storage.Node         `json:"nodes,omitempty"`
-	Relationships []storage.Relationship `json:"relationships,omitempty"`
-	Stages        []ResolutionStage      `json:"stages"`
 }
 
 // Pipeline resolves parsed queries against relational UIR storage.
