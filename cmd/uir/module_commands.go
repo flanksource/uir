@@ -40,14 +40,46 @@ func (row moduleRootRow) Row() map[string]any {
 	}
 }
 
+// moduleQueryRow is one query match or declaration. Source is the display form of Path, Line, and
+// Column; the remaining fields are set by the index-backed operations.
 type moduleQueryRow struct {
-	Kind       string `json:"kind"`
-	Root       string `json:"root"`
-	Symbol     string `json:"symbol"`
-	Location   string `json:"location"`
-	Source     string `json:"source"`
-	SnapshotID string `json:"snapshot_id"`
+	Kind         string `json:"kind"`
+	Root         string `json:"root"`
+	Symbol       string `json:"symbol"`
+	Location     string `json:"location"`
+	Source       string `json:"source"`
+	SnapshotID   string `json:"snapshot_id"`
+	Path         string `json:"path,omitempty"`
+	Line         *int   `json:"line,omitempty"`
+	Column       *int   `json:"column,omitempty"`
+	EndLine      *int   `json:"end_line,omitempty"`
+	EndColumn    *int   `json:"end_column,omitempty"`
+	Role         string `json:"role,omitempty"`
+	SymbolID     string `json:"symbol_id,omitempty"`
+	EnclosingID  string `json:"enclosing_id,omitempty"`
+	EnclosingKey string `json:"enclosing_key,omitempty"`
+	Coverage     string `json:"coverage,omitempty"`
+	Dispatch     bool   `json:"dispatch,omitempty"`
 }
+
+// moduleQueryResult is the query envelope. It is clicky.Paged, so JSON and YAML responses carry every
+// field while tabular formats render Matches.
+type moduleQueryResult struct {
+	Operation    query.Operation         `json:"operation"`
+	Total        int                     `json:"total"`
+	Matches      []moduleQueryRow        `json:"matches"`
+	Declarations []moduleQueryRow        `json:"declarations"`
+	Symbols      []query.ModuleSymbol    `json:"symbols"`
+	Coverage     []query.ModuleCoverage  `json:"coverage"`
+	Stages       []query.ResolutionStage `json:"stages"`
+	limit        int
+}
+
+func (result moduleQueryResult) PageMetadata() clicky.PageInfo {
+	return clicky.PageInfo{Limit: result.limit, Total: int64(result.Total)}
+}
+
+func (result moduleQueryResult) PageRows() any { return result.Matches }
 
 type moduleGetOptions struct {
 	Root string `args:"true" required:"true"`
@@ -161,12 +193,12 @@ func registerModuleCommands(root *cobra.Command) {
 	get.Args = cobra.ExactArgs(1)
 	setModuleRoute(get, "modules/by-key/{root}")
 
-	queryCommand := clicky.AddNamedCommandWithContext("query", root, moduleQueryOptions{}, func(ctx context.Context, options moduleQueryOptions) ([]moduleQueryRow, error) {
+	queryCommand := clicky.AddNamedCommandWithContext("query", root, moduleQueryOptions{}, func(ctx context.Context, options moduleQueryOptions) (moduleQueryResult, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return nil, err
+			return moduleQueryResult{}, err
 		}
-		return queryModuleRows(ctx, database, options)
+		return queryModules(ctx, database, options)
 	})
 	queryCommand.Use = "query <expression>"
 	queryCommand.Short = "Run a PEG query against indexed modules"
@@ -216,19 +248,31 @@ func registerModuleCommands(root *cobra.Command) {
 	setModuleRoute(reindex, "modules/reindex")
 }
 
-func queryModuleRows(ctx context.Context, database *gorm.DB, options moduleQueryOptions) ([]moduleQueryRow, error) {
+func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOptions) (moduleQueryResult, error) {
 	pipeline, err := query.NewPipeline(database)
 	if err != nil {
-		return nil, err
+		return moduleQueryResult{}, err
 	}
 	result, err := pipeline.RunModules(ctx, options.Expression, query.ModuleScopeOptions{
 		RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
 	})
 	if err != nil {
-		return nil, err
+		return moduleQueryResult{}, err
 	}
-	rows := make([]moduleQueryRow, 0, len(result.Matches))
-	for _, match := range result.Matches {
+	symbols := result.Symbols
+	if symbols == nil {
+		symbols = []query.ModuleSymbol{}
+	}
+	return moduleQueryResult{
+		Operation: result.Operation, Total: result.Total, Matches: moduleQueryRows(result.Matches),
+		Declarations: moduleQueryRows(result.Declarations), Symbols: symbols, Coverage: result.Coverage,
+		Stages: result.Stages, limit: options.Limit,
+	}, nil
+}
+
+func moduleQueryRows(matches []query.ModuleMatch) []moduleQueryRow {
+	rows := make([]moduleQueryRow, 0, len(matches))
+	for _, match := range matches {
 		source := match.Path
 		if match.Line != nil {
 			source += fmt.Sprintf(":%d", *match.Line)
@@ -239,9 +283,12 @@ func queryModuleRows(ctx context.Context, database *gorm.DB, options moduleQuery
 		rows = append(rows, moduleQueryRow{
 			Kind: match.Kind, Root: match.RootKey, Symbol: match.Identifier.SymbolKey(),
 			Location: match.Location, Source: source, SnapshotID: match.SnapshotID,
+			Path: match.Path, Line: match.Line, Column: match.Column, EndLine: match.EndLine, EndColumn: match.EndColumn,
+			Role: match.Role, SymbolID: match.SymbolID, EnclosingID: match.EnclosingID, EnclosingKey: match.EnclosingKey,
+			Coverage: match.Coverage, Dispatch: match.Dispatch,
 		})
 	}
-	return rows, nil
+	return rows
 }
 
 func setModuleRoute(command *cobra.Command, path string) {

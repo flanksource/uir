@@ -63,6 +63,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)
 	registerModuleCommands(root)
+	registerDiffCommand(root)
 	registerSystemInfoCommand(root)
 	root.AddCommand(newServeCommand(runtime))
 	versionCommand := &cobra.Command{

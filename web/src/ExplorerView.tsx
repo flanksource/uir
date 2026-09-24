@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { Select, Tabs, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
+import { Select, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
 import { Tree } from "@flanksource/clicky-ui/data";
 import { UiFolder, UiListTree } from "@flanksource/clicky-ui/icons";
 import { MonacoProvider } from "@flanksource/clicky-ui/monaco";
@@ -10,8 +10,9 @@ import { fileSelectionPatch } from "./explorer-navigation";
 import { FileTypeIcon, FolderTypeIcon } from "./file-icons";
 import { getMonacoWorker } from "./monaco-workers";
 import type { Route } from "./route";
+import { SymbolDetails } from "./SymbolDetails";
 import { SymbolIcon } from "./symbol-icons";
-import { CodeBlock, Detail, DetailGrid, ErrorMessage, Field, Muted, TextInput } from "./ui";
+import { ErrorMessage, Field, Muted, TextInput } from "./ui";
 import { useLoad, type Load } from "./use-load";
 
 type OutlineItem = SymbolItem | { id: string; label: string; children: SymbolItem[]; source: ModuleSource };
@@ -37,16 +38,16 @@ function filterItems<T extends { children: T[] }>(items: T[], query: string, tex
   });
 }
 
-function revealSymbol(editor: EditorInstance, node?: ModuleNode) {
-  if (!node?.line || node.line < 1) return;
-  editor.setPosition({ lineNumber: node.line, column: Math.max(1, node.column ?? 1) });
-  editor.revealLineInCenter(node.line);
+function revealPosition(editor: EditorInstance, line: number, column: number) {
+  if (line < 1) return;
+  editor.setPosition({ lineNumber: line, column: Math.max(1, column) });
+  editor.revealLineInCenter(line);
 }
 
-function SourcePane({ snapshot, source, node }: { snapshot: string; source?: ModuleSource; node?: ModuleNode }) {
+function SourcePane({ snapshot, source, line, column }: { snapshot: string; source?: ModuleSource; line: number; column: number }) {
   const content = useLoad<ModuleSourceContent>(source ? () => readModuleSource(snapshot, source.path) : null, `${snapshot}:${source?.id}`);
   const editor = useRef<EditorInstance | null>(null);
-  useEffect(() => { if (editor.current && content.data) revealSymbol(editor.current, node); }, [content.data, node]);
+  useEffect(() => { if (editor.current && content.data) revealPosition(editor.current, line, column); }, [content.data, line, column]);
 
   if (!source) return <div className="p-3"><Muted>Select a file to view its verified content.</Muted></div>;
   return <div className="flex h-full min-h-0 flex-col">
@@ -60,33 +61,9 @@ function SourcePane({ snapshot, source, node }: { snapshot: string; source?: Mod
     {content.data && <div className="min-h-0 flex-1">
       <MonacoProvider getWorker={getMonacoWorker}>
         <Editor value={content.data.content} language="go" path={`file:///uir/${snapshot}/${source.path}`} height="100%" options={{ readOnly: true, automaticLayout: true, minimap: { enabled: false } }}
-          onMount={(instance) => { editor.current = instance; revealSymbol(instance, node); }} />
+          onMount={(instance) => { editor.current = instance; revealPosition(instance, line, column); }} />
       </MonacoProvider>
     </div>}
-  </div>;
-}
-
-function SymbolDetails({ node }: { node?: ModuleNode }) {
-  const [tab, setTab] = useState("overview");
-  if (!node) return <div className="p-3"><Muted>Select a symbol to inspect its payload, field, and outgoing calls.</Muted></div>;
-  return <div className="flex min-w-0 flex-col gap-3 p-3">
-    <strong className="break-all text-sm">{node.symbol || node.id}</strong>
-    <Tabs value={tab} onChange={setTab} tabs={[
-      { id: "overview", label: "Overview" }, { id: "field", label: "Field", count: node.field ? 1 : 0 },
-      { id: "calls", label: "Calls", count: node.calls.length }, { id: "raw", label: "Raw" },
-    ]} />
-    {tab === "overview" && <>
-      <DetailGrid>
-        <Detail label="Kind">{node.node_type}</Detail>
-        <Detail label="Source">{node.path}{node.line ? `:${node.line}` : ""}</Detail>
-        <Detail label="Child slot">{node.child_slot}</Detail>
-        <Detail label="Semantic hash">{node.semantic_hash.slice(0, 12)}</Detail>
-      </DetailGrid>
-      <h3>UIR payload</h3><CodeBlock>{JSON.stringify(node.payload, null, 2)}</CodeBlock>
-    </>}
-    {tab === "field" && (node.field ? <CodeBlock>{JSON.stringify(node.field, null, 2)}</CodeBlock> : <Muted>No field projection</Muted>)}
-    {tab === "calls" && (node.calls.length ? <CodeBlock>{JSON.stringify(node.calls, null, 2)}</CodeBlock> : <Muted>No outgoing calls</Muted>)}
-    {tab === "raw" && <CodeBlock>{JSON.stringify(node, null, 2)}</CodeBlock>}
   </div>;
 }
 
@@ -146,10 +123,11 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
     });
   }, [nodes, route.source, route.symbolSearch, sources]);
   const selectedSymbol = findItem(items, route.node);
+  const revealed = route.line ? route : selectedNode && selectedNode.source_id === route.source ? { line: selectedNode.line ?? 0, column: selectedNode.column ?? 1 } : { line: 0, column: 0 };
 
   useEffect(() => {
     if (!browse.data) return;
-    if (route.node && selectedNode && route.source !== selectedNode.source_id) onRoute({ source: selectedNode.source_id, fileSearch: "" }, true);
+    if (route.node && selectedNode && !route.source) onRoute({ source: selectedNode.source_id, fileSearch: "" }, true);
     else if (!route.source && !route.node && !route.fileSearch && sources.length) onRoute({ source: sources[0].id }, true);
   }, [browse.data, onRoute, route.fileSearch, route.node, route.source, selectedNode, sources]);
 
@@ -159,9 +137,9 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
     { id: "outline", label: "Symbols", icon: <UiListTree />, location: "left", width: 300, height: 240,
       content: <OutlinePane items={items} selected={selectedSymbol} route={route} onRoute={onRoute} />, contentClassName: "overflow-hidden" },
     { id: "source", label: selectedSource?.path ?? "Source", icon: <FileTypeIcon filename={selectedSource?.path ?? ""} />, location: "center", collapsible: false,
-      content: <SourcePane snapshot={route.snapshot} source={selectedSource} node={selectedNode} />, contentClassName: "overflow-hidden" },
+      content: <SourcePane snapshot={route.snapshot} source={selectedSource} line={revealed.line} column={revealed.column} />, contentClassName: "overflow-hidden" },
     { id: "details", label: "Details", icon: <UiListTree />, location: "right", width: 320,
-      content: <SymbolDetails node={selectedNode} /> },
+      content: <SymbolDetails node={selectedNode} route={route} sources={sources} onRoute={onRoute} /> },
   ];
 
   return <div className="flex h-full min-h-0 flex-col">

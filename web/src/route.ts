@@ -5,6 +5,8 @@ export type Route = {
   snapshot: string;
   source: string;
   node: string;
+  line: number;
+  column: number;
   fileSearch: string;
   symbolSearch: string;
   expression: string;
@@ -21,6 +23,8 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     snapshot: params.get("snapshot") ?? "",
     source: params.get("source") ?? "",
     node: params.get("node") ?? "",
+    line: Number(params.get("line") ?? 0),
+    column: Number(params.get("column") ?? 0),
     fileSearch: params.get("fileSearch") ?? (path === "explorer" ? params.get("search") ?? "" : ""),
     symbolSearch: params.get("symbolSearch") ?? (path === "nodes" ? params.get("search") ?? "" : ""),
     expression: params.get("expression") ?? "",
@@ -33,7 +37,16 @@ export function routeURL(route: Route): string {
   for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "expression"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
-  if (route.offset > 0) params.set("offset", String(route.offset));
+  for (const key of ["line", "column", "offset"] as const) {
+    if (route[key] > 0) params.set(key, String(route[key]));
+  }
   const query = params.toString();
   return `/${route.view === "overview" ? "" : route.view}${query ? `?${query}` : ""}`;
+}
+
+// applyRoutePatch drops a revealed line and column once the source or node changes, unless the patch
+// reveals a new position itself.
+export function applyRoutePatch(current: Route, patch: Partial<Route>): Route {
+  const moved = ("source" in patch || "node" in patch) && !("line" in patch);
+  return { ...current, ...(moved ? { line: 0, column: 0 } : {}), ...patch };
 }

@@ -150,6 +150,13 @@ var _ = Describe("serve", func() {
 		handler.ServeHTTP(snapshots, httptest.NewRequest(http.MethodGet,
 			"/api/v1/modules/snapshots?root=example.org%2Fbrowser&location="+url.QueryEscape(locationRows[0].CanonicalPath), nil))
 		Expect(snapshots.Code).To(Equal(http.StatusOK), snapshots.Body.String())
+		var snapshotKeys struct {
+			Data []map[string]any `json:"data"`
+		}
+		Expect(json.Unmarshal(snapshots.Body.Bytes(), &snapshotKeys)).To(Succeed())
+		Expect(snapshotKeys.Data).To(HaveLen(1))
+		Expect(snapshotKeys.Data[0]).To(And(HaveKeyWithValue("worktree_state", "unknown"), HaveKeyWithValue("coverage", "indexed"),
+			HaveKey("completed_at"), Not(HaveKey("state"))), "a snapshot reports its worktree state and coverage, not a publication state")
 		var snapshotPage struct {
 			Data []storage.ModuleSnapshotView `json:"data"`
 		}
@@ -174,10 +181,66 @@ var _ = Describe("serve", func() {
 		request.Header.Set("Content-Type", "application/json")
 		handler.ServeHTTP(queried, request)
 		Expect(queried.Code).To(Equal(http.StatusOK), queried.Body.String())
-		var queryRows []moduleQueryRow
-		Expect(json.Unmarshal(queried.Body.Bytes(), &queryRows)).To(Succeed())
-		Expect(queryRows).To(HaveLen(1))
-		Expect(queryRows[0].Symbol).To(ContainSubstring("Run"))
+		var queryResult moduleQueryResult
+		Expect(json.Unmarshal(queried.Body.Bytes(), &queryResult)).To(Succeed())
+		Expect(queryResult.Operation).To(Equal(query.OperationNodes))
+		Expect(queryResult.Total).To(Equal(1))
+		Expect(queryResult.Matches).To(HaveLen(1))
+		Expect(queryResult.Matches[0].Symbol).To(ContainSubstring("Run"))
+	})
+
+	It("serves the query envelope with snake_case row fields for references and search", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		_, err := addModules(ctx, database, writeReferencesModule(), false)
+		Expect(err).To(Succeed())
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		post := func(expression string) map[string]any {
+			GinkgoHelper()
+			body, err := json.Marshal(map[string]any{"args": []string{expression}, "root": referencesRoot})
+			Expect(err).To(Succeed())
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/query", strings.NewReader(string(body)))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+			Expect(response.Header().Get("X-Total-Count")).To(Equal("1"))
+			var envelope map[string]any
+			Expect(json.Unmarshal(response.Body.Bytes(), &envelope)).To(Succeed())
+			return envelope
+		}
+
+		references := post(`references of node where type = "Store" and method = "Save"`)
+		Expect(references).To(HaveKeyWithValue("operation", "references"))
+		Expect(references).To(HaveKeyWithValue("total", 1.0))
+		Expect(references).To(HaveKey("stages"))
+		reference := references["matches"].([]any)[0].(map[string]any)
+		Expect(reference).To(HaveKeyWithValue("path", "app/app.go"))
+		Expect(reference).To(HaveKeyWithValue("source", "app/app.go:5:28"))
+		Expect([]any{reference["line"], reference["column"], reference["end_line"], reference["end_column"]}).To(Equal([]any{5.0, 28.0, 5.0, 32.0}))
+		Expect(reference).To(HaveKeyWithValue("role", "call"))
+		Expect(reference).To(HaveKeyWithValue("coverage", "indexed"))
+		Expect(reference).To(HaveKey("symbol_id"))
+		Expect(reference).To(HaveKey("enclosing_id"))
+		Expect(reference).To(HaveKey("enclosing_key"))
+		Expect(reference).ToNot(HaveKey("dispatch"), "dispatch is omitted unless the caller is reached through an interface")
+		declaration := references["declarations"].([]any)[0].(map[string]any)
+		Expect(declaration).To(HaveKeyWithValue("kind", "definition"))
+		Expect(declaration).To(HaveKeyWithValue("path", "store/store.go"))
+		symbol := references["symbols"].([]any)[0].(map[string]any)
+		Expect(symbol).To(HaveKeyWithValue("id", reference["symbol_id"]))
+		Expect(symbol).To(HaveKeyWithValue("owner", "Store"))
+		Expect(symbol).To(HaveKeyWithValue("name", "Save"))
+		Expect(symbol).To(HaveKeyWithValue("visibility", "exported"))
+		Expect(references["coverage"]).To(ConsistOf(And(
+			HaveKeyWithValue("package_path", referencesRoot+"/broken"), HaveKeyWithValue("coverage", "partial"),
+		)))
+
+		search := post(`search "Store.Sa"`)
+		Expect(search).To(HaveKeyWithValue("operation", "search"))
+		Expect(search["matches"]).To(ConsistOf(And(HaveKeyWithValue("kind", "symbol"), HaveKeyWithValue("path", "store/store.go"))))
+		Expect(search).To(HaveKeyWithValue("declarations", BeEmpty()))
 	})
 
 	It("adds and reindexes module roots through structured API operations", func(ctx SpecContext) {
