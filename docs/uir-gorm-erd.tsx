@@ -29,7 +29,7 @@ function Label({ children }: { children: React.ReactNode }) {
 
 function ModulesAndPublication() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-start justify-center gap-16 mb-16">
+    <div className="flex items-center justify-center gap-16 mb-16">
       <Entity id={id('module')} title="modules" detail="One logical Go module path" accent={COLORS.accent} fields={[
         { name: 'id', type: 'uuid', pk: true },
         { name: 'root_key', type: 'text · unique' },
@@ -78,15 +78,15 @@ function ModulesAndPublication() {
     <Arrow variant="er" from={id('location')} to={id('module')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>N:1 module</Label> }} />
     <Arrow variant="er" from={id('snapshot')} to={id('location')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>N:1 checkout</Label> }} />
     <Arrow variant="er" from={id('primary')} to={id('module')} path="straight" startAnchor="top" endAnchor="bottom" />
-    <Arrow variant="er" from={id('primary')} to={id('location')} path="straight" startAnchor="top" endAnchor="bottom" />
-    <Arrow variant="er" from={id('head')} to={id('location')} path="straight" startAnchor="top" endAnchor="bottom" />
+    <Arrow variant="er" from={id('primary')} to={id('location')} path="straight" startAnchor="top" endAnchor={{ position: 'bottom', offset: { x: -50 } }} />
+    <Arrow variant="er" from={id('head')} to={id('location')} path="straight" startAnchor="top" endAnchor={{ position: 'bottom', offset: { x: 50 } }} />
     <Arrow variant="er" from={id('head')} to={id('snapshot')} path="straight" startAnchor="top" endAnchor="bottom" labels={{ middle: <Label>(location_id, snapshot_id)</Label> }} />
   </>}</Diagram>;
 }
 
 function FilesAndDocuments() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-start justify-center gap-20 mb-16">
+    <div className="flex items-center justify-center gap-20 mb-16">
       <Entity id={id('revision')} title="source_revisions" detail="Content-addressed byte identity of one file version" accent={COLORS.accent} fields={[
         { name: 'id', type: 'uuid', pk: true },
         { name: 'root_id', type: 'uuid', fk: true },
@@ -131,7 +131,7 @@ function FilesAndDocuments() {
 
 function SymbolIndex() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-start justify-center gap-20 mb-16">
+    <div className="flex items-center justify-center gap-20 mb-16">
       <Entity id={id('symbol')} title="symbols" detail="Canonical identity, global across modules" accent={COLORS.accent} fields={[
         { name: 'id', type: 'text · 64 hex', pk: true },
         { name: 'identity_version', type: 'integer' },
@@ -159,7 +159,7 @@ function SymbolIndex() {
         { name: 'input_hash', type: 'text · 64 hex' },
       ]} />
     </div>
-    <div className="flex items-start justify-center gap-20">
+    <div className="flex items-center justify-center gap-20">
       <Entity id={id('coverage')} title="package_coverage" detail="Per-snapshot package input and export shape" accent={COLORS.outputBorder} fields={[
         { name: 'snapshot_id', type: 'uuid', pk: true, fk: true },
         { name: 'package_path', type: 'text', pk: true },

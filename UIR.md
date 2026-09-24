@@ -24,6 +24,7 @@ It is written for two audiences:
 - `UIR` is the root aggregate. It does not carry `node_type`.
 - Concrete node documents are identified by `node_type`.
 - Concrete statements are identified by `statement_type`.
+- A statement whose `Type` is refined past its registered kind keeps `statement_type` at the kind and carries the refined value in `statement_refinement`, e.g. `{"statement_type": "call", "statement_refinement": "call:package"}`. A refinement is accepted when its longest registered `:`-prefix is the statement's own kind, or when the kind lists it explicitly (a `control:block` may be refined to `doc`); anything else is refused on encode and decode.
 - `MethodNode.body` is always a `BlockStmt`, even when the body object omits `statement_type` in current Go builder output.
 
 ### Shared embedding model
