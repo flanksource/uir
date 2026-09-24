@@ -1,152 +1,76 @@
 # Querying indexed modules
 
-`uir query` uses the PEG grammar in `query/grammar.peg` and a resolution pipeline over immutable module snapshots. It does not translate the expression into SQL. `nodes` and `unresolved calls` read the declarations and call occurrences of the documents a snapshot activates. The symbol operations (`references`, `definitions`, `implementations`, `callers`, `callees`, and `search`) resolve canonical symbols through the `symbols` table and read only the documents their `symbol_postings` select.
+`uir query` reads the snapshot-aware symbol index using a compact Go symbol expression. It resolves canonical symbols and traverses recorded declarations, occurrences, implementations, and calls. Queries run against the primary head of each selected registered root unless `--location` or `--snapshot` selects another indexed view. The parser is generated from `query/grammar.peg` with `make query-parser`.
 
-## CLI and scope
+## Quick start
 
 ```sh
-uir query 'nodes where method = "Run"' --root example.org/service
-uir query 'references of node where type = "Store" and method = "Save"' --root example.org/service
-uir query 'callers of node where type = "Store" and method = "Save" including dispatch' --root example.org/service --location ../service-feature
-uir query 'search "Store.Sa"' --root example.org/service
-uir query 'unresolved calls' --snapshot 6f8b2c6e-79af-4b59-8736-e45696f0c546 --format json
+uir query 'store.Store.Save' --root example.org/service
+uir query 'store.Store.Save <' --root example.org/service
+uir query 'store.Store.Save < -pkg store' --root example.org/service
+uir query 'store.Store.Save < -pkg example.org/service/...' --root example.org/service
+uir query 'example.org/service/store.Store.Save =' --root example.org/service
+uir query 'api.* >> store.Store.Save' --root example.org/service --format json
+uir query 'pkg:example.org/service:store & struct:Store' --root example.org/service
+uir query 'func:Store.Save < pkg:example.org/service:api/**' --root example.org/service
+uir query 'func:* +pkg:example.org/service:api -func:Test*' --root example.org/service
 ```
 
-`--dsn` on the root command accepts a PostgreSQL DSN, `sqlite://` URL, or plain `.db` path. Without it, the CLI uses its configured local SQLite database. `--root` is the full `go.mod` module path; `--location` identifies a registered canonical checkout; `--snapshot` selects one historical published snapshot by UUID. Location and snapshot are mutually exclusive. A snapshot plus root must agree. `--limit` defaults to 100 and accepts 1–1000. Clicky's shared format flags select table, JSON, YAML, and other supported renderers.
-
-Without an explicit location or snapshot, `nodes` and `unresolved calls` read the primary head of each selected root, and the symbol operations read the head of every registered checkout of each selected root. A selected historical snapshot never silently falls back to a newer head.
-
-### Output envelope
-
-`uir query` and `POST /api/v1/modules/query` return one envelope. JSON and YAML carry every field; table, CSV, and the other tabular renderers show `matches` (the CLI table also prints the other collections beneath it), and HTTP responses set `X-Total-Count` to `total`.
-
-| Field | Content |
-| --- | --- |
-| `operation` | The parsed operation, e.g. `references` or `search`. |
-| `total` | Rows found before `--limit` was applied. For `search` the scan stops once the limit is filled, so `total` is then a lower bound and the `search` stage says "scan stopped at the limit". |
-| `matches` | Result rows, bounded by the limit. |
-| `declarations` | The target's definitions, in the row shape; empty for operations without a single target. |
-| `symbols` | The canonical symbols the selector resolved to: `id`, `module_key`, `package_path`, `kind`, `owner_id`, `owner`, `name`, `visibility`, `parameter_types`. Empty for `nodes`, `unresolved calls`, and `search`. |
-| `coverage` | Packages in scope that are `partial`, `syntax`, or `excluded`: `root_key`, `location`, `snapshot_id`, `package_path`, `coverage`, and `diagnostics`, the number of recorded diagnostics for that package. |
-| `stages` | Pipeline decisions as `name`/`value` pairs. |
-
-Every row carries `kind`, `root`, `symbol` (the identifier's symbol key: the row's own declaration, or the declaration enclosing an occurrence), `location` (checkout), `source` (display `path:line:column`), and `snapshot_id`. Rows add, when set and omitted otherwise: `path`, `line`, `column`, `end_line`, `end_column`, `role`, `symbol_id`, `enclosing_id`, `enclosing_key`, `coverage`, and `dispatch` (`true` only for a caller reached through an interface).
-
-```json
-{
-  "operation": "references",
-  "total": 1,
-  "matches": [{
-    "kind": "reference", "root": "example.org/refs", "symbol": "method:example.org/refs/app:Run#()",
-    "location": "/src/refs", "source": "app/app.go:5:28", "snapshot_id": "1ae9058d-daec-4f34-bd5b-21832ff480f7",
-    "path": "app/app.go", "line": 5, "column": 28, "end_line": 5, "end_column": 32, "role": "call",
-    "symbol_id": "f22a813c…", "enclosing_id": "d7e469f7…",
-    "enclosing_key": "v1:[\"method\",\"\",\"example.org/refs/app\",\"\",\"Run\",\"\",\"()\"]", "coverage": "indexed"
-  }],
-  "declarations": [{
-    "kind": "definition", "root": "example.org/refs", "symbol": "method:example.org/refs/store.Store:Save#()",
-    "location": "/src/refs", "source": "store/store.go:5:14", "snapshot_id": "1ae9058d-daec-4f34-bd5b-21832ff480f7",
-    "path": "store/store.go", "line": 5, "column": 14, "end_line": 5, "end_column": 18, "role": "definition",
-    "symbol_id": "f22a813c…", "coverage": "indexed"
-  }],
-  "symbols": [{
-    "id": "f22a813c…", "module_key": "example.org/refs", "package_path": "example.org/refs/store", "kind": "method",
-    "owner_id": "6959d8b2…", "owner": "Store", "name": "Save", "visibility": "exported", "parameter_types": []
-  }],
-  "coverage": [{
-    "root_key": "example.org/refs", "location": "/src/refs", "snapshot_id": "1ae9058d-daec-4f34-bd5b-21832ff480f7",
-    "package_path": "example.org/refs/broken", "coverage": "partial", "diagnostics": 1
-  }],
-  "stages": [
-    {"name": "parse", "value": "references"}, {"name": "scope", "value": "1 snapshots"},
-    {"name": "coverage", "value": "incomplete: 1 package is not fully indexed (1 partial)"},
-    {"name": "resolve", "value": "1 symbols"}, {"name": "execute", "value": "1 rows"}
-  ]
-}
-```
+`--root` is a registered module path. `--location` selects a registered checkout and `--snapshot` selects a historical published snapshot; they cannot be combined. `--limit` defaults to 100 and accepts 1–1000. The root command's `--dsn` selects the UIR database. The HTTP equivalent is `POST /api/v1/modules/query` with `args: [expression]` and optional `root`, `location`, `snapshot`, and `limit` fields.
 
 ## Grammar
 
 ```text
-nodes [where predicate [and predicate ...]]
-references of node where predicate [and predicate ...]
-definitions of node where predicate [and predicate ...]
-implementations of node where predicate [and predicate ...]
-callers of node where predicate [and predicate ...] [including dispatch]
-callees of node where predicate [and predicate ...]
-search "prefix" [where root = "module/path"]
-unresolved calls [where root = "module/path"]
-predicate := field = "value"
+expression  := chain ("&" chain | "|" chain)* | expression ">>" [depth] expression
+chain       := primary modifier* (relation filter* primary? | relation filter*)*
+primary     := symbol | selector | "(" expression ")"
+selector    := "pkg:" package-glob | "pkg:" module-glob ":" relative-package-glob
+             | "mod:" module-glob | "func:" name-glob | "field:" name-glob | "struct:" name-glob
+modifier    := ("+" | "-") selector
+symbol      := package.Type.Member | package.Type | package.Member | package.*
+relation    := "<" | ">" | "=" | "<<" [depth] | ":impl" | ":methods" | "~w"
+filter      := "-f" file-suffix | "+pkg" package | "-pkg" package | "~w"
+depth       := 1..8
 ```
 
-Keywords and fields are lowercase; values use double-quoted Go-style strings. Comparisons are exact equality, not substring or regex matching. `root` must agree with `--root` when both are present. An incomplete expression, unknown field, unquoted value, `including dispatch` after anything but `callers`, or trailing input fails at parse time.
+Parentheses group sets and path endpoints. `&` binds more tightly than `|`; `>>` joins two complete endpoint expressions. Both `<<` and `>>` are bounded, with defaults of 3 and 8 hops respectively. Invalid or incomplete expressions fail at the parser. The symbol is a Go qualified name, never a predicate or a bound variable.
 
-The two families accept different predicates, and a predicate the operation cannot evaluate is an error rather than a filter that matches nothing:
+Typed selectors return sets of active declared canonical symbols. `pkg:` and `mod:` select symbols declared in packages or registered module roots; they do not create package or module result entities. `func:` includes functions and methods, `field:` includes struct fields, and `struct:` includes defined non-alias types with a struct underlying type in the selected snapshot. Short typed names may select several symbols without an ambiguity error. An exact typed selector with no active match returns an empty result.
 
-| Operations | Predicates |
+Selector globs are case sensitive and anchored to the whole key. `*` matches within one slash-delimited segment, `?` matches one character within it, and `**` must occupy a whole segment and can match zero or more segments. Periods and literal `@`, `#`, `$`, and `!` have no special meaning; escape operator characters with `\`. A colon remains a selector separator. One-part `pkg:example.org/service/store` matches a full import path. Two-part `pkg:example.org/service:store` matches the `store` package relative to that registered module root; `pkg:example.org/*:internal/**` searches matching module roots without crossing a nested module boundary. Use `.` only as the complete relative pattern for a module's root package and `**` for the root plus descendants. For `func:`, `field:`, and `struct:`, a pattern with no dot or slash matches a name; a dot selects the owner-qualified name; a slash selects the complete `query_name`.
+
+Postfix `+kind:pattern` keeps symbols and `-kind:pattern` removes them. Multiple positive modifiers of one kind are ORed, multiple negatives are subtracted, and different kinds are ANDed. For example, `func:* +pkg:example.org/service:api +pkg:example.org/service:store -func:Test*` keeps functions from either package except matching test names. Parenthesize a unary relation before filtering its projected result: `(func:Save <) +pkg:example.org/service:api`. A leading exclusion is invalid.
+
+| Expression | Result |
 | --- | --- |
-| `nodes` | `node_type`, `module`, `package`, `type`, `method`, `field`, `signature`, `language`, `symbol_key`, `identity_key`, `root`, compared with each declaration's structured identifier |
-| `references`, `definitions`, `implementations`, `callers`, `callees` | `symbol_id`, `module`, `package`, `type`, `method`, `field`, `kind`, `name`, `owner`, `root`, compared with columns of `symbols` |
-| `search`, `unresolved calls` | `root` only |
+| `sub.Thing.Do` | Resolve a symbol and show its declaration. |
+| `sub.Thing.Do <` | Incoming call sites, including known interface dispatch for methods. For other symbols, incoming references. |
+| `sub.Thing.Do >` | Call sites within that function or method. |
+| `sub.Thing.Do =` | Definition locations. |
+| `sub.Thing.Do <<3` | Callers up to three edges away, with a depth on each row. |
+| `sub.Thing.Field ~w` | Write references. `sub.Thing.Field < ~w` is equivalent. |
+| `sub.Iface :impl` | Types indexed as implementing the interface. |
+| `sub.Thing :methods` | Methods owned by the type. |
+| `sub.Thing.Do < -f _test.go` | Incoming rows excluding paths with that suffix. |
+| `sub.Thing.Do < +pkg api` | Incoming rows inside a package named `api`; a full import path selects exactly that package. |
+| `sub.Thing.Do < -pkg sub` | Incoming rows outside package `sub`; use the full import path when several packages share the name. |
+| `sub.Thing.Do < -pkg example.org/mod/...` | Exclude callers in the module root package and every subpackage. `+pkg` accepts the same pattern. |
+| `os.Exec.Command < & io.ReadAll >` | Symbols shared by the two projected result sets. |
+| `main.* >> sub.Thing.Do` | Shortest recorded call chain, if one exists. |
+| `func:Save < pkg:example.org/service:api` | Incoming call sites whose enclosing caller is declared in that package. |
+| `func:Run > func:Store.Save` | Outgoing call sites whose resolved callee is that method. |
+| `struct:Store :methods func:Save` | Method witnesses of matching struct types, narrowed to `Save`. |
 
-A symbol selector maps onto `symbols` columns: `module` is `module_key`, `package` is `package_path`, `kind` is one of `package`, `type`, `func`, `method`, `field`, `var`, `const`, `builtin`, `name` is the symbol's name, `owner` is its owner's name, and `symbol_id` is the canonical id. `type` alone selects a type named that; with `method` or `field` it selects the owner. `method` without an owner matches functions and methods; with one, only methods. The selector must name a symbol through `symbol_id`, `name`, `type`, `method`, or `field`, and conflicting names (`method = "Run" and name = "Stop"`) are rejected.
+A name with `/` is matched against its full import path; without `/`, the package portion is suffix matched. `.*` selects direct children of the named package or owner. A spelling that resolves to several canonical symbols returns positioned candidates with their full `query_name`, rather than choosing one. Use a full path to disambiguate. `&` and `|` compare canonical symbol identities after each side's location rows are projected to symbols. Chaining a relation traverses the projected symbols from the previous step.
 
-```text
-nodes where language = "go" and node_type = "method"
-references of node where package = "example.org/service/invoices" and type = "Store" and method = "Save"
-definitions of node where kind = "func" and name = "Run"
-implementations of node where type = "Saver"
-callers of node where type = "Store" and method = "Save" including dispatch
-callees of node where package = "example.org/service/api" and method = "Run"
-search "sav"
-search "Store.Sa" where root = "example.org/service"
-unresolved calls where root = "example.org/service"
-```
+Package filters without `/...` match one package. A filter ending in `/...` matches that full Go import path and every descendant at a `/` boundary. Use the full `go.mod` module path followed by `/...` to cover a whole module. Omit `--root` to search every registered primary root; the filter then removes callers from the selected package or module while retaining indexed consumers in other roots.
 
-## Resolution
+Binary relations keep the unary relation's witness rows and retain only rows whose projected canonical symbol belongs to the right operand in the same selected snapshot. `<` projects the enclosing caller or referrer, `>` the resolved callee, `<<N` the caller after traversal, `:impl` the implementing type, `:methods` the owned method, and `~w` the enclosing writer. `=` has only a unary form. Use parentheses to make a set the right operand, as in `func:Save < (pkg:example.org/service:api & func:Run)`. A bare right operand binds before `&`, so `func:Save < pkg:example.org/service:api & func:Run` intersects the binary relation result with `func:Run`. The older space-separated `+pkg value` and `-pkg value` filter location rows; colon modifiers filter projected canonical symbols.
 
-`query.Pipeline.RunModules(ctx, expression, query.ModuleScopeOptions{RootKey: root, Location: location, SnapshotID: snapshot, Limit: limit})` parses the expression, reconciles the root selector, rejects predicates the operation does not support, and resolves snapshot scope. It returns `ModuleQueryResult`:
+## Results and limits
 
-| Field | Meaning |
-| --- | --- |
-| `operation`, `stages` | The parsed operation and each successful pipeline decision: `parse`, `scope`, `coverage`, then `resolve`, `dispatch`, or `search` where they apply, and `execute`. |
-| `matches` | Rows, bounded by the limit, in a stable order. |
-| `total` | Rows before the limit. |
-| `symbols` | The canonical symbols a selector resolved to, with owner name, visibility, and parameter types. |
-| `declarations` | The target's definitions, kept apart from `matches` so occurrence rows are never multiplied by the number of declaration locations. |
-| `coverage` | Every package in the selected snapshots that is `partial`, `syntax`, or `excluded`. |
+The JSON envelope contains `operation`, `total`, `matches`, `symbols`, `declarations`, `coverage`, and `stages`. A found `>>` query also contains `path` with ordered `symbols` and the call-site `calls` connecting them; `total` is one. When no path exists, `total` is zero and `path` is absent. HTTP sets `X-Total-Count` to `total`. Result rows include root, checkout, snapshot, source position, package path, role, canonical symbol ID, and enclosing symbol ID where available. `coverage` lists packages with partial, syntax-only, or excluded indexing, so an empty result is not proof of absence in those packages.
 
-A match carries kind, root, checkout, snapshot, module-relative path, the start (`line`, `column`) and end (`end_line`, `end_column`) of its range in one-based lines and UTF-16 columns, and a structured `uir.Identifier`. Symbol-operation rows also carry `role`, `symbol_id`, `enclosing_id` and `enclosing_key` for an occurrence, the `coverage` of the document the row was read from, and `dispatch` for a caller reached through an interface. A declaration's range is its name; an occurrence's is the identifier.
+The browser expression field uses a Monaco language for compact queries. Completion shows selectors, modifiers, relations, filters, set and path operators at the cursor. It suggests active canonical symbols for bare names and indexed modules, packages, or typed names for selector prefixes. Arrow keys select suggestions; Enter or Tab inserts one and opens the next relevant choices. Ctrl/Cmd+Space opens suggestions; Ctrl/Cmd+Enter runs the query. `GET /api/v1/modules/suggest?prefix=store.Store.S&root=example.org/service&snapshot=<uuid>` supplies qualified symbol names. `GET /api/v1/modules/suggest-selectors?prefix=pkg:example.org/service:st&root=example.org/service&snapshot=<uuid>` supplies typed selector completions. Both accept `location` or `snapshot` and an optional `limit` up to 100.
 
-### Symbol operations
-
-1. **Scope.** Each selected head or snapshot gets its active document set from `storage.ActiveDocuments` (effective sources, the snapshot's package input hashes, and a batched document lookup).
-2. **Resolve.** The selector reads `symbols`, looking a name up through `search_name` and an owner through a subquery on the owner's name. No match is an error that states the scope's coverage. When the selector matches several symbols, only those with a posting in an active document stay; if more than one remains, the result is `candidate` rows, one per declaration in scope (or one unpositioned row for a symbol that is only referenced in scope), and no traversal happens. The same identity declared at two heads is one symbol with two declarations, not two candidates.
-3. **Intersect.** Postings are read per root for `(symbol, role, root)` and intersected with the union of that root's active sets. The query counts the postings first: when they are no more than the active documents it range-scans them and probes the active set in memory; otherwise it probes the posting index with the active document ids in `IN` batches of 256. Symbol id lists are batched the same way. A posting whose document is active at several heads yields a row for each.
-4. **Read.** Only the documents the intersection selected are decoded, once each, and validated against their source revisions.
-
-| Operation | Postings | Rows |
-| --- | --- | --- |
-| `definitions` | `definition` | One `definition` row per declaration, from the document's symbol entry. |
-| `references` | `reference` | One `reference` row per occurrence whose `symbol` is the target, except the declaring `definition` occurrence, named by its enclosing declaration (or by its package at file scope). `declarations` holds the target's definitions. |
-| `implementations` | `implements` | One `implementation` row per declared type whose `implements` names the target, which must be a `type`. |
-| `callers` | `reference` | One `caller` row per `call` occurrence of the target. With `including dispatch`, the target must be a method `T.M`: the `implements` entries of T's declarations in scope name interfaces I, and each I's method with M's name and parameter types joins the targets; its call rows carry `dispatch`. Interfaces outside T's import closure are not recorded, so dispatch through them is not proven. |
-| `callees` | `definition` | One `callee` row per `call` occurrence whose `enclosing` is the target, resolved or not; the identifier is the call's target locator and `symbol_id` is empty for an unresolved call. |
-
-Occurrence and declaration rows are ordered by root, checkout, path, line, column, kind, and symbol id.
-
-### Search
-
-`search "prefix"` normalizes the input as `search_name` is stored (lowercased, restricted to `[a-z0-9]`, so `save_v2` and `savev2` search alike) and range-scans `search_name >= prefix AND search_name < upper`. `upper` increments the prefix within the ordered alphabet `0-9` then `a-z` with carry: `9` becomes `a`, and a trailing `z` is dropped while the character before it increments (`fizz` scans below `fj`); a prefix of only `z` has no upper bound. Every scanned row is then kept only when its `search_name` starts with the prefix, so a column collation that orders the range differently from byte order can only make the scan read more rows, never miss or admit one. Builtins are excluded. The candidates keep those with a `definition` posting in an active document, ranked by kind (type, func, method, field, const, var), module, package, owner name, name, and id; each is returned once per declaration as a `symbol` row, and only the documents of rows within the limit are decoded. `Owner.Name` input splits on the dot: owners resolve by exact `search_name`, and their children are range-scanned by the name prefix (`Store.` lists every member of `Store`). More than one dot, or input with none of the alphabet, is an error.
-
-### Coverage
-
-Every result lists the packages in scope whose coverage is not `indexed` and states `complete` or `incomplete` in its `coverage` stage. A `partial` package records only proven facts, and a `syntax` package has no postings at all, so an empty or short symbol result over such a package is not proof of absence.
-
-### Nodes and unresolved calls
-
-`nodes` filters the explorable declarations of every active document by the predicates. `unresolved calls` lists call occurrences whose locator is unresolved or whose target identifier matches no declaration in scope; a signature-free locator may match a declaration with a signature. Call locators carry no target root, so identical identifiers across roots or checkouts can match across scopes. Both read typed and `syntax` documents alike, so packages that do not type-check keep their AST-derived answers.
-
-The extractor type-checks each package with `go/packages` and `go/types`, applying the build variant recorded in the snapshot's configuration hash; a package that cannot be type-checked falls back to `syntax` coverage, whose documents hold the AST extractor's declarations and call locators. External dependencies are not indexed automatically.
-
-The generated parser is checked in. After changing `query/grammar.peg`, run `make query-parser`; tests check parser behavior.
+Only registered roots and their selected snapshots contribute graph edges. Interface dispatch includes relationships recorded by the index; it cannot prove calls through interfaces outside the indexed import closure. The path query is reachability over calls, not dataflow or sanitizer-aware taint analysis. Joins over two free variables belong in a full query language such as CodeQL or Joern. This grammar replaces the former `from`/`where` style, `nodes`, `search`, and `unresolved calls` query expressions; those spellings now fail parsing.

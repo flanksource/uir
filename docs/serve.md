@@ -10,7 +10,7 @@ go run ./cmd/uir --dsn ./state/uir.db serve --host localhost --port 8080
 
 `--host` defaults to `localhost` and `--port` to `8080`. The database is migrated and checked before the listener opens. The command serves embedded Vite assets and Clicky operations on one origin. For live frontend development, use `go run ./cmd/uir --dsn ./state/uir.db serve --dev`; the command starts the Vite server and proxies its UI while API requests remain on the same origin. The local `web/node_modules/.bin/vite` executable is required in dev mode.
 
-The browser lists module roots, their registered checkout locations, and immutable snapshots. Select a root and checkout to inspect effective sources and node projections; source content is displayed only after its bytes match the indexed content hash. The Query tab runs the [PEG language](query.md) against the selected scope. Add indexes a directory or package path, discovering enclosing and nested Go modules; Reindex refreshes a registered location. The URL retains module, location, snapshot, source, node, the revealed `line` and `column`, search, expression, and offset so a view can be reopened.
+The browser lists module roots, their registered checkout locations, and immutable snapshots. The scope picker in the top-right of the header defaults to "All modules"; choosing a root scopes the browser to that root's primary checkout head. Select a checkout to inspect effective sources and node projections; source content is displayed only after its bytes match the indexed content hash. The Query tab runs the [compact PEG language](query.md) against the selected scope: with "All modules", `clicky.StartTask <` reads the primary head of every indexed root and returns recorded callers with their Root column. Add indexes a directory or package path, discovering enclosing and nested Go modules; Reindex refreshes a registered location. The URL retains module, location, snapshot, source, node, the revealed `line` and `column`, search, expression, and offset so a view can be reopened.
 
 The browser uses these Clicky routes:
 
@@ -21,7 +21,8 @@ The browser uses these Clicky routes:
 | `GET /api/v1/modules/snapshots?root=...&location=...` | Paged snapshots for one checkout. |
 | `GET /api/v1/modules/browse?snapshot=...` | Effective sources and node/call projections for one snapshot. |
 | `GET /api/v1/modules/content?snapshot=...&path=...` | Hash-verified bytes for one module-relative source. |
-| `POST /api/v1/modules/query` | PEG query with `args` containing the expression and `root`, `location`, `snapshot`, and `limit` as JSON fields. Returns the [query envelope](query.md#output-envelope): `operation`, `total`, `matches`, `declarations`, `symbols`, `coverage`, and `stages`, with `X-Total-Count` set to `total`. |
+| `POST /api/v1/modules/query` | Compact PEG query with `args` containing the expression and `root`, `location`, `snapshot`, and `limit` as JSON fields. Omitting scope fields reads the primary head of every indexed root. Returns the [query envelope](query.md#results-and-limits): `operation`, `total`, `matches`, `declarations`, `symbols`, `coverage`, `stages`, and an optional call `path`, with `X-Total-Count` set to `total`. |
+| `GET /api/v1/modules/suggest` | Active canonical symbol completions for `prefix`, with optional `root`, `location`, `snapshot`, and `limit` query parameters. |
 | `POST /api/v1/modules/diff` | [Commit-to-commit symbol diff](diff.md) with `args` containing `<from>..<to>` and `root`, `visibility`, `stat`, `snapshot-from`, and `snapshot-to` as JSON fields. |
 | `POST /api/v1/modules/add` and `POST /api/v1/modules/reindex` | Index a new directory or a registered location. |
 
