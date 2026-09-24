@@ -31,6 +31,9 @@ func validateTypedContent(content DocumentContent, partial bool) error {
 		case symbol.ID != nil && (len(*symbol.ID) != 64 || len(symbol.ShapeHash) != 64):
 			return fmt.Errorf("%s: a typed symbol requires a 64-character id and shape_hash", subject)
 		}
+		if _, err := TypeForm(content.Version, symbol); err != nil {
+			return fmt.Errorf("%s: %w", subject, err)
+		}
 		for _, implemented := range symbol.Implements {
 			if len(implemented) != 64 {
 				return fmt.Errorf("%s: implements %q is not a symbol id", subject, implemented)

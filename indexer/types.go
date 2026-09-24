@@ -12,7 +12,7 @@ import (
 )
 
 // IndexerVersion versions the extractor and the document format it writes; it enters the configuration hash.
-const IndexerVersion = "go-types-v1"
+const IndexerVersion = "go-types-v2"
 
 type Indexer struct {
 	database     *gorm.DB
