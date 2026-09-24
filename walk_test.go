@@ -73,14 +73,16 @@ var _ = Describe("NodeTree.Walk", func() {
 
 var _ = Describe("FindOptions.Many", func() {
 	It("finds methods at every depth without warnings", func() {
-		methods, warnings := uir.Find[uir.MethodNode](servicePackage()).Many()
+		methods, warnings, err := uir.Find[uir.MethodNode](servicePackage()).Many()
+		Expect(err).NotTo(HaveOccurred())
 
 		Expect(methodNames(methods)).To(Equal([]string{"GetUser", "init"}))
 		Expect(warnings).To(BeEmpty())
 	})
 
 	It("returns a warning for each matching node of the wrong Go type", func() {
-		methods, warnings := uir.FindOptions[uir.MethodNode]{Root: servicePackage()}.Many()
+		methods, warnings, err := uir.FindOptions[uir.MethodNode]{Root: servicePackage()}.Many()
+		Expect(err).NotTo(HaveOccurred())
 
 		Expect(methodNames(methods)).To(Equal([]string{"GetUser", "init"}))
 		Expect(warnings).To(HaveLen(1))
@@ -88,13 +90,15 @@ var _ = Describe("FindOptions.Many", func() {
 	})
 
 	It("honours WithDepth", func() {
-		methods, _ := uir.Find[uir.MethodNode](servicePackage()).WithDepth(1).Many()
+		methods, _, err := uir.Find[uir.MethodNode](servicePackage()).WithDepth(1).Many()
+		Expect(err).NotTo(HaveOccurred())
 
 		Expect(methodNames(methods)).To(Equal([]string{"init"}))
 	})
 
 	It("honours the name filter below non-matching ancestors", func() {
-		method, warnings := uir.Find[uir.MethodNode](servicePackage()).WithName("GetUser").One()
+		method, warnings, err := uir.Find[uir.MethodNode](servicePackage()).WithName("GetUser").One()
+		Expect(err).NotTo(HaveOccurred())
 
 		Expect(method.GetIdentifier().GetName()).To(Equal("GetUser"))
 		Expect(warnings).To(BeEmpty())

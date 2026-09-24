@@ -1,5 +1,7 @@
 package uir
 
+import "fmt"
+
 func Find[T Node](tree Node) FindOptions[T] {
 	var empty T
 	options := FindOptions[T]{
@@ -11,18 +13,32 @@ func Find[T Node](tree Node) FindOptions[T] {
 	return options
 }
 
-func (find FindOptions[T]) One() (T, []Warning) {
-	results, warnings := find.WithLimit(1).Many()
-	if len(results) == 0 {
-		var zero T
-		return zero, warnings
+func (find FindOptions[T]) One() (T, []Warning, error) {
+	var zero T
+	results, warnings, err := find.WithLimit(1).Many()
+	if err != nil || len(results) == 0 {
+		return zero, warnings, err
 	}
-	return results[0], warnings
+	return results[0], warnings, nil
+}
+
+// Validate reports a Name or Language expression that fails to parse.
+func (find FindOptions[T]) Validate() error {
+	if err := find.Name.Validate(); err != nil {
+		return fmt.Errorf("find name: %w", err)
+	}
+	if err := find.Language.Validate(); err != nil {
+		return fmt.Errorf("find language: %w", err)
+	}
+	return nil
 }
 
 // Many returns the matching nodes, and a warning for each node that matched
-// but is not a T.
-func (find FindOptions[T]) Many() ([]T, []Warning) {
+// but is not a T. It fails before walking when the options do not Validate.
+func (find FindOptions[T]) Many() ([]T, []Warning, error) {
+	if err := find.Validate(); err != nil {
+		return nil, nil, err
+	}
 	results := []T{}
 	var warnings []Warning
 	_ = NodeTree{Node: find.Root}.Walk(func(node Node) bool {
@@ -38,7 +54,7 @@ func (find FindOptions[T]) Many() ([]T, []Warning) {
 		}
 		return true
 	}, WalkOptions{Depth: find.Depth})
-	return results, warnings
+	return results, warnings, nil
 }
 
 type FindOptions[T Node] struct {

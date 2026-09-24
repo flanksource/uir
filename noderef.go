@@ -76,10 +76,6 @@ func (nl NodeList) GetChildren() []Node {
 	return nl
 }
 
-func (nl NodeList) GetNode() Node {
-	return nl
-}
-
 // UIRNode represents a node in the UIR tree, which can be a module, package, type, record, endpoint, or function.
 type UIRNode struct {
 	Module   *ModuleNode  `json:"module,omitempty" gorm:"serializer:json"`

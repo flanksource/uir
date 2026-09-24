@@ -3,6 +3,7 @@ package uir
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -194,6 +195,21 @@ func (r *Registry[T]) acceptRefinements(field string, crossHierarchy map[string]
 // registry accepts no refinements.
 func (r *Registry[T]) RefinementField() string {
 	return r.refinementField
+}
+
+// Kinds returns every registered kind, sorted.
+func (r *Registry[T]) Kinds() []string {
+	return slices.Sorted(maps.Keys(r.m))
+}
+
+// CrossHierarchy returns a copy of the refinements each kind accepts from outside
+// its own ':'-hierarchy.
+func (r *Registry[T]) CrossHierarchy() map[string][]string {
+	out := make(map[string][]string, len(r.crossHierarchy))
+	for kind, refinements := range r.crossHierarchy {
+		out[kind] = slices.Clone(refinements)
+	}
+	return out
 }
 
 // checkRefinement reports an error unless refined may refine kind: it resolves to
