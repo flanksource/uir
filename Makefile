@@ -33,7 +33,7 @@ web-build: ## Build embedded browser assets
 	VITE_UIR_VERSION=$(VERSION) pnpm --dir web run build
 
 .PHONY: schema
-schema: ## Regenerate schema/uir.schema.json from the Go model
+schema: ## Regenerate schema/uir.schema.json and python/statement_kinds.py from the Go model
 	go run ./cmd/genschema
 
 .PHONY: query-parser

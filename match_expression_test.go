@@ -1,6 +1,8 @@
 package uir_test
 
 import (
+	"encoding/json"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -30,4 +32,35 @@ var _ = Describe("MatchExpression.Matches", func() {
 		Entry("patterns are URL-decoded", "Get%2AUser", "Get*User", result{true, false}),
 		Entry("empty expression matches only empty", "", "GetUser", result{false, false}),
 	)
+})
+
+// badEscape is a pattern url.QueryUnescape rejects: "%zz" is not a hex escape.
+const badEscape = "Get%zzUser"
+
+var _ = Describe("MatchExpression validation", func() {
+	It("ParseMatchExpression rejects a pattern that fails to URL-decode, naming it", func() {
+		_, err := uir.ParseMatchExpression("Set*," + badEscape)
+		Expect(err).To(MatchError(ContainSubstring(badEscape)))
+	})
+
+	It("ParseMatchExpression accepts a decodable expression unchanged", func() {
+		expression, err := uir.ParseMatchExpression("Set*,Get%2AUser")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(expression).To(Equal(uir.MatchExpression("Set*,Get%2AUser")))
+	})
+
+	It("decoding JSON rejects an undecodable pattern", func() {
+		var expression uir.MatchExpression
+		err := json.Unmarshal([]byte(`"`+badEscape+`"`), &expression)
+		Expect(err).To(MatchError(ContainSubstring(badEscape)))
+	})
+
+	It("Matches panics on an expression that bypassed validation", func() {
+		Expect(func() { uir.MatchExpression(badEscape).Matches("GetUser") }).To(PanicWith(ContainSubstring(badEscape)))
+	})
+
+	It("Find fails instead of silently dropping an undecodable name pattern", func() {
+		_, _, err := uir.Find[uir.MethodNode](servicePackage()).WithName(badEscape).Many()
+		Expect(err).To(MatchError(ContainSubstring(badEscape)))
+	})
 })

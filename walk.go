@@ -3,7 +3,6 @@ package uir
 import (
 	"maps"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -51,13 +50,6 @@ func (options WalkOptions) WithStopper(filter NodeFilter) WalkOptions {
 func (options WalkOptions) WithHider(filter NodeFilter) WalkOptions {
 	options.HideFilter = filter
 	return options
-}
-
-type MatchExpression string
-
-func (me MatchExpression) Matches(value string) (matches bool, negated bool) {
-	patterns := strings.Split(string(me), ",")
-	return matchItem(value, patterns...)
 }
 
 func (opts WalkOptions) WithDepth(depth int) WalkOptions {

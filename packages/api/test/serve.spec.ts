@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { addModules, browseModule, getSystemInfo, listModuleHeads, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery } from "../../../web/src/api";
+import { addModules, browseModule, getSystemInfo, listModuleHeads, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,9 +31,9 @@ const saveDeclaration = {
 it.each([
   {
     name: "references with declarations, symbols, and a partial package",
-    expression: 'references of node where type = "Store" and method = "Save"',
+    expression: 'store.Store.Save <',
     envelope: {
-      operation: "references", total: 1,
+      operation: "incoming", total: 1,
       matches: [{
         kind: "reference", ...scope, symbol: "method:example.org/refs/app:Run#()", source: "app/app.go:5:28",
         path: "app/app.go", line: 5, column: 28, end_line: 5, end_column: 32, role: "call", symbol_id: saveID,
@@ -43,29 +43,67 @@ it.each([
       declarations: [saveDeclaration],
       symbols: [{ id: saveID, module_key: scope.root, package_path: "example.org/refs/store", kind: "method", owner: "Store", name: "Save", visibility: "exported", parameter_types: [] }],
       coverage: [brokenPartial],
-      stages: [{ name: "parse", value: "references" }, { name: "coverage", value: "incomplete: 1 package is not fully indexed (1 partial)" }],
+      stages: [{ name: "parse", value: "incoming" }, { name: "coverage", value: "incomplete: 1 package is not fully indexed (1 partial)" }],
     },
   },
   {
     name: "search rows in the same envelope",
-    expression: 'search "Store.Sa"',
+    expression: 'store.Store.Save',
     envelope: {
-      operation: "search", total: 1, matches: [{ ...saveDeclaration, kind: "symbol" }], declarations: [], symbols: [], coverage: [brokenPartial],
-      stages: [{ name: "search", value: 'prefix "sa": 1 declared symbols' }],
+      operation: "resolve", total: 1, matches: [{ ...saveDeclaration, kind: "symbol" }], declarations: [], symbols: [], coverage: [brokenPartial],
+      stages: [{ name: "parse", value: "resolve" }],
+    },
+  },
+  {
+    name: "module scoped package selector on a binary relation",
+    expression: "func:Save < pkg:example.org/refs:app/**",
+    envelope: {
+      operation: "incoming", total: 0, matches: [], declarations: [], symbols: [], coverage: [brokenPartial],
+      stages: [{ name: "parse", value: "incoming" }],
     },
   },
 ])("posts the scoped PEG query and returns the $name", async ({ expression, envelope }) => {
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200, headers: { "Server-Timing": "total;dur=12.5, command;dur=9.2" } }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(runModuleQuery(expression, scope.root, snapshot)).resolves.toEqual(envelope);
+  await expect(runModuleQuery(expression, scope.root, snapshot)).resolves.toEqual({ data: envelope, timing: [
+    { name: "total", duration: 12.5, counters: {} }, { name: "command", duration: 9.2, counters: {} },
+  ] });
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
     method: "POST",
     body: JSON.stringify({ args: [expression], root: scope.root, snapshot }),
   }));
 });
 
+it("gets scoped canonical symbol suggestions for query completion", async () => {
+  const symbols = [{ id: saveID, query_name: "example.org/refs/store.Store.Save", package_path: "example.org/refs/store", kind: "method", name: "Save" }];
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(symbols), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(suggestModuleSymbols("store.Store.S", scope.root, snapshot)).resolves.toEqual(symbols);
+  expect(fetcher).toHaveBeenCalledWith(`/api/v1/modules/suggest?prefix=store.Store.S&root=example.org%2Frefs&snapshot=${snapshot}`, expect.objectContaining({ headers: { Accept: "application/json" } }));
+});
+
+it("gets module scoped relative package completions", async () => {
+  const choices = ["pkg:example.org/refs:app", "pkg:example.org/refs:app/sub"];
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(choices), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(suggestTypedSelectors("pkg:example.org/refs:app", scope.root, snapshot)).resolves.toEqual(choices);
+  expect(fetcher).toHaveBeenCalledWith(`/api/v1/modules/suggest-selectors?prefix=pkg%3Aexample.org%2Frefs%3Aapp&root=example.org%2Frefs&snapshot=${snapshot}`, expect.objectContaining({ headers: { Accept: "application/json" } }));
+});
+
+it("posts an unscoped PEG query across every module root", async () => {
+  const expression = 'example.org/refs/store.Store.Save <';
+  const envelope = { operation: "incoming", total: 0, matches: [], declarations: [], symbols: [], coverage: [], stages: [] };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200, headers: { "Server-Timing": "total;dur=7" } }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(runModuleQuery(expression, "", "")).resolves.toEqual({ data: envelope, timing: [{ name: "total", duration: 7, counters: {} }] });
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
+    method: "POST",
+    body: JSON.stringify({ args: [expression], root: "", snapshot: "" }),
+  }));
+});
+
 it("scopes checkout history, source projections, and content to a module snapshot", async () => {
-  const fetcher = vi.fn().mockImplementation(async () => new Response("{}", { status: 200 }));
+  const fetcher = vi.fn().mockImplementation(async () => new Response("{}", { status: 200, headers: { "Server-Timing": "total;dur=1" } }));
   vi.stubGlobal("fetch", fetcher);
   await listModuleLocations("example.org/service");
   await listModuleSnapshots("example.org/service", "/checkout/service", 100);
@@ -80,6 +118,16 @@ it("scopes checkout history, source projections, and content to a module snapsho
     ["/api/v1/modules/browse", { snapshot: "snapshot-id" }],
     ["/api/v1/modules/content", { snapshot: "snapshot-id", path: "pkg/main.go" }],
   ]);
+});
+
+it("reads server timing from the explorer browse response", async () => {
+  const browse = { sources: [], nodes: [] };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(browse), {
+    status: 200, headers: { "Server-Timing": "total;dur=4.1, command;dur=3.5" },
+  })));
+  await expect(browseModule(snapshot)).resolves.toEqual({ data: browse, timing: [
+    { name: "total", duration: 4.1, counters: {} }, { name: "command", duration: 3.5, counters: {} },
+  ] });
 });
 
 it("sends explicit add and reindex inputs and reports server failures", async () => {
