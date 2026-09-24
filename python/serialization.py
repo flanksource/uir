@@ -1,7 +1,7 @@
 """UIR JSON serialization for Python."""
 
 import json
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from typing import Any
 from datetime import datetime
 from enum import Enum
@@ -14,20 +14,72 @@ except ImportError:
     from enums import *
 
 
+def _pop_present(d: dict, moves: dict) -> dict:
+    """Move each present key of d named in moves to a new dict under its new name."""
+    return {new: d.pop(old) for old, new in moves.items() if old in d}
+
+
+# Go's statements name the node they call, read or write through a Node-typed
+# field, encoded as a node object stamped with its node_kind; these dataclasses
+# keep those fields flat, so the encoder regroups them into the Go shape.
+def _method_call_wire(d: dict) -> dict:
+    ref = _pop_present(d, {"module": "module", "package": "package", "type": "type", "method": "method"})
+    if ref:
+        d["Method"] = {"node_kind": "ref", **ref}
+    return d
+
+
+def _endpoint_call_wire(d: dict) -> dict:
+    endpoint = _pop_present(d, {"environment": "module", "id": "method", "endpointType": "endpointType"})
+    if endpoint:
+        d["endpoint"] = {"node_kind": "endpoint", "node_type": "endpoint", **endpoint}
+    return d
+
+
+def _record_access_wire(d: dict) -> dict:
+    record = _pop_present(d, {"environment": "module", "id": "type"})
+    if record:
+        d["Record"] = {"node_kind": "ref", "node_type": "record", **record}
+    expression = _pop_present(d, {"expressionType": "type", "expression": "expression"})
+    if expression:
+        d["expression"] = expression
+    return d
+
+
+_WIRE_SHAPES = {
+    "MethodCallStmt": _method_call_wire,
+    "EndpointCallStmt": _endpoint_call_wire,
+    "RecordReadStmt": _record_access_wire,
+    "RecordWriteStmt": _record_access_wire,
+}
+
+
 class UIREncoder(json.JSONEncoder):
     """Custom JSON encoder for UIR types."""
 
     def default(self, obj):
-        if is_dataclass(obj):
-            return self._convert_dataclass(asdict(obj))
-        elif isinstance(obj, datetime):
-            return obj.isoformat()
-        elif isinstance(obj, Enum):
-            return obj.value
+        if is_dataclass(obj) or isinstance(obj, (datetime, Enum)):
+            return self._encode(obj)
         return super().default(obj)
 
+    def _encode(self, value):
+        """Encode a value bottom-up, keeping each dataclass's type for _WIRE_SHAPES."""
+        if is_dataclass(value) and not isinstance(value, type):
+            d = self._convert_dataclass({f.name: self._encode(getattr(value, f.name)) for f in fields(value)})
+            shape = _WIRE_SHAPES.get(type(value).__name__)
+            return shape(d) if shape else d
+        if isinstance(value, list):
+            return [self._encode(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self._encode(item) for key, item in value.items()}
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
     def _convert_dataclass(self, raw_dict: dict) -> dict:
-        """Convert a dataclass dict to JSON-compatible dict with correct key names."""
+        """Rename an encoded dataclass's keys to their JSON names and drop empty values."""
         d = {}
         for key, value in raw_dict.items():
             if value is None:
@@ -39,9 +91,6 @@ class UIREncoder(json.JSONEncoder):
             if isinstance(value, str) and value == "" and key not in ['name', 'id']:
                 continue
 
-            # Recursively convert nested dicts and lists
-            value = self._convert_value(value)
-
             # Convert key name
             json_key = self._to_camel_case(key)
 
@@ -51,14 +100,6 @@ class UIREncoder(json.JSONEncoder):
 
             d[json_key] = value
         return d
-
-    def _convert_value(self, value):
-        """Recursively convert nested values."""
-        if isinstance(value, dict):
-            return self._convert_dataclass(value)
-        elif isinstance(value, list):
-            return [self._convert_value(item) for item in value]
-        return value
 
     # Statement type values that should be serialized as "statement_type" key
     _STATEMENT_TYPE_PREFIXES = frozenset([
