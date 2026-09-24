@@ -13,13 +13,30 @@ type Operation string
 const (
 	// OperationNodes selects nodes without traversing relationships.
 	OperationNodes Operation = "nodes"
-	// OperationCallers selects nodes with resolved call edges to one target.
+	// OperationCallers selects the call occurrences that target one symbol.
 	OperationCallers Operation = "callers"
-	// OperationCallees selects nodes reached by resolved call edges from one target.
+	// OperationCallees selects the call occurrences one symbol's declaration encloses.
 	OperationCallees Operation = "callees"
 	// OperationUnresolvedCalls selects call edges whose target is unresolved.
 	OperationUnresolvedCalls Operation = "unresolved_calls"
+	// OperationReferences selects every non-declaring occurrence of one symbol.
+	OperationReferences Operation = "references"
+	// OperationDefinitions selects the declarations of one symbol.
+	OperationDefinitions Operation = "definitions"
+	// OperationImplementations selects the types that implement one interface.
+	OperationImplementations Operation = "implementations"
+	// OperationSearch selects declared symbols by name prefix.
+	OperationSearch Operation = "search"
 )
+
+// indexed reports whether the operation reads symbols and postings rather than scanning documents.
+func (operation Operation) indexed() bool {
+	switch operation {
+	case OperationNodes, OperationUnresolvedCalls:
+		return false
+	}
+	return true
+}
 
 // Predicate is one exact structured field comparison produced by the PEG parser.
 type Predicate struct {
@@ -27,10 +44,13 @@ type Predicate struct {
 	Value string `json:"value"`
 }
 
-// Query is the typed syntax tree consumed by the resolution pipeline.
+// Query is the typed syntax tree consumed by the resolution pipeline. Dispatch asks callers to
+// include calls through the interfaces the target's receiver implements; Search is the search input.
 type Query struct {
 	Operation  Operation   `json:"operation"`
 	Predicates []Predicate `json:"predicates,omitempty"`
+	Dispatch   bool        `json:"dispatch,omitempty"`
+	Search     string      `json:"search,omitempty"`
 }
 
 // ResolutionStage records one successful, externally visible pipeline decision.

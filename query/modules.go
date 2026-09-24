@@ -2,10 +2,10 @@ package query
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/flanksource/uir"
@@ -24,21 +24,41 @@ type ModuleScopeOptions struct {
 	Limit      int
 }
 
+// ModuleMatch is one result row. A declaration's position is its name's range; an occurrence's is
+// the identifier's range. Role through Dispatch are set by the index-backed operations: the
+// occurrence role, the symbol the row names, the declaration enclosing an occurrence, the coverage
+// of the document the row was read from, and whether a caller reaches the target through an interface.
 type ModuleMatch struct {
-	Kind       string         `json:"kind"`
-	RootKey    string         `json:"root_key"`
-	Location   string         `json:"location"`
-	SnapshotID string         `json:"snapshot_id"`
-	Path       string         `json:"path"`
-	Line       *int           `json:"line,omitempty"`
-	Column     *int           `json:"column,omitempty"`
-	Identifier uir.Identifier `json:"identifier"`
+	Kind         string         `json:"kind"`
+	RootKey      string         `json:"root_key"`
+	Location     string         `json:"location"`
+	SnapshotID   string         `json:"snapshot_id"`
+	Path         string         `json:"path"`
+	Line         *int           `json:"line,omitempty"`
+	Column       *int           `json:"column,omitempty"`
+	Identifier   uir.Identifier `json:"identifier"`
+	EndLine      *int           `json:"end_line,omitempty"`
+	EndColumn    *int           `json:"end_column,omitempty"`
+	Role         string         `json:"role,omitempty"`
+	SymbolID     string         `json:"symbol_id,omitempty"`
+	EnclosingID  string         `json:"enclosing_id,omitempty"`
+	EnclosingKey string         `json:"enclosing_key,omitempty"`
+	Coverage     string         `json:"coverage,omitempty"`
+	Dispatch     bool           `json:"dispatch,omitempty"`
 }
 
+// ModuleQueryResult holds the rows of one query. Total counts the rows before the limit; Symbols are
+// the canonical symbols a selector resolved to; Declarations are the target's definitions, kept apart
+// so occurrence rows are never multiplied by declaration locations; Coverage lists every package in
+// scope that is not fully indexed, so an empty result is not mistaken for proven absence.
 type ModuleQueryResult struct {
-	Operation Operation         `json:"operation"`
-	Matches   []ModuleMatch     `json:"matches"`
-	Stages    []ResolutionStage `json:"stages"`
+	Operation    Operation         `json:"operation"`
+	Matches      []ModuleMatch     `json:"matches"`
+	Stages       []ResolutionStage `json:"stages"`
+	Total        int               `json:"total"`
+	Symbols      []ModuleSymbol    `json:"symbols,omitempty"`
+	Declarations []ModuleMatch     `json:"declarations,omitempty"`
+	Coverage     []ModuleCoverage  `json:"coverage"`
 }
 
 type moduleScope struct {
@@ -47,55 +67,26 @@ type moduleScope struct {
 	snapshot storage.ModuleSnapshot
 }
 
-type projectedNode struct {
-	Identifier uir.Identifier
-	ParentIdentity string
-	ChildSlot string
-	Ordinal int
-	Payload json.RawMessage
-	SemanticHash string
-	StartLine  *int
-	EndLine *int
-	Column     *int
-	Field json.RawMessage
-}
-
-type projectedCall struct {
-	FromIdentity string
-	ToIdentifier uir.Identifier
-	ToRootKey *string
-	LocalRoot bool
-	Resolvable   bool
-	StatementPath string
-	StartLine    *int
-	EndLine *int
-	Column       *int
-	Text string
-}
-
-type sourceProjection struct {
-	PackagePath string
-	Nodes       []projectedNode
-	Calls       []projectedCall
-}
-
 type moduleCall struct {
-	fromIdentity string
 	toIdentifier uir.Identifier
 	resolvable   bool
 	match        ModuleMatch
 }
 
 type indexedModuleScope struct {
-	nodes      []ModuleMatch
-	calls      []moduleCall
-	byIdentity map[string][]ModuleMatch
+	nodes []ModuleMatch
+	calls []moduleCall
 }
 
 type moduleTargetIndex struct {
 	exact    map[string][]ModuleMatch
 	callable map[string][]ModuleMatch
 }
+
+var (
+	documentPredicates = []string{"node_type", "module", "package", "type", "method", "field", "signature", "language", "symbol_key", "identity_key"}
+	symbolPredicates   = []string{"symbol_id", "module", "package", "type", "method", "field", "kind", "name", "owner"}
+)
 
 func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options ModuleScopeOptions) (ModuleQueryResult, error) {
 	if pipeline == nil || pipeline.database == nil {
@@ -119,22 +110,60 @@ func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options 
 	if options.Location != "" && options.SnapshotID != "" {
 		return ModuleQueryResult{}, errors.New("location and snapshot selectors are mutually exclusive")
 	}
-	allHeads := parsed.Operation == OperationCallers || parsed.Operation == OperationCallees
-	scopes, err := pipeline.moduleScopes(ctx, options, allHeads)
+	if err := checkPredicates(parsed.Operation, predicates); err != nil {
+		return ModuleQueryResult{}, err
+	}
+	scopes, err := pipeline.moduleScopes(ctx, options, parsed.Operation.indexed())
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	result := ModuleQueryResult{Operation: parsed.Operation, Matches: []ModuleMatch{}, Stages: []ResolutionStage{{Name: "parse", Value: string(parsed.Operation)}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(scopes))}}}
+	coverage, err := pipeline.scopeCoverage(ctx, scopes)
+	if err != nil {
+		return ModuleQueryResult{}, err
+	}
+	result := ModuleQueryResult{Operation: parsed.Operation, Matches: []ModuleMatch{}, Coverage: coverage, Stages: []ResolutionStage{
+		{Name: "parse", Value: string(parsed.Operation)}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(scopes))}, coverageStage(coverage),
+	}}
+	if parsed.Operation.indexed() {
+		err = pipeline.runIndexed(ctx, parsed, predicates, scopes, options.Limit, &result)
+	} else {
+		err = pipeline.runDocuments(ctx, parsed.Operation, predicates, scopes, &result)
+	}
+	if err != nil {
+		return ModuleQueryResult{}, err
+	}
+	if len(result.Matches) > options.Limit {
+		result.Matches = result.Matches[:options.Limit]
+	}
+	result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: fmt.Sprintf("%d rows", len(result.Matches))})
+	return result, nil
+}
+
+// checkPredicates rejects a predicate the operation cannot evaluate instead of letting it match nothing.
+func checkPredicates(operation Operation, predicates []Predicate) error {
+	supported := documentPredicates
+	if operation.indexed() {
+		supported = symbolPredicates
+	}
+	for _, predicate := range predicates {
+		if !slices.Contains(supported, predicate.Field) {
+			return fmt.Errorf("predicate %q is not supported by %s; use one of %v", predicate.Field, operation, supported)
+		}
+	}
+	return nil
+}
+
+// runDocuments answers nodes and unresolved calls by scanning each primary head's active documents.
+func (pipeline *Pipeline) runDocuments(ctx context.Context, operation Operation, predicates []Predicate, scopes []moduleScope, result *ModuleQueryResult) error {
 	indexed := make([]indexedModuleScope, 0, len(scopes))
 	for _, scope := range scopes {
 		loaded, err := pipeline.loadModuleScope(ctx, scope)
 		if err != nil {
-			return ModuleQueryResult{}, err
+			return err
 		}
 		indexed = append(indexed, loaded)
 	}
-	targets := newModuleTargetIndex(indexed)
-	switch parsed.Operation {
+	switch operation {
 	case OperationNodes:
 		for _, scope := range indexed {
 			for _, node := range scope.nodes {
@@ -143,30 +172,8 @@ func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options 
 				}
 			}
 		}
-	case OperationCallers, OperationCallees:
-		if len(predicates) == 0 {
-			return ModuleQueryResult{}, errors.New("call queries require at least one symbol predicate in addition to root")
-		}
-		candidates := make([]ModuleMatch, 0)
-		for _, scope := range indexed {
-			for _, node := range scope.nodes {
-				if matchesPredicates(node, predicates) {
-					candidates = append(candidates, node)
-				}
-			}
-		}
-		if len(candidates) == 0 {
-			return ModuleQueryResult{}, errors.New("target selector matched no nodes")
-		}
-		if len(candidates) > 1 {
-			for _, candidate := range candidates {
-				candidate.Kind = "candidate"
-				result.Matches = append(result.Matches, candidate)
-			}
-			break
-		}
-		result.Matches = graphMatches(parsed.Operation, candidates[0], indexed, targets)
 	case OperationUnresolvedCalls:
+		targets := newModuleTargetIndex(indexed)
 		for _, scope := range indexed {
 			for _, call := range scope.calls {
 				if !call.resolvable || len(targets.resolve(call.toIdentifier)) == 0 {
@@ -175,57 +182,45 @@ func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options 
 			}
 		}
 	default:
-		return ModuleQueryResult{}, fmt.Errorf("unsupported UIR operation %q", parsed.Operation)
+		return fmt.Errorf("unsupported UIR operation %q", operation)
 	}
 	sort.Slice(result.Matches, func(i, j int) bool {
 		left, right := result.Matches[i], result.Matches[j]
 		return left.RootKey+"\x00"+left.Location+"\x00"+left.Path+"\x00"+left.Identifier.IdentityKey() <
 			right.RootKey+"\x00"+right.Location+"\x00"+right.Path+"\x00"+right.Identifier.IdentityKey()
 	})
-	if len(result.Matches) > options.Limit {
-		result.Matches = result.Matches[:options.Limit]
-	}
-	result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: fmt.Sprintf("%d rows", len(result.Matches))})
-	return result, nil
+	result.Total = len(result.Matches)
+	return nil
 }
 
 func (pipeline *Pipeline) loadModuleScope(ctx context.Context, scope moduleScope) (indexedModuleScope, error) {
-	sources, err := storage.EffectiveSources(ctx, pipeline.database, scope.snapshot.ID)
+	documents, err := pipeline.scopeDocuments(ctx, scope)
 	if err != nil {
 		return indexedModuleScope{}, err
 	}
-	paths := make([]string, 0, len(sources))
-	for path := range sources {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	result := indexedModuleScope{byIdentity: map[string][]ModuleMatch{}}
-	for _, path := range paths {
-		revision := sources[path]
-		var projection sourceProjection
-		if err := json.Unmarshal(revision.Projection, &projection); err != nil {
-			return indexedModuleScope{}, fmt.Errorf("decode projection for %s at %s: %w", path, scope.snapshot.ID, err)
-		}
-		if projection.PackagePath != revision.PackagePath {
-			return indexedModuleScope{}, fmt.Errorf("projection for %s has package %q, expected %q", path, projection.PackagePath, revision.PackagePath)
-		}
-		for _, node := range projection.Nodes {
-			match := ModuleMatch{
-				Kind: "node", RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath,
-				SnapshotID: scope.snapshot.ID.String(), Path: path, Line: node.StartLine, Column: node.Column,
-				Identifier: node.Identifier,
+	var result indexedModuleScope
+	for _, document := range documents {
+		for _, symbol := range document.content.Symbols {
+			if !symbol.Explorable() {
+				continue
 			}
-			result.nodes = append(result.nodes, match)
-			key := match.Identifier.IdentityKey()
-			result.byIdentity[key] = append(result.byIdentity[key], match)
+			line, _, column := symbolPosition(symbol)
+			result.nodes = append(result.nodes, ModuleMatch{
+				Kind: "node", RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath,
+				SnapshotID: scope.snapshot.ID.String(), Path: document.path, Line: line, Column: column,
+				Identifier: symbol.Identifier,
+			})
 		}
-		for _, call := range projection.Calls {
+		for _, occurrence := range document.content.Occurrences {
+			if !occurrence.IsCall() {
+				continue
+			}
 			result.calls = append(result.calls, moduleCall{
-				fromIdentity: call.FromIdentity, toIdentifier: call.ToIdentifier, resolvable: call.Resolvable,
+				toIdentifier: *occurrence.Target, resolvable: occurrence.Resolvable,
 				match: ModuleMatch{
 					Kind: "unresolved_call", RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath,
-					SnapshotID: scope.snapshot.ID.String(), Path: path, Line: call.StartLine, Column: call.Column,
-					Identifier: call.ToIdentifier,
+					SnapshotID: scope.snapshot.ID.String(), Path: document.path, Line: &occurrence.Range[0], Column: &occurrence.Range[1],
+					Identifier: *occurrence.Target,
 				},
 			})
 		}
@@ -265,32 +260,6 @@ func matchesPredicates(node ModuleMatch, predicates []Predicate) bool {
 	return true
 }
 
-func graphMatches(operation Operation, target ModuleMatch, scopes []indexedModuleScope, targets moduleTargetIndex) []ModuleMatch {
-	matches := []ModuleMatch{}
-	for _, scope := range scopes {
-		for _, call := range scope.calls {
-			if operation == OperationCallers {
-				if !callMatches(call.toIdentifier, target.Identifier) {
-					continue
-				}
-				for _, node := range scope.byIdentity[call.fromIdentity] {
-					node.Kind = "caller"
-					matches = append(matches, node)
-				}
-				continue
-			}
-			if call.fromIdentity != target.Identifier.IdentityKey() {
-				continue
-			}
-			for _, node := range targets.resolve(call.toIdentifier) {
-				node.Kind = "callee"
-				matches = append(matches, node)
-			}
-		}
-	}
-	return matches
-}
-
 func newModuleTargetIndex(scopes []indexedModuleScope) moduleTargetIndex {
 	index := moduleTargetIndex{exact: map[string][]ModuleMatch{}, callable: map[string][]ModuleMatch{}}
 	for _, scope := range scopes {
@@ -321,15 +290,4 @@ func canonicalLocation(path string) (string, error) {
 		return "", fmt.Errorf("canonicalize location %q: %w", path, err)
 	}
 	return canonical, nil
-}
-
-func callMatches(call, candidate uir.Identifier) bool {
-	if call.IdentityKey() == candidate.IdentityKey() {
-		return true
-	}
-	if call.Signature != "" {
-		return false
-	}
-	candidate.Signature = ""
-	return call.IdentityKey() == candidate.IdentityKey()
 }

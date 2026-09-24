@@ -4,13 +4,21 @@ type queryGrammar Peg {
     parserState
 }
 
-Query <- _ (UnresolvedCalls / Callers / Callees / Nodes) _ !.
+Query <- _ (UnresolvedCalls / Callers / Callees / References / Definitions / Implementations / Search / Nodes) _ !.
 
 Nodes <- 'nodes' { p.setOperation(OperationNodes) } (Spacing 'where' Spacing Predicates)?
 
-Callers <- 'callers' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallers) } Spacing 'where' Spacing Predicates
+Callers <- 'callers' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallers) } Spacing 'where' Spacing Predicates (Spacing 'including' Spacing 'dispatch' { p.setDispatch() })?
 
 Callees <- 'callees' Spacing 'of' Spacing 'node' { p.setOperation(OperationCallees) } Spacing 'where' Spacing Predicates
+
+References <- 'references' Spacing 'of' Spacing 'node' { p.setOperation(OperationReferences) } Spacing 'where' Spacing Predicates
+
+Definitions <- 'definitions' Spacing 'of' Spacing 'node' { p.setOperation(OperationDefinitions) } Spacing 'where' Spacing Predicates
+
+Implementations <- 'implementations' Spacing 'of' Spacing 'node' { p.setOperation(OperationImplementations) } Spacing 'where' Spacing Predicates
+
+Search <- 'search' { p.setOperation(OperationSearch) } Spacing Quoted { p.setSearch() } (Spacing 'where' Spacing RootPredicate)?
 
 UnresolvedCalls <- 'unresolved' Spacing 'calls' { p.setOperation(OperationUnresolvedCalls) } (Spacing 'where' Spacing RootPredicate)?
 
@@ -20,7 +28,7 @@ Predicate <- Field _ '=' _ Quoted { p.addPredicate() }
 
 RootPredicate <- RootField _ '=' _ Quoted { p.addPredicate() }
 
-Field <- <('node_type' / 'module' / 'package' / 'type' / 'method' / 'field' / 'signature' / 'language' / 'symbol_key' / 'identity_key' / 'root')> { p.setField(text) }
+Field <- <('node_type' / 'module' / 'package' / 'type' / 'method' / 'field' / 'signature' / 'language' / 'symbol_key' / 'identity_key' / 'symbol_id' / 'kind' / 'name' / 'owner' / 'root')> { p.setField(text) }
 
 RootField <- <'root'> { p.setField(text) }
 

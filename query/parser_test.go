@@ -42,6 +42,29 @@ var _ = Describe("PEG query grammar", func() {
 			Operation:  query.OperationNodes,
 			Predicates: []query.Predicate{{Field: "package", Value: `billing"core`}},
 		}),
+		Entry("references with owner and name", `references of node where owner = "Store" and name = "Save"`, query.Query{
+			Operation:  query.OperationReferences,
+			Predicates: []query.Predicate{{Field: "owner", Value: "Store"}, {Field: "name", Value: "Save"}},
+		}),
+		Entry("definitions by kind and package", `definitions of node where kind = "func" and package = "example.org/shop/app"`, query.Query{
+			Operation:  query.OperationDefinitions,
+			Predicates: []query.Predicate{{Field: "kind", Value: "func"}, {Field: "package", Value: "example.org/shop/app"}},
+		}),
+		Entry("implementations by symbol id", `implementations of node where symbol_id = "3f9c"`, query.Query{
+			Operation:  query.OperationImplementations,
+			Predicates: []query.Predicate{{Field: "symbol_id", Value: "3f9c"}},
+		}),
+		Entry("callers including dispatch", `callers of node where type = "Store" and method = "Save" including dispatch`, query.Query{
+			Operation:  query.OperationCallers,
+			Predicates: []query.Predicate{{Field: "type", Value: "Store"}, {Field: "method", Value: "Save"}},
+			Dispatch:   true,
+		}),
+		Entry("search by prefix", `search "Sav"`, query.Query{Operation: query.OperationSearch, Search: "Sav"}),
+		Entry("root-scoped qualified search", `search "Store.Save" where root = "example.org/shop"`, query.Query{
+			Operation:  query.OperationSearch,
+			Search:     "Store.Save",
+			Predicates: []query.Predicate{{Field: "root", Value: "example.org/shop"}},
+		}),
 	)
 
 	DescribeTable("rejects invalid input",
@@ -55,5 +78,12 @@ var _ = Describe("PEG query grammar", func() {
 		Entry("unquoted value", "nodes where module = billing", "quoted"),
 		Entry("trailing input", "unresolved calls now", "now"),
 		Entry("unsupported unresolved filter", `unresolved calls where module = "billing"`, "module"),
+		Entry("references without a selector", "references of node", "where"),
+		Entry("definitions without of node", `definitions where name = "Run"`, "where"),
+		Entry("dispatch on references", `references of node where name = "Save" including dispatch`, "including"),
+		Entry("dispatch without its keyword", `callers of node where name = "Save" including`, "including"),
+		Entry("unquoted search", "search Save", "Save"),
+		Entry("search without a prefix", "search", "search"),
+		Entry("search with a symbol predicate", `search "Save" where name = "Save"`, "name"),
 	)
 })

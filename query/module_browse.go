@@ -24,7 +24,6 @@ type ModuleSourceView struct {
 
 type ModuleCallView struct {
 	ToIdentifier  uir.Identifier `json:"to_identifier"`
-	ToRootKey     *string        `json:"to_root_key,omitempty"`
 	Resolvable    bool           `json:"resolvable"`
 	StatementPath string         `json:"statement_path"`
 	Line          *int           `json:"line,omitempty"`
@@ -43,7 +42,7 @@ type ModuleNodeView struct {
 	Ordinal        int              `json:"ordinal"`
 	Payload        json.RawMessage  `json:"payload"`
 	SemanticHash   string           `json:"semantic_hash"`
-	Field          json.RawMessage  `json:"field,omitempty"`
+	Field          *storage.Field   `json:"field,omitempty"`
 	Line           *int             `json:"line,omitempty"`
 	EndLine        *int             `json:"end_line,omitempty"`
 	Column         *int             `json:"column,omitempty"`
@@ -73,53 +72,53 @@ func (pipeline *Pipeline) BrowseModules(ctx context.Context, options ModuleScope
 		return ModuleBrowseResult{}, fmt.Errorf("module browse requires one snapshot, matched %d", len(scopes))
 	}
 	scope := scopes[0]
-	revisions, err := storage.EffectiveSources(ctx, pipeline.database, scope.snapshot.ID)
+	documents, err := pipeline.scopeDocuments(ctx, scope)
 	if err != nil {
 		return ModuleBrowseResult{}, err
 	}
-	paths := make([]string, 0, len(revisions))
-	for path := range revisions {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
 	result := ModuleBrowseResult{Sources: []ModuleSourceView{}, Nodes: []ModuleNodeView{}}
-	for _, path := range paths {
-		revision := revisions[path]
-		var projection sourceProjection
-		if err := json.Unmarshal(revision.Projection, &projection); err != nil {
-			return ModuleBrowseResult{}, fmt.Errorf("decode projection for %s at %s: %w", path, scope.snapshot.ID, err)
-		}
-		if projection.PackagePath != revision.PackagePath {
-			return ModuleBrowseResult{}, fmt.Errorf("projection for %s has package %q, expected %q", path, projection.PackagePath, revision.PackagePath)
-		}
-		result.Sources = append(result.Sources, moduleSourceView(scope, path, revision))
-		calls := make(map[string][]ModuleCallView)
-		for _, call := range projection.Calls {
-			calls[call.FromIdentity] = append(calls[call.FromIdentity], ModuleCallView{
-				ToIdentifier: call.ToIdentifier, ToRootKey: call.ToRootKey, Resolvable: call.Resolvable,
-				StatementPath: call.StatementPath, Line: call.StartLine, Text: call.Text,
-			})
-		}
-		for _, node := range projection.Nodes {
-			identity := node.Identifier.IdentityKey()
-			outgoing := calls[identity]
-			if outgoing == nil {
-				outgoing = []ModuleCallView{}
-			}
-			result.Nodes = append(result.Nodes, ModuleNodeView{
-				ID: revision.ID.String() + ":" + identity, SourceID: revision.ID.String(), Path: path,
-				Symbol: node.Identifier.SymbolKey(), NodeType: string(node.Identifier.GetNodeType()),
-				Identifier: node.Identifier, ParentIdentity: node.ParentIdentity, ChildSlot: node.ChildSlot,
-				Ordinal: node.Ordinal, Payload: node.Payload, SemanticHash: node.SemanticHash, Field: node.Field,
-				Line: node.StartLine, EndLine: node.EndLine, Column: node.Column, Calls: outgoing,
-			})
-		}
+	for _, document := range documents {
+		result.Sources = append(result.Sources, moduleSourceView(scope, document.path, document.source))
+		result.Nodes = append(result.Nodes, moduleNodeViews(document)...)
 	}
 	sort.Slice(result.Nodes, func(i, j int) bool {
 		left, right := result.Nodes[i], result.Nodes[j]
 		return left.Symbol+"\x00"+left.Path+"\x00"+left.ID < right.Symbol+"\x00"+right.Path+"\x00"+right.ID
 	})
 	return result, nil
+}
+
+func moduleNodeViews(document scopeDocument) []ModuleNodeView {
+	calls := make(map[string][]ModuleCallView)
+	for _, occurrence := range document.content.Occurrences {
+		if !occurrence.IsCall() {
+			continue
+		}
+		calls[occurrence.EnclosingKey] = append(calls[occurrence.EnclosingKey], ModuleCallView{
+			ToIdentifier: *occurrence.Target, Resolvable: occurrence.Resolvable,
+			StatementPath: occurrence.StatementPath, Line: &occurrence.Range[0], Text: occurrence.Text,
+		})
+	}
+	sourceID := document.source.ID.String()
+	nodes := make([]ModuleNodeView, 0, len(document.content.Symbols))
+	for _, symbol := range document.content.Symbols {
+		if !symbol.Explorable() {
+			continue
+		}
+		outgoing := calls[symbol.Key]
+		if outgoing == nil {
+			outgoing = []ModuleCallView{}
+		}
+		line, endLine, column := symbolPosition(symbol)
+		nodes = append(nodes, ModuleNodeView{
+			ID: sourceID + ":" + symbol.Key, SourceID: sourceID, Path: document.path,
+			Symbol: symbol.Identifier.SymbolKey(), NodeType: string(symbol.Identifier.GetNodeType()),
+			Identifier: symbol.Identifier, ParentIdentity: symbol.ParentKey, ChildSlot: symbol.ChildSlot,
+			Ordinal: symbol.Ordinal, Payload: json.RawMessage(symbol.Payload), SemanticHash: symbol.SemanticHash,
+			Field: symbol.Field, Line: line, EndLine: endLine, Column: column, Calls: outgoing,
+		})
+	}
+	return nodes
 }
 
 func moduleSourceView(scope moduleScope, path string, revision storage.SourceRevision) ModuleSourceView {
