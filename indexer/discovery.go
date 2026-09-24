@@ -13,19 +13,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/uir/storage"
 	"golang.org/x/mod/modfile"
 )
 
 type discoveredRoot struct {
-	RootKey        string
-	ParentRootKey  string
-	MountPath      string
-	LocalPath      string
-	Kind           string
-	Revision       string
-	RepositoryURI  string
-	ContentSetHash string
-	Files          []discoveredFile
+	RootKey           string
+	ParentRootKey     string
+	MountPath         string
+	LocalPath         string
+	Kind              string
+	Revision          string
+	WorktreeState     storage.WorktreeState
+	RepositoryURI     string
+	ContentSetHash    string
+	ConfigurationHash string
+	Variant           buildVariant
+	WorkFile          string
+	Files             []discoveredFile
 }
 
 type discoveredFile struct {
@@ -63,7 +68,20 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		return fmt.Errorf("discover Go sources in root %q: %w", root.RootKey, err)
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].PathKey < root.Files[j].PathKey })
-	root.ContentSetHash = hashFileSet(root.Files)
+	if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.Revision, root.Files); err != nil {
+		return err
+	}
+	environment, err := readGoEnvironment(ctx, root.LocalPath)
+	if err != nil {
+		return fmt.Errorf("root %q: %w", root.RootKey, err)
+	}
+	manifests, err := readManifests(root.LocalPath, environment.WorkFile)
+	if err != nil {
+		return fmt.Errorf("root %q: %w", root.RootKey, err)
+	}
+	root.ContentSetHash = contentSetHash(root.Files, manifests)
+	root.ConfigurationHash = configurationHash(includeTests, environment.Variant)
+	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
 	return nil
 }
 
@@ -187,17 +205,35 @@ func gitValue(ctx context.Context, directory string, args ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func hashFileSet(files []discoveredFile) string {
-	hasher := sha256.New()
-	for _, file := range files {
-		_, _ = hasher.Write([]byte(file.PathKey))
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write([]byte(file.PackagePath))
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write([]byte(file.ContentHash))
-		_, _ = hasher.Write([]byte{0})
+// worktreeState reports whether the module's files are exactly its revision's files: Git reports no
+// change under the directory and every indexed file is tracked, since Git's status omits the ignored
+// files discovery still indexes. Without a revision the module is not in a Git checkout (or the
+// checkout has no commit), so the state is unknown.
+func worktreeState(ctx context.Context, directory, revision string, files []discoveredFile) (storage.WorktreeState, error) {
+	if revision == "" {
+		return storage.WorktreeUnknown, nil
 	}
-	return hex.EncodeToString(hasher.Sum(nil))
+	status, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", directory, "status", "--porcelain", "--", ".").Output()
+	if err != nil {
+		return "", fmt.Errorf("read Git worktree state of %q: %w", directory, err)
+	}
+	if len(strings.TrimSpace(string(status))) > 0 {
+		return storage.WorktreeDirty, nil
+	}
+	listed, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", directory, "ls-files", "-z", "--", ".").Output()
+	if err != nil {
+		return "", fmt.Errorf("list Git-tracked files of %q: %w", directory, err)
+	}
+	tracked := map[string]bool{}
+	for _, path := range strings.Split(string(listed), "\x00") {
+		tracked[path] = true
+	}
+	for _, file := range files {
+		if !tracked[file.PathKey] {
+			return storage.WorktreeDirty, nil
+		}
+	}
+	return storage.WorktreeClean, nil
 }
 
 func hashBytes(content []byte) string {

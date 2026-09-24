@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -68,7 +69,7 @@ func Build() *Service {
 		}))
 		Expect(indexed.Calls[1].Resolvable).To(BeFalse())
 		Expect(indexed.Calls[0].Text).To(Equal("helper.Notify"))
-		Expect(indexed.Calls[0].StartLine).To(HaveValue(Equal(10)))
+		Expect(indexed.syntaxDocument().Occurrences[0].Range).To(Equal(storage.Range{10, 2, 10, 15}))
 		Expect(json.Valid(indexed.Nodes[0].Payload)).To(BeTrue())
 	})
 })
