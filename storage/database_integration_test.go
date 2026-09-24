@@ -12,11 +12,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var moduleTables = []any{
-	&storage.ModuleRoot{}, &storage.ModuleLocation{}, &storage.ModuleSnapshot{},
-	&storage.ModuleLocationHead{}, &storage.ModulePrimary{}, &storage.SourceRevision{}, &storage.SourceDelta{},
-}
-
 var _ = Describe("UirDB", func() {
 	DescribeTable("rejects invalid configuration",
 		func(options storage.DBOptions, message string) {
@@ -69,14 +64,4 @@ func openDB(ctx context.Context, options storage.DBOptions) *gorm.DB {
 		Expect(sqlDB.Close()).To(Succeed())
 	})
 	return database
-}
-
-func assertModuleSchema(database *gorm.DB) {
-	GinkgoHelper()
-	for _, model := range moduleTables {
-		Expect(database.Migrator().HasTable(model)).To(BeTrue(), model)
-	}
-	for _, name := range legacyTables {
-		Expect(database.Migrator().HasTable(name)).To(BeFalse(), name)
-	}
 }

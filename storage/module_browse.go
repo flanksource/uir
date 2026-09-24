@@ -26,10 +26,11 @@ type ModuleSnapshotView struct {
 	RootKey        string        `json:"root_key"`
 	CanonicalPath  string        `json:"canonical_path"`
 	BaseSnapshotID *uuid.UUID    `json:"base_snapshot_id,omitempty"`
-	State          SnapshotState `json:"state"`
 	Revision       string        `json:"revision"`
+	WorktreeState  WorktreeState `json:"worktree_state"`
+	Coverage       Coverage      `json:"coverage"`
 	StartedAt      time.Time     `json:"started_at"`
-	CompletedAt    *time.Time    `json:"completed_at,omitempty"`
+	CompletedAt    time.Time     `json:"completed_at"`
 	Head           bool          `json:"head"`
 	HeadVersion    int64         `json:"head_version,omitempty"`
 }
@@ -115,7 +116,8 @@ func ModuleSnapshots(ctx context.Context, database *gorm.DB, options ModuleSnaps
 	for _, snapshot := range snapshots {
 		row := ModuleSnapshotView{
 			ID: snapshot.ID, RootKey: root.RootKey, CanonicalPath: location.CanonicalPath,
-			BaseSnapshotID: snapshot.BaseSnapshotID, State: snapshot.State, Revision: snapshot.Revision,
+			BaseSnapshotID: snapshot.BaseSnapshotID, Revision: snapshot.Revision,
+			WorktreeState: snapshot.WorktreeState, Coverage: snapshot.Coverage,
 			StartedAt: snapshot.StartedAt, CompletedAt: snapshot.CompletedAt, Head: snapshot.ID == head.SnapshotID,
 		}
 		if row.Head {
