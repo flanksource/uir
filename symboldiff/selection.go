@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
@@ -16,6 +19,8 @@ import (
 )
 
 var fullCommitHash = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+var pullRequestRevision = regexp.MustCompile(`^pr:([1-9][0-9]*)$`)
+var errCleanSnapshotMissing = errors.New("clean snapshot is missing")
 
 // rootScope is the root being diffed and its registered checkouts, primary first.
 type rootScope struct {
@@ -56,6 +61,24 @@ func (scope rootScope) checkoutPaths() string {
 // resolveCommit returns a full commit hash as is and resolves any other revision through the first
 // registered checkout that knows it.
 func (scope rootScope) resolveCommit(ctx context.Context, revision string) (string, error) {
+	if match := pullRequestRevision.FindStringSubmatch(revision); match != nil {
+		number, err := strconv.Atoi(match[1])
+		if err != nil {
+			return "", fmt.Errorf("invalid pull request %q: %w", revision, err)
+		}
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		var failures []error
+		for _, location := range scope.locations {
+			ref := fmt.Sprintf("refs/uir/pr/%d", number)
+			if _, err := git(fetchCtx, location.CanonicalPath, "fetch", "--no-tags", "origin", fmt.Sprintf("refs/pull/%d/head:%s", number, ref)); err == nil {
+				return verifyCommit(fetchCtx, location.CanonicalPath, ref)
+			} else {
+				failures = append(failures, err)
+			}
+		}
+		return "", fmt.Errorf("fetch pull request #%d for %q: %w", number, scope.root.RootKey, errors.Join(failures...))
+	}
 	if fullCommitHash.MatchString(revision) {
 		return revision, nil
 	}
@@ -89,7 +112,7 @@ func (scope rootScope) selectSnapshot(ctx context.Context, database *gorm.DB, co
 		return storage.ModuleSnapshot{}, fmt.Errorf("load snapshots of commit %s: %w", commit, err)
 	}
 	if len(snapshots) == 0 {
-		return storage.ModuleSnapshot{}, fmt.Errorf("commit %s of root %q has no snapshot; check it out in a registered location and index it first", commit, scope.root.RootKey)
+		return storage.ModuleSnapshot{}, fmt.Errorf("%w: commit %s of root %q has no snapshot; check it out in a registered location and index it first", errCleanSnapshotMissing, commit, scope.root.RootKey)
 	}
 	dirty := make([]string, 0, len(snapshots))
 	for _, snapshot := range snapshots {
@@ -98,7 +121,8 @@ func (scope rootScope) selectSnapshot(ctx context.Context, database *gorm.DB, co
 		}
 		dirty = append(dirty, snapshot.ID.String())
 	}
-	return storage.ModuleSnapshot{}, fmt.Errorf("commit %s of root %q has only dirty snapshots (%s), whose bytes may not be the commit's bytes; select one explicitly with %s",
+	return storage.ModuleSnapshot{}, fmt.Errorf("%w: commit %s of root %q has only dirty snapshots (%s), whose bytes may not be the commit's bytes; select one explicitly with %s",
+		errCleanSnapshotMissing,
 		commit, scope.root.RootKey, strings.Join(dirty, ", "), flag)
 }
 
@@ -127,6 +151,7 @@ func verifyCommit(ctx context.Context, directory, revision string) (string, erro
 
 func git(ctx context.Context, directory string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...)
+	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
 )
@@ -81,7 +82,26 @@ func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, option
 		if err != nil {
 			return selectedSide{}, selectedSide{}, err
 		}
-		snapshot, err := scope.selectSnapshot(ctx, database, commit, request.override, request.flag)
+		var snapshot storage.ModuleSnapshot
+		if options.AutoIndex && request.override == "" {
+			checkout, checkoutErr := scope.checkoutFor(ctx, commit)
+			if checkoutErr != nil {
+				return selectedSide{}, selectedSide{}, checkoutErr
+			}
+			engine, createErr := indexer.New(database)
+			if createErr != nil {
+				return selectedSide{}, selectedSide{}, createErr
+			}
+			indexed, indexErr := engine.IndexRevision(ctx, indexer.RevisionOptions{
+				RootKey: scope.root.RootKey, Checkout: checkout, Commit: commit, IncludeTests: options.IncludeTests,
+			})
+			if indexErr != nil {
+				return selectedSide{}, selectedSide{}, indexErr
+			}
+			snapshot, err = scope.overrideSnapshot(ctx, database, commit, indexed.SnapshotID, request.flag)
+		} else {
+			snapshot, err = scope.selectSnapshot(ctx, database, commit, request.override, request.flag)
+		}
 		if err != nil {
 			return selectedSide{}, selectedSide{}, err
 		}

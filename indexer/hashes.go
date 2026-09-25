@@ -80,6 +80,9 @@ func configurationHash(includeTests bool, variant buildVariant) string {
 	for _, tag := range tags {
 		digest.text(tag)
 	}
+	if variant.GoWorkOff {
+		digest.text("standalone-module")
+	}
 	return digest.sum()
 }
 

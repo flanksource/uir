@@ -25,10 +25,14 @@ export function registerQueryLanguage(monaco: Monaco): void {
   });
 }
 
-export function queryCompletionProvider(monaco: Monaco, scope: () => Scope, reportError: (message: string) => void): monacoEditor.languages.CompletionItemProvider {
+export function queryCompletionProvider(monaco: Monaco, options: {
+  uri: string; scope: () => Scope; reportError: (message: string) => void;
+}): monacoEditor.languages.CompletionItemProvider {
+  const { uri, scope, reportError } = options;
   return {
     triggerCharacters: [".", "/", "*", "?", "<", ">", "=", ":", "~", "+", "-", "&", "|", "(", ")", " "],
     async provideCompletionItems(model, position, _context, cancellation) {
+      if (model.uri.toString() !== uri) return { suggestions: [] };
       const context = queryCompletionContext(model.getValue(), model.getOffsetAt(position));
       const start = model.getPositionAt(context.start);
       const end = model.getPositionAt(context.end);

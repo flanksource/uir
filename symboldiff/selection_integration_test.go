@@ -2,6 +2,8 @@ package symboldiff
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
@@ -21,6 +23,49 @@ func checkoutSource(suffix string) *string {
 }
 
 var _ = Describe("commit-to-snapshot selection", func() {
+	It("type-checks a historical worktree even when its parent workspace names only the current checkout", func(ctx SpecContext) {
+		database := openDatabase(ctx, sqliteOptions())
+		parent := GinkgoT().TempDir()
+		repo := &repository{path: filepath.Join(parent, "checkout")}
+		Expect(os.MkdirAll(repo.path, 0o755)).To(Succeed())
+		repo.git("init", "--quiet", "--initial-branch=main")
+		Expect(os.WriteFile(filepath.Join(parent, "go.work"), []byte("go 1.26\n\nuse ./checkout\n"), 0o644)).To(Succeed())
+		repo.write(map[string]*string{"go.mod": text("module " + shopRoot + "\n\ngo 1.26\n"), "cart.go": text(cartBefore)})
+		from := repo.commit("shop before")
+		repo.write(map[string]*string{"cart.go": text(cartAfter)})
+		to := repo.commit("shop after")
+		repo.index(ctx, database)
+
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
+	})
+
+	It("indexes missing clean commits without changing the registered checkout head", func(ctx SpecContext) {
+		database := openDatabase(ctx, sqliteOptions())
+		repo := newRepository()
+		repo.write(map[string]*string{"go.mod": text("module " + shopRoot + "\n\ngo 1.26\n"), "cart.go": text(cartBefore)})
+		from := repo.commit("shop before")
+		repo.write(map[string]*string{"cart.go": text(cartAfter)})
+		to := repo.commit("shop after")
+		GinkgoT().Setenv("CGO_ENABLED", "1")
+		original := repo.index(ctx, database)
+		GinkgoT().Setenv("CGO_ENABLED", "0")
+
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		Expect(err).ToNot(HaveOccurred())
+		Expect([]string{result.From.Commit, result.To.Commit, result.From.WorktreeState}).To(Equal([]string{from, to, "clean"}))
+		Expect(result.From.SnapshotID).ToNot(Equal(original))
+		Expect(result.To.SnapshotID).ToNot(Equal(original))
+		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
+		var head storage.ModuleLocationHead
+		Expect(database.First(&head).Error).To(Succeed())
+		Expect(head.SnapshotID.String()).To(Equal(original))
+		var locations int64
+		Expect(database.Model(&storage.ModuleLocation{}).Count(&locations).Error).To(Succeed())
+		Expect(locations).To(Equal(int64(1)))
+	})
+
 	DescribeTable("rejects dirty-only, unindexed, mismatched, and empty selections and fails one file's lines on a hash mismatch",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openDatabase(ctx, options())

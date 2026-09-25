@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { MonacoEditor, MonacoProvider } from "@flanksource/clicky-ui/monaco";
 import type { IDisposable } from "monaco-editor";
 import { getMonacoWorker } from "./monaco-workers";
@@ -8,12 +8,17 @@ import { queryScope } from "./query-model";
 import type { Route } from "./route";
 import "./query-expression.css";
 
-export function QueryExpressionInput({ draft, route, onChange }: { draft: string; route: Route; onChange: (value: string) => void }) {
+export function QueryExpressionInput({ draft, route, path, autoFocus = false, onChange, onRun }: {
+  draft: string; route: Route; path: string; autoFocus?: boolean; onChange: (value: string) => void; onRun: () => void;
+}) {
+  const labelId = useId();
   const scope = useRef(queryScope(route));
+  const run = useRef(onRun);
   const disposables = useRef<IDisposable[]>([]);
   const [error, setError] = useState("");
   const [context, setContext] = useState(() => queryCompletionContext(draft, draft.length));
   scope.current = queryScope(route);
+  run.current = onRun;
   useEffect(() => () => { disposables.current.forEach((item) => item.dispose()); disposables.current = []; }, []);
   const hint = context.mode === "symbol" ? "Type a Go symbol; indexed candidates appear as you type."
     : context.mode === "relation" ? "Choose a relation (<, >, =, :impl, :methods, ~w), set operator (&, |), or path (>>)."
@@ -22,9 +27,9 @@ export function QueryExpressionInput({ draft, route, onChange }: { draft: string
     : "Enter a package name or full import path; append /... to include its subpackages.";
 
   return <div className="uir-query-expression min-w-64 flex-1 text-sm">
-    <label className="mb-1 block" id="query-expression-label">Expression</label>
+    <label className="mb-1 block" id={labelId}>Expression</label>
     <MonacoProvider getWorker={getMonacoWorker}>
-      <MonacoEditor value={draft} onChange={onChange} language={queryLanguageId} path="file:///uir/query/expression.uirq" height="2.75rem"
+      <MonacoEditor value={draft} onChange={onChange} language={queryLanguageId} path={path} height="2.75rem"
         beforeMount={registerQueryLanguage} onMount={(editor, monaco) => {
           disposables.current.forEach((item) => item.dispose());
           editor.updateOptions({
@@ -32,9 +37,9 @@ export function QueryExpressionInput({ draft, route, onChange }: { draft: string
             renderLineHighlight: "none", overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
             wordBasedSuggestions: "off", tabCompletion: "on", acceptSuggestionOnEnter: "on", wordWrap: "off",
           });
-          editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => editor.getDomNode()?.closest("form")?.requestSubmit());
+          editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => run.current());
           disposables.current = [
-            monaco.languages.registerCompletionItemProvider(queryLanguageId, queryCompletionProvider(monaco, () => scope.current, setError)),
+            monaco.languages.registerCompletionItemProvider(queryLanguageId, queryCompletionProvider(monaco, { uri: path, scope: () => scope.current, reportError: setError })),
             editor.onDidFocusEditorText(() => editor.trigger("uir-query", "editor.action.triggerSuggest", {})),
             editor.onDidChangeCursorPosition((event) => {
               const model = editor.getModel();
@@ -47,6 +52,7 @@ export function QueryExpressionInput({ draft, route, onChange }: { draft: string
               if (model && position) setContext(queryCompletionContext(model.getValue(), model.getOffsetAt(position)));
             }),
           ];
+          if (autoFocus) editor.focus();
         }} />
     </MonacoProvider>
     <p id="query-expression-help" className="mt-1 text-xs text-muted-foreground">{hint} Ctrl/Cmd+Space opens suggestions; Ctrl/Cmd+Enter runs the query.</p>

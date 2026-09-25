@@ -20,7 +20,7 @@ describe("command result icons", () => {
   });
 
   it("provides a distinct icon for each navigation result", () => {
-    expect(Object.keys(commandNavigationIcons).sort()).toEqual(["explorer", "overview", "query", "tasks"]);
-    expect(new Set(Object.values(commandNavigationIcons)).size).toBe(4);
+    expect(Object.keys(commandNavigationIcons).sort()).toEqual(["explorer", "history", "overview", "query", "tasks"]);
+    expect(new Set(Object.values(commandNavigationIcons)).size).toBe(5);
   });
 });

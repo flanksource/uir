@@ -77,14 +77,6 @@ export function queryExamples(_root: string, nodes: ModuleNode[]): QueryExample[
   ];
 }
 
-// paletteExpression recognizes a qualified Go subject or the explicit `>` command prefix.
-export function paletteExpression(input: string): string | undefined {
-  const text = input.trim();
-  if (text.startsWith(">")) return text.slice(1).trim() || undefined;
-  const subject = text.split(/\s/, 1)[0];
-  return /^[A-Za-z_][A-Za-z0-9_./*-]*$/.test(subject) && /[./]/.test(subject) ? text : undefined;
-}
-
 export function groupRowsByFile(rows: ModuleQueryRow[]): { candidates: ModuleQueryRow[]; files: FileRows[] } {
   const candidates: ModuleQueryRow[] = [];
   const files = new Map<string, FileRows>();

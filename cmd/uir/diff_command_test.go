@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,5 +120,20 @@ var _ = Describe("uir diff", func() {
 		Expect([]any{file.HiddenRows, len(file.Rows), *file.Lines}).To(Equal([]any{0, 3, symboldiff.LineCount{Added: 2, Removed: 2}}))
 		Expect(file.Rows[2].ShapeDiff).To(BeNil(), "helper is a body row")
 		Expect(file.Rows[1].ShapeDiff[1].Tokens).To(ContainElement(symboldiff.Token{Op: symboldiff.OpInsert, Text: ", loud bool"}))
+	})
+
+	It("serves branch and commit choices for the comparison view", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		from, to := indexedCommits(ctx, database)
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/history?root="+url.QueryEscape(diffRoot), nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var history symboldiff.History
+		Expect(json.Unmarshal(response.Body.Bytes(), &history)).To(Succeed(), response.Body.String())
+		Expect(history.Branches).To(ContainElement(symboldiff.GitRef{Name: "main", Commit: to}))
+		Expect([]string{history.Commits[0].Commit, history.Commits[0].Parents[0]}).To(Equal([]string{to, from}))
 	})
 })

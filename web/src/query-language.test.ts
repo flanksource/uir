@@ -16,13 +16,15 @@ const cancellation = {
 } as unknown as CancellationToken;
 
 function complete(expression: string) {
+  const uri = "file:///uir/query/expression.uirq";
   const model = {
+    uri: { toString: () => uri },
     getValue: () => expression,
     getOffsetAt: (position: { column: number }) => position.column - 1,
     getPositionAt: (offset: number) => ({ lineNumber: 1, column: offset + 1 }),
   } as unknown as editor.ITextModel;
   const reportError = vi.fn();
-  const provider = queryCompletionProvider(monaco, () => ({ root: "example.org/shop", snapshot: "snapshot-1" }), reportError);
+  const provider = queryCompletionProvider(monaco, { uri, scope: () => ({ root: "example.org/shop", snapshot: "snapshot-1" }), reportError });
   return { result: provider.provideCompletionItems!(model, { lineNumber: 1, column: expression.length + 1 } as never, {} as never, cancellation), reportError };
 }
 
@@ -64,5 +66,15 @@ describe("query Monaco completion", () => {
       label: "pkg:example.org/shop:store", insertText: "pkg:example.org/shop:store ",
     }));
     expect(suggestTypedSelectors).toHaveBeenCalledWith("pkg:example.org/shop:st", "example.org/shop", "snapshot-1", expect.any(AbortSignal));
+  });
+
+  it("does not offer completions for another expression editor's model", async () => {
+    const { result } = complete("store.Store.Save ");
+    expect((await result)?.suggestions.length).toBeGreaterThan(0);
+    const provider = queryCompletionProvider(monaco, {
+      uri: "file:///uir/palette/expression.uirq", scope: () => ({ root: "example.org/shop", snapshot: "snapshot-1" }), reportError: vi.fn(),
+    });
+    const otherModel = { uri: { toString: () => "file:///uir/query/expression.uirq" } } as unknown as editor.ITextModel;
+    expect(await provider.provideCompletionItems!(otherModel, { lineNumber: 1, column: 1 } as never, {} as never, cancellation)).toEqual({ suggestions: [] });
   });
 });
