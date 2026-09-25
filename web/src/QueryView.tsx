@@ -40,7 +40,8 @@ export function QueryView({ route, query, examples, onRoute }: {
     <PanelForm onSubmit={(event) => { event.preventDefault(); onRoute({ expression: draft.trim() }); }}>
       <div className="flex flex-wrap items-end gap-3">
         <Suspense fallback={<div className="min-w-64 flex-1 text-sm text-muted-foreground">Loading expression editor…</div>}>
-          <QueryExpressionInput draft={draft} route={route} onChange={setDraft} />
+          <QueryExpressionInput draft={draft} route={route} path="file:///uir/query/expression.uirq" onChange={setDraft}
+            onRun={() => { if (draft.trim()) onRoute({ expression: draft.trim() }); }} />
         </Suspense>
         <Button type="submit" disabled={!draft.trim()}>Run query</Button>
       </div>

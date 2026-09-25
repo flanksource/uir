@@ -58,6 +58,8 @@ type Options struct {
 	SnapshotTo   string
 	Visibility   Visibility
 	Stat         bool
+	AutoIndex    bool
+	IncludeTests bool
 }
 
 // ParseRange splits "<from>..<to>" into its two commits; both must be non-empty.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModuleNode, ModuleQueryRow } from "./api";
-import { groupRowsByFile, identityLabel, nodeIdentityKey, paletteExpression, parseIdentityKey, queryExamples, queryScope, symbolSelector } from "./query-model";
+import { groupRowsByFile, identityLabel, nodeIdentityKey, parseIdentityKey, queryExamples, queryScope, symbolSelector } from "./query-model";
 
 const pkg = "example.org/service/store";
 const root = "example.org/service";
@@ -126,22 +126,6 @@ describe("queryScope", () => {
     ["the chosen module snapshot", { module: root, snapshot: "snapshot-1" }, { root, snapshot: "snapshot-1" }],
   ])("queries %s", (_, route, expected) => {
     expect(queryScope(route)).toEqual(expected);
-  });
-});
-
-describe("paletteExpression", () => {
-  it.each([
-    [">sub.Thing.Do <", "sub.Thing.Do <"],
-    [">  main.* >> sub.Thing.Do ", "main.* >> sub.Thing.Do"],
-    ["sub.Thing.Do <", "sub.Thing.Do <"],
-    ["example.org/service/store.Store.Save =", "example.org/service/store.Store.Save ="],
-    ["main.* >> sub.Thing.Do", "main.* >> sub.Thing.Do"],
-  ])("runs %s as %s", (input, expression) => {
-    expect(paletteExpression(input)).toBe(expression);
-  });
-
-  it.each([[">"], ["> "], ["Store"], ["references"], ["search"], ["researcher of"]])("treats %s as a palette search", (input) => {
-    expect(paletteExpression(input)).toBeUndefined();
   });
 });
 

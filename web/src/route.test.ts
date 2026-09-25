@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue } from "./route";
 
 const root = { root_key: "example.org/service", location: "/checkout/service", snapshot_id: "head-1" };
-const selectionReset = { source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 };
+const selectionReset = { source: "", node: "", fileSearch: "", symbolSearch: "", compareFrom: "", compareTo: "", logCommit: "", includeTests: false, offset: 0 };
 
 describe("scope", () => {
   it.each([
@@ -27,6 +27,12 @@ it("opens the task manager at its own route", () => {
   const route = readRoute({ pathname: "/tasks", search: "?module=example.org%2Fservice" });
   expect(route.view).toBe("tasks");
   expect(routeURL(route)).toBe("/tasks?module=example.org%2Fservice");
+});
+
+it("round trips a Git comparison and selected log commit through the history URL", () => {
+  const route = readRoute({ pathname: "/history", search: "?module=example.org%2Fservice&compareFrom=main&compareTo=pr%3A12&logCommit=abc123" });
+  expect(route).toMatchObject({ view: "history", compareFrom: "main", compareTo: "pr:12", logCommit: "abc123" });
+  expect(readRoute(new URL(routeURL(route), "http://localhost"))).toEqual(route);
 });
 
 it("round trips the selected module, checkout, snapshot, source, node, position, filters, and query through the URL", () => {

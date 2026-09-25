@@ -130,6 +130,19 @@ export type ModuleIndexResult = {
   reused_files: number;
   unchanged: boolean;
 };
+export type GitRef = { name: string; commit: string };
+export type GitCommit = { commit: string; parents: string[]; subject: string; authored_at: string };
+export type GitHistory = { root_key: string; location: string; branches: GitRef[]; commits: GitCommit[];
+  pull_requests: { number: number; commit: string }[]; pull_request_error?: string };
+export type SymbolChange = { class: "added" | "removed" | "signature" | "body" | "moved"; kind: string;
+  owner?: string; name: string; visibility: string; shape_before?: string; shape_after?: string;
+  shape_diff?: { op: string; text: string; paired?: boolean; tokens: { op: string; text: string }[] }[];
+  path_before?: string; path_after?: string; lines?: { added: number; removed: number }; coverage?: string[]; note?: string };
+export type SymbolDiff = { root_key: string; from: { commit: string; snapshot_id: string; worktree_state: string };
+  to: { commit: string; snapshot_id: string; worktree_state: string }; visibility: string; stat: boolean;
+  lines_error?: string; packages: { path: string; lines?: { added: number; removed: number };
+    files: { path: string; status: string; coverage?: string[]; excluded?: string;
+      lines?: { added: number; removed: number }; lines_error?: string; hidden_rows?: number; rows: SymbolChange[] }[] }[] };
 export type Page<T> = { data: T[]; page: { limit: number; offset: number; total: number } };
 export type SystemInfo = {
   backend_version: string;
@@ -215,4 +228,12 @@ export function addModules(path: string, includeTests: boolean): Promise<ModuleI
 
 export function reindexModules(path: string, includeTests: boolean, force: boolean): Promise<ModuleIndexResult[]> {
   return request(moduleURL("reindex"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, force }) });
+}
+
+export function listGitHistory(root: string, location: string): Promise<GitHistory> {
+  return request(moduleURL("history", { root, location, limit: "50" }));
+}
+
+export function compareGitRevisions(root: string, from: string, to: string, visibility: string, includeTests: boolean): Promise<SymbolDiff> {
+  return request(moduleURL("diff"), { method: "POST", body: JSON.stringify({ args: [`${from}..${to}`], root, visibility, stat: true, "auto-index": true, "include-tests": includeTests }) });
 }

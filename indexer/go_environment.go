@@ -21,6 +21,7 @@ type buildVariant struct {
 	CGOEnabled string
 	GoVersion  string
 	BuildTags  []string
+	GoWorkOff  bool
 }
 
 // goEnvironment is what the Go toolchain that type-checks a module reports for its directory.

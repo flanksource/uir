@@ -1,9 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { AppShell, Button, Combobox, CommandPalette, CommandPaletteTrigger, type CommandGroup } from "@flanksource/clicky-ui/components";
+import { AppShell, Button, Combobox, CommandPaletteTrigger, type CommandGroup } from "@flanksource/clicky-ui/components";
 import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
 import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
 import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
-import { paletteExpression, queryExamples, queryScope, type QueryExample } from "./query-model";
+import { queryExamples, queryScope, type QueryExample } from "./query-model";
+import { QueryCommandPalette } from "./QueryCommandPalette";
+import { HistoryView } from "./HistoryView";
 import { QueryView } from "./QueryView";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue, type Route } from "./route";
 import { SystemDetails } from "./SystemDetails";
@@ -136,13 +138,8 @@ export function App() {
     if (route.module && !browse.data) return { items: [] };
     try { return { items: queryExamples(route.module, browse.data?.nodes ?? []) }; } catch (error) { return { items: [], error: `Cannot build query examples: ${String(error)}` }; }
   }, [browse.data, route.module]);
-  const [paletteQuery, setPaletteQuery] = useState("");
-  const typedExpression = paletteExpression(paletteQuery);
-
-  const nav = ["overview", "explorer", "query", "tasks"] as const;
+  const nav = ["overview", "explorer", "query", "history", "tasks"] as const;
   const commandGroups: CommandGroup[] = [
-    ...(typedExpression ? [{ id: "expression", heading: "Run expression", items: [{ id: "expression:typed", label: `Run ${typedExpression}`, keywords: [paletteQuery.trim()], icon: commandNavigationIcons.query,
-      onSelect: () => setRoute({ view: "query", expression: typedExpression }) }] }] : []),
     { id: "queries", heading: "Queries", items: examples.items.map((example) => ({ id: `query:${example.id}`, label: `${example.label} (example)`, description: example.expression, icon: commandNavigationIcons.query,
       onSelect: () => setRoute({ view: "query", expression: example.expression }) })) },
     { id: "navigation", heading: "Go to", items: nav.map((view) => ({ id: `view:${view}`, label: view[0].toUpperCase() + view.slice(1), icon: commandNavigationIcons[view], onSelect: () => setRoute({ view }) })) },
@@ -189,7 +186,8 @@ export function App() {
         <QueryView route={route} query={query} examples={examples.items} onRoute={setRoute} />
         <ErrorMessage error={browse.error ?? examples.error} />
       </>}
+      {route.view === "history" && <HistoryView route={route} refresh={refresh} onRoute={setRoute} />}
     </PageLayout>}
-  </AppShell><CommandPalette open={searchOpen} onOpenChange={setSearchOpen} groups={commandGroups} query={paletteQuery} onQueryChange={setPaletteQuery}
-    footer={browse.loading ? "Loading snapshot files and symbols…" : browse.error ?? examples.error ?? "Start with > to run a compact expression"} /></>;
+  </AppShell><QueryCommandPalette open={searchOpen} onOpenChange={setSearchOpen} route={route} onRoute={setRoute} commands={commandGroups}
+    status={browse.loading ? "Loading snapshot files and symbols…" : browse.error ?? examples.error ?? "Type > for an expression"} /></>;
 }

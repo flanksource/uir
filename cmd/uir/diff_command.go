@@ -15,6 +15,8 @@ type diffOptions struct {
 	Stat         bool   `flag:"stat" help:"Add per-file and per-symbol line counts from hash-verified Git blobs"`
 	SnapshotFrom string `flag:"snapshot-from" help:"Snapshot UUID to use for <from> instead of its newest clean snapshot"`
 	SnapshotTo   string `flag:"snapshot-to" help:"Snapshot UUID to use for <to> instead of its newest clean snapshot"`
+	AutoIndex    bool   `flag:"auto-index" help:"Index missing clean commit snapshots without moving the checkout head"`
+	IncludeTests bool   `flag:"include-tests" help:"Include Go test symbols when indexing historical commits"`
 }
 
 func registerDiffCommand(root *cobra.Command) {
@@ -33,7 +35,7 @@ func registerDiffCommand(root *cobra.Command) {
 		}
 		return symboldiff.Diff(ctx, database, symboldiff.Options{
 			RootKey: options.Root, From: from, To: to, SnapshotFrom: options.SnapshotFrom, SnapshotTo: options.SnapshotTo,
-			Visibility: visibility, Stat: options.Stat,
+			Visibility: visibility, Stat: options.Stat, AutoIndex: options.AutoIndex, IncludeTests: options.IncludeTests,
 		})
 	})
 	command.Use = "diff <from>..<to>"

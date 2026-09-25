@@ -118,12 +118,13 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 }
 
 type snapshotPublication struct {
-	root       storage.ModuleRoot
-	location   storage.ModuleLocation
-	base       moduleBase
-	extraction moduleExtraction
-	force      bool
-	startedAt  time.Time
+	root         storage.ModuleRoot
+	location     storage.ModuleLocation
+	base         moduleBase
+	extraction   moduleExtraction
+	force        bool
+	startedAt    time.Time
+	preserveHead bool
 }
 
 // publishSnapshot writes source revisions, symbols, documents, and postings, then the snapshot row
@@ -155,8 +156,12 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err := createPackageCoverage(ctx, database, snapshot, publication.extraction.packages); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot); err != nil {
-		return storage.ModuleSnapshot{}, err
+	if publication.preserveHead {
+		result.HeadVersion = publication.base.head.Version
+	} else {
+		if result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot); err != nil {
+			return storage.ModuleSnapshot{}, err
+		}
 	}
 	return snapshot, nil
 }

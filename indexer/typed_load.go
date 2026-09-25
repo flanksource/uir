@@ -42,6 +42,9 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 	var mutex sync.Mutex
 	parsed := map[string]string{}
 	environment := append(os.Environ(), "GOOS="+root.Variant.GOOS, "GOARCH="+root.Variant.GOARCH, "CGO_ENABLED="+root.Variant.CGOEnabled)
+	if root.Variant.GoWorkOff {
+		environment = append(environment, "GOWORK=off")
+	}
 	config := &packages.Config{
 		Mode: typedLoadMode, Context: ctx, Dir: root.LocalPath, Env: environment, Tests: includeTests, Fset: token.NewFileSet(),
 		ParseFile: func(fileSet *token.FileSet, filename string, source []byte) (*ast.File, error) {

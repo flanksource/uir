@@ -5,7 +5,7 @@ export const ALL_MODULES = "*";
 export type ScopeRoot = Pick<ModuleRoot, "root_key" | "location" | "snapshot_id">;
 
 export type Route = {
-  view: "overview" | "explorer" | "query" | "tasks";
+  view: "overview" | "explorer" | "query" | "history" | "tasks";
   module: string;
   location: string;
   snapshot: string;
@@ -16,6 +16,11 @@ export type Route = {
   fileSearch: string;
   symbolSearch: string;
   expression: string;
+  compareFrom: string;
+  compareTo: string;
+  logCommit: string;
+  diffVisibility: string;
+  includeTests: boolean;
   offset: number;
 };
 
@@ -23,7 +28,7 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
   const params = new URLSearchParams(location.search);
   const path = location.pathname.slice(1);
   return {
-    view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : path === "tasks" ? "tasks" : "overview",
+    view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : path === "history" ? "history" : path === "tasks" ? "tasks" : "overview",
     module: params.get("module") ?? "",
     location: params.get("location") ?? "",
     snapshot: params.get("snapshot") ?? "",
@@ -34,18 +39,24 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     fileSearch: params.get("fileSearch") ?? (path === "explorer" ? params.get("search") ?? "" : ""),
     symbolSearch: params.get("symbolSearch") ?? (path === "nodes" ? params.get("search") ?? "" : ""),
     expression: params.get("expression") ?? "",
+    compareFrom: params.get("compareFrom") ?? "",
+    compareTo: params.get("compareTo") ?? "",
+    logCommit: params.get("logCommit") ?? "",
+    diffVisibility: params.get("diffVisibility") ?? "",
+    includeTests: params.get("includeTests") === "1",
     offset: Number(params.get("offset") ?? 0),
   };
 }
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "expression"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
   for (const key of ["line", "column", "offset"] as const) {
     if (route[key] > 0) params.set(key, String(route[key]));
   }
+  if (route.includeTests) params.set("includeTests", "1");
   const query = params.toString();
   return `/${route.view === "overview" ? "" : route.view}${query ? `?${query}` : ""}`;
 }
@@ -67,5 +78,5 @@ export function scopeValue(route: Pick<Route, "module">): string {
 export function scopePatch(root: ScopeRoot | null): Partial<Route> {
   if (!root) return { module: "" };
   return { module: root.root_key, location: root.location, snapshot: root.snapshot_id,
-    source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 };
+    source: "", node: "", fileSearch: "", symbolSearch: "", compareFrom: "", compareTo: "", logCommit: "", includeTests: false, offset: 0 };
 }
