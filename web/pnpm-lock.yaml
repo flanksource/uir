@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@flanksource/clicky-ui':
-        specifier: 0.3.36
-        version: 0.3.36(@babel/core@7.29.7)(@babel/template@7.29.7)(@types/react@18.3.31)(monaco-editor@0.56.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recharts@3.10.1(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react-is@19.3.0)(react@18.3.1)(redux@5.0.1))(tailwindcss@4.3.3)
+        specifier: 0.3.41
+        version: 0.3.41(@babel/core@7.29.7)(@babel/template@7.29.7)(@tanstack/react-query@5.103.2(react@18.3.1))(@types/react@18.3.31)(monaco-editor@0.56.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recharts@3.10.1(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react-is@19.3.0)(react@18.3.1)(redux@5.0.1))(tailwindcss@4.3.3)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -305,14 +305,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@flanksource/clicky-ui@0.3.36':
-    resolution: {integrity: sha512-ix5u2lIcstYUIgx9t/ng33T/k11E4eXeL2/K4CN0tRjeyvQlGceOKjQYWykAJyqV8WVNxmhQW7VrKO8UWUipzg==}
+  '@flanksource/clicky-ui@0.3.41':
+    resolution: {integrity: sha512-e3YPmn9hosRq4L+dN1HrkOeXbhdEe2pyUREu/EEZvCaIetdO/lxx9tEpIrfc7EYLZNXU+veGhaGxJ8dQiO10yw==}
     peerDependencies:
       '@ai-sdk/react': ^3.0.0
       '@mdxeditor/editor': ^4.0.4
       '@shikijs/langs': ^1.24.0
       '@shikijs/themes': ^1.24.0
       '@shikijs/transformers': ^1.24.0
+      '@tanstack/react-query': ^5.66.8
       ai: ^6.0.0
       marked: ^15.0.0
       monaco-editor: '>=0.48 <1'
@@ -1663,7 +1664,7 @@ snapshots:
   '@esbuild/win32-x64@0.25.12':
     optional: true
 
-  '@flanksource/clicky-ui@0.3.36(@babel/core@7.29.7)(@babel/template@7.29.7)(@types/react@18.3.31)(monaco-editor@0.56.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recharts@3.10.1(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react-is@19.3.0)(react@18.3.1)(redux@5.0.1))(tailwindcss@4.3.3)':
+  '@flanksource/clicky-ui@0.3.41(@babel/core@7.29.7)(@babel/template@7.29.7)(@tanstack/react-query@5.103.2(react@18.3.1))(@types/react@18.3.31)(monaco-editor@0.56.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(recharts@3.10.1(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react-is@19.3.0)(react@18.3.1)(redux@5.0.1))(tailwindcss@4.3.3)':
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/commands': 6.11.1
