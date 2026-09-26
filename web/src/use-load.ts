@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ServerTimingMetric } from "@flanksource/clicky-ui/data";
-import type { TimedResponse } from "./api";
+import { ApiError, errorMessage, type TimedResponse } from "./api";
 
-export type Load<T> = { data?: T; error?: string; loading: boolean };
+export type Load<T> = { data?: T; error?: string; diagnostic?: ApiError; loading: boolean };
 export type TimedLoad<T> = Load<T> & { timing?: ServerTimingMetric[] };
 
 export function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T> {
@@ -15,7 +15,7 @@ export function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T
     let active = true;
     setResult({ key, loading: true });
     load().then((data) => { if (active) setResult({ key, data, loading: false }); }, (error: unknown) => {
-      if (active) setResult({ key, error: String(error), loading: false });
+      if (active) setResult({ key, error: errorMessage(error), diagnostic: error instanceof ApiError ? error : undefined, loading: false });
     });
     return () => { active = false; };
     // key names every input that changes the request.
@@ -26,5 +26,5 @@ export function useLoad<T>(load: (() => Promise<T>) | null, key: string): Load<T
 
 export function useTimedLoad<T>(load: (() => Promise<TimedResponse<T>>) | null, key: string): TimedLoad<T> {
   const result = useLoad(load, key);
-  return { data: result.data?.data, timing: result.data?.timing, error: result.error, loading: result.loading };
+  return { data: result.data?.data, timing: result.data?.timing, error: result.error, diagnostic: result.diagnostic, loading: result.loading };
 }

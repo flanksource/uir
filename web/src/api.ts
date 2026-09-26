@@ -2,6 +2,26 @@ import { parseServerTiming, type ServerTimingMetric } from "@flanksource/clicky-
 
 export type TimedResponse<T> = { data: T; timing: ServerTimingMetric[] };
 
+export class ApiError extends Error {
+  readonly name = "ApiError";
+
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly hint: string,
+    readonly context: Record<string, unknown>,
+    readonly trace: string,
+  ) {
+    super(message);
+  }
+}
+
+export function errorMessage(reason: unknown): string {
+  if (reason instanceof ApiError) return reason.hint ? `${reason.message}\nHint: ${reason.hint}` : reason.message;
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
 export type ModuleRoot = {
   root_key: string;
   name: string;
@@ -154,7 +174,23 @@ export type SystemInfo = {
 
 async function requestResponse(path: string, options?: RequestInit): Promise<Response> {
   const response = await fetch(path, { headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) }, ...options });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+  if (!response.ok) {
+    const body = await response.text();
+    if (response.headers.get("Content-Type")?.includes("json")) {
+      const diagnostic: unknown = JSON.parse(body);
+      if (typeof diagnostic !== "object" || diagnostic === null || Array.isArray(diagnostic)
+        || !("code" in diagnostic) || typeof diagnostic.code !== "string"
+        || !("message" in diagnostic) || typeof diagnostic.message !== "string") {
+        throw new Error(`Invalid API error response from ${path}: ${body}`);
+      }
+      throw new ApiError(response.status, diagnostic.code, diagnostic.message,
+        "hint" in diagnostic && typeof diagnostic.hint === "string" ? diagnostic.hint : "",
+        "context" in diagnostic && typeof diagnostic.context === "object" && diagnostic.context !== null && !Array.isArray(diagnostic.context)
+          ? diagnostic.context as Record<string, unknown> : {},
+        "trace" in diagnostic && typeof diagnostic.trace === "string" ? diagnostic.trace : "");
+    }
+    throw new Error(body.trim() || `${response.status} ${response.statusText}`);
+  }
   return response;
 }
 

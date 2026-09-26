@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Button, CommandPalette, type CommandGroup } from "@flanksource/clicky-ui/components";
-import { browseModule, runModuleQuery, type ModuleQueryResult, type ModuleQueryRow } from "./api";
+import { ApiError, browseModule, errorMessage, runModuleQuery, type ModuleQueryResult, type ModuleQueryRow } from "./api";
 import { queryMatchLabel, queryMatchRoute, queryPaletteRows, searchInputMode } from "./query-palette-model";
 import { queryScope } from "./query-model";
 import type { Route } from "./route";
@@ -18,6 +18,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
   const [result, setResult] = useState<ModuleQueryResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [diagnostic, setDiagnostic] = useState<ApiError>();
   const [focusListKey, setFocusListKey] = useState<number>();
   const request = useRef(0);
   const switchTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -57,9 +58,9 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
 
   async function runExpression() {
     const text = expression.trim();
-    if (!text) { setError("Enter an expression before running it"); return; }
+    if (!text) { setDiagnostic(undefined); setError("Enter an expression before running it"); return; }
     const scope = queryScope(route);
-    if (!scope) { setError(`Snapshot for ${route.module} is not ready`); return; }
+    if (!scope) { setDiagnostic(undefined); setError(`Snapshot for ${route.module} is not ready`); return; }
     const current = ++request.current;
     setBusy(true); setResult(undefined); setError("");
     try {
@@ -68,7 +69,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
       queryPaletteRows(data);
       setResult(data); setSubmitted(text); setFocusListKey(current);
     } catch (reason) {
-      if (current === request.current) setError(String(reason));
+      if (current === request.current) { setDiagnostic(reason instanceof ApiError ? reason : undefined); setError(errorMessage(reason)); }
     } finally {
       if (current === request.current) setBusy(false);
     }
@@ -83,7 +84,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
       onRoute(queryMatchRoute(row, data.sources));
       changeOpen(false);
     } catch (reason) {
-      if (current === request.current) setError(String(reason));
+      if (current === request.current) { setDiagnostic(undefined); setError(errorMessage(reason)); }
     } finally {
       if (current === request.current) setBusy(false);
     }
@@ -115,7 +116,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
       }}>Search</Button>
       <Suspense fallback={<span className="text-sm text-muted-foreground">Loading expression editor…</span>}>
         <QueryExpressionInput draft={expression} route={route} path="file:///uir/palette/expression.uirq" autoFocus
-          onChange={changeExpression} onRun={() => { void runExpression(); }} />
+          runError={error && !result ? diagnostic ?? error : undefined} onChange={changeExpression} onRun={() => { void runExpression(); }} />
       </Suspense>
     </div> : undefined}
     loading={mode === "expression" && busy} emptyState={mode === "expression" ? "Ctrl/Cmd+Enter runs the expression" : undefined}
