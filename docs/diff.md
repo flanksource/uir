@@ -1,11 +1,11 @@
 # Diffing two commits
 
-`uir diff` lists the symbols a module root added, removed, and changed between two Git commits, and with `--stat` how many lines each symbol gained and lost. It reads the two commits' snapshots from the index and, for line counts only, the two commits' blobs from a registered checkout. Nothing is stored: both inputs are immutable, so the same command always prints the same result. The design is in [symbol-index-storage.md](symbol-index-storage.md#diffing-two-commits); the implementation is the `symboldiff` package.
+`uir diff` lists the symbols a module root added, removed, and changed between two Git commits, and with `--stat` how many lines each symbol gained and lost. It reads the two commits' snapshots from the index and, for line counts only, the two commits' blobs from a registered checkout. With `--auto-index`, missing clean snapshots are generated from temporary Git worktrees without changing the registered checkout or its head snapshot. The design is in [symbol-index-storage.md](symbol-index-storage.md#diffing-two-commits); the implementation is the `symboldiff` package.
 
 ## Command
 
 ```sh
-uir diff <from>..<to> --root <module> [--visibility exported|internal|all] [--stat] [--snapshot-from <uuid>] [--snapshot-to <uuid>]
+uir diff <from>..<to> --root <module> [--visibility exported|internal|all] [--stat] [--auto-index] [--include-tests] [--snapshot-from <uuid>] [--snapshot-to <uuid>]
 ```
 
 | Flag | Meaning |
@@ -15,8 +15,10 @@ uir diff <from>..<to> --root <module> [--visibility exported|internal|all] [--st
 | `--visibility` | `exported` (default), `internal`, or `all`. A row is kept when the symbol's visibility on either side matches. |
 | `--stat` | Adds per-package, per-file, and per-symbol `+added -removed` counts. Requires readable Git blobs. |
 | `--snapshot-from`, `--snapshot-to` | Use this snapshot for that side instead of the newest clean one. The snapshot must belong to the root and record that commit as its revision. |
+| `--auto-index` | Select or generate a clean snapshot for each commit under the current standalone module configuration. Historical indexing reads the commit's `go.mod` and `go.sum` with `GOWORK=off`, so the current workspace cannot replace dependencies or hide the historical module. It leaves registered checkout files and heads untouched. |
+| `--include-tests` | Include Go test symbols in snapshots generated with `--auto-index`. Without it, test files are excluded, matching the usual indexing default. |
 
-The command is a Clicky operation, so `--format json`, `--format yaml`, `--format markdown`, and `--format html` all render the same typed result, and `uir serve` exposes it as `POST /api/v1/modules/diff` with a body such as `{"args": ["<from>..<to>"], "root": "example.org/service", "visibility": "all", "stat": true}`.
+The command is a Clicky operation, so `--format json`, `--format yaml`, `--format markdown`, and `--format html` all render the same typed result, and `uir serve` exposes it as `POST /api/v1/modules/diff` with a body such as `{"args": ["<from>..<to>"], "root": "example.org/service", "visibility": "all", "stat": true, "auto-index": true}`. `uir history --root <module> [--location <checkout>]` and `GET /api/v1/modules/history` list local branches, recent commits, and up to 50 pull request refs from `origin` for the browser's History view. A `pr:<number>` revision fetches that pull request head from `origin` when selected.
 
 ```sh
 uir diff HEAD~1..HEAD --root example.org/ledger --visibility all --stat
@@ -26,9 +28,9 @@ uir diff HEAD~1..HEAD --root example.org/ledger --visibility all --stat
 
 For each commit the diff takes the root's snapshots whose `revision` equals the commit (through the `(root_id, revision)` index) and picks the newest whose `worktree_state` is `clean`. Indexing records `clean` only when `git status --porcelain` under the module is empty and every indexed file is tracked by Git; a snapshot that indexed an untracked or Git-ignored `.go` file is `dirty`, because the commit does not contain that file and the diff would otherwise report it as added or removed.
 
-- No snapshot for the commit: the diff fails and says the commit must be indexed first. Check the commit out in a registered location and run `uir reindex`.
-- Only `dirty` snapshots: the diff fails and names them, because a dirty snapshot's bytes may not be the commit's bytes. Pass `--snapshot-from` or `--snapshot-to` to use one anyway; `--stat` then verifies each file's blob against the snapshot and reports the files whose bytes differ.
-- Different `configuration_hash` on the two snapshots (another indexer version, `GOOS`, `GOARCH`, `CGO_ENABLED`, toolchain, or tags): the diff fails, because shape and body hashes are only comparable under one configuration.
+- No snapshot for the commit: without `--auto-index`, the diff fails and says the commit must be indexed first. With `--auto-index`, it creates a clean standalone snapshot from a temporary worktree.
+- Only `dirty` snapshots: without `--auto-index`, the diff fails and names them, because a dirty snapshot's bytes may not be the commit's bytes. With `--auto-index`, it creates a clean standalone snapshot. Pass `--snapshot-from` or `--snapshot-to` to use a dirty snapshot explicitly; `--stat` then verifies each file's blob against the snapshot and reports the files whose bytes differ.
+- Different `configuration_hash` on the two selected snapshots (another indexer version, `GOOS`, `GOARCH`, `CGO_ENABLED`, toolchain, or tags): the diff fails, because shape and body hashes are only comparable under one configuration. `--auto-index` selects or generates both sides under the current standalone configuration.
 
 ## Changed files
 
@@ -113,8 +115,7 @@ The plain form (non-TTY output, `String()`) prints unchanged lines with two spac
 ## Not implemented
 
 - The package-level `export_shape_hash` pre-check that the design suggests for skipping packages under `--visibility exported` is not applied: skipping would hide exported `body` rows and line counts, so every changed package is read.
-- Indexing an arbitrary commit through a temporary worktree is a separate command.
 
-## Not yet built
+## Browser history
 
-- The explorer diff view from step 7 of the [symbol index design](symbol-index-storage.md) does not exist; the web UI has no page for this command's result. It is tracked follow-up work; until then use the CLI or `POST /api/v1/modules/diff`.
+The History page compares any two selected branches, commits, or pull request heads. The Git log shows recent commits; selecting one compares it with its first parent and displays changed packages, files, symbol rows, signatures, and line counts. Comparison choices and the selected log commit are kept in the URL.
