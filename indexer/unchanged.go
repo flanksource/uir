@@ -29,18 +29,9 @@ func reusableHead(ctx context.Context, database *gorm.DB, root discoveredRoot, f
 	if force {
 		return uuid.Nil, false, nil
 	}
-	var head storage.ModuleSnapshot
-	err := database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
-		Joins("JOIN location_heads AS head ON head.location_id = snapshot.location_id AND head.snapshot_id = snapshot.id").
-		Joins("JOIN locations AS location ON location.id = head.location_id").
-		Joins("JOIN modules AS root ON root.id = location.root_id").
-		Where("root.root_key = ? AND location.canonical_path = ?", root.RootKey, root.LocalPath).
-		Take(&head).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return uuid.Nil, false, nil
-	}
-	if err != nil {
-		return uuid.Nil, false, fmt.Errorf("load head snapshot of %q at %q: %w", root.RootKey, root.LocalPath, err)
+	head, found, err := loadHead(ctx, database, root)
+	if err != nil || !found {
+		return uuid.Nil, false, err
 	}
 	if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash {
 		return uuid.Nil, false, nil
@@ -50,6 +41,23 @@ func reusableHead(ctx context.Context, database *gorm.DB, root discoveredRoot, f
 		return uuid.Nil, false, err
 	}
 	return head.ID, true, nil
+}
+
+func loadHead(ctx context.Context, database *gorm.DB, root discoveredRoot) (storage.ModuleSnapshot, bool, error) {
+	var head storage.ModuleSnapshot
+	err := database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
+		Joins("JOIN location_heads AS head ON head.location_id = snapshot.location_id AND head.snapshot_id = snapshot.id").
+		Joins("JOIN locations AS location ON location.id = head.location_id").
+		Joins("JOIN modules AS root ON root.id = location.root_id").
+		Where("root.root_key = ? AND location.canonical_path = ?", root.RootKey, root.LocalPath).
+		Take(&head).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return storage.ModuleSnapshot{}, false, nil
+	}
+	if err != nil {
+		return storage.ModuleSnapshot{}, false, fmt.Errorf("load head snapshot of %q at %q: %w", root.RootKey, root.LocalPath, err)
+	}
+	return head, true, nil
 }
 
 // workspaceSiblingImports lists the root's imports that resolve, by longest module-path prefix, to

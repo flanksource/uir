@@ -24,6 +24,15 @@ type ambiguousSymbols struct {
 
 func (errorValue ambiguousSymbols) Error() string { return "symbol spelling is ambiguous" }
 
+type UnresolvedSymbolError struct {
+	Symbol   string
+	Coverage string
+}
+
+func (err *UnresolvedSymbolError) Error() string {
+	return fmt.Sprintf("symbol %q matched no indexed symbols; coverage %s", err.Symbol, err.Coverage)
+}
+
 func expressionOperation(expression *Expr) Operation {
 	if expression == nil {
 		return ""
@@ -102,7 +111,7 @@ func (index *compactIndex) evaluate(ctx context.Context, expression *Expr, resul
 			return compactValue{}, err
 		}
 		if len(symbols) == 0 {
-			return compactValue{}, fmt.Errorf("symbol %q matched no indexed symbols; coverage %s", expression.Symbol, coverageSummary(result.Coverage))
+			return compactValue{}, &UnresolvedSymbolError{Symbol: expression.Symbol, Coverage: coverageSummary(result.Coverage)}
 		}
 		if len(symbols) > 1 && !strings.HasSuffix(expression.Symbol, ".*") {
 			return compactValue{}, ambiguousSymbols{symbols: symbols}

@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -40,6 +41,9 @@ var _ = Describe("module queries", func() {
 		Expect(err).ToNot(HaveOccurred())
 		_, err = pipeline.RunModules(ctx, `calls.Target =`, query.ModuleScopeOptions{RootKey: "example.org/calls"})
 		Expect(err).To(MatchError(ContainSubstring("matched no indexed symbols")))
+		var unresolved *query.UnresolvedSymbolError
+		Expect(errors.As(err, &unresolved)).To(BeTrue())
+		Expect(unresolved.Symbol).To(Equal("calls.Target"))
 		historical, err := pipeline.RunModules(ctx, `calls.Target =`, query.ModuleScopeOptions{SnapshotID: indexed[0].SnapshotID})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(historical.Matches).To(HaveLen(1))
