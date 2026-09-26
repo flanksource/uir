@@ -1,12 +1,22 @@
 package query_test
 
 import (
+	"errors"
+
 	"github.com/flanksource/uir/query"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("compact PEG query grammar", func() {
+	It("reports a typed syntax error with a position and hint", func() {
+		_, err := query.Parse("func:Save &")
+		var invalid *query.InvalidQueryError
+		Expect(errors.As(err, &invalid)).To(BeTrue())
+		Expect(invalid.Line).To(Equal(1))
+		Expect(invalid.Column).To(Equal(11))
+		Expect(invalid.Hint).ToNot(BeEmpty())
+	})
 	It("parses precedence, filters, and bounded paths into a typed tree", func() {
 		parsed, err := query.Parse("(store.Store.Save < -f _test.go & app.Run >) | main.*")
 		Expect(err).ToNot(HaveOccurred())

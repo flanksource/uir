@@ -24,11 +24,14 @@ func parseSelector(value string) (Selector, error) {
 			return Selector{}, fmt.Errorf("invalid typed selector %q: . is only valid as the whole relative package pattern", value)
 		}
 	}
-	for _, pattern := range []string{selector.Pattern, selector.ModulePattern} {
-		if pattern == "" {
+	for _, pattern := range []*string{&selector.Pattern, &selector.ModulePattern} {
+		if strings.HasSuffix(*pattern, "/...") {
+			*pattern = strings.TrimSuffix(*pattern, "...") + "**"
+		}
+		if *pattern == "" {
 			continue
 		}
-		if _, err := compileSelectorGlob(pattern); err != nil {
+		if _, err := compileSelectorGlob(*pattern); err != nil {
 			return Selector{}, fmt.Errorf("invalid typed selector %q: %w", value, err)
 		}
 	}

@@ -11,6 +11,17 @@ type queryToken struct {
 	kind, value string
 }
 
+type InvalidQueryError struct {
+	Message string
+	Hint    string
+	Line    int
+	Column  int
+	Cause   error
+}
+
+func (err *InvalidQueryError) Error() string { return err.Message }
+func (err *InvalidQueryError) Unwrap() error { return err.Cause }
+
 type parserState struct {
 	tokens []queryToken
 }
@@ -213,18 +224,32 @@ func validateSymbolPattern(value string) error {
 // Parse applies the generated PEG grammar and builds a compact expression tree.
 func Parse(input string) (Query, error) {
 	if strings.TrimSpace(input) == "" {
-		return Query{}, errors.New("UIR query is required")
+		return Query{}, &InvalidQueryError{Message: "UIR query is required", Hint: "Enter a Go symbol or typed selector."}
 	}
 	parser := &queryGrammar{Buffer: input}
 	if err := parser.Init(); err != nil {
 		return Query{}, fmt.Errorf("initialize UIR query parser: %w", err)
 	}
 	if err := parser.Parse(); err != nil {
-		return Query{}, fmt.Errorf("parse compact UIR query %q: %w", input, err)
+		invalid := &InvalidQueryError{Message: strings.TrimSpace(err.Error()), Hint: "Check the expression near the marked token; enter a Go symbol or typed selector after an operator.", Cause: err}
+		var syntax *parseError
+		if errors.As(err, &syntax) {
+			invalid.Line, invalid.Column = 1, 1
+			offset := min(int(syntax.max.begin), len([]rune(input)))
+			for _, character := range []rune(input)[:offset] {
+				if character == '\n' {
+					invalid.Line++
+					invalid.Column = 1
+				} else {
+					invalid.Column++
+				}
+			}
+		}
+		return Query{}, invalid
 	}
 	expression, err := (&expressionParser{tokens: parser.tokens}).expression()
 	if err != nil {
-		return Query{}, fmt.Errorf("parse compact UIR query %q: %w", input, err)
+		return Query{}, &InvalidQueryError{Message: err.Error(), Hint: "Check the symbol, relation, and filter syntax in this expression.", Cause: err}
 	}
 	return Query{Expr: expression}, nil
 }
