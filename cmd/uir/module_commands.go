@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -315,6 +316,21 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 		RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
 	})
 	if err != nil {
+		var invalid *query.InvalidQueryError
+		if errors.As(err, &invalid) {
+			failure := entity.NewStatusError(http.StatusBadRequest, "invalid_query", invalid.Message)
+			failure.Hint = invalid.Hint
+			if invalid.Line > 0 {
+				failure.Context = map[string]any{"line": invalid.Line, "column": invalid.Column}
+			}
+			return moduleQueryResult{}, failure
+		}
+		var unresolved *query.UnresolvedSymbolError
+		if errors.As(err, &unresolved) {
+			failure := entity.NewStatusError(http.StatusNotFound, "symbol_not_found", unresolved.Error())
+			failure.Hint = "Check the symbol spelling or select a snapshot where it is indexed."
+			return moduleQueryResult{}, failure
+		}
 		return moduleQueryResult{}, err
 	}
 	symbols := result.Symbols

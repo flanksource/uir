@@ -20,6 +20,32 @@ import (
 )
 
 var _ = Describe("serve", func() {
+	It("returns query syntax failures with a useful hint and position", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		runtime := &commandRuntime{database: database}
+		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
+		Expect(err).To(Succeed())
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/query", strings.NewReader(`{"args":["func:Save &"]}`))
+		request.Header.Set("Content-Type", "application/json")
+
+		handler.ServeHTTP(response, request)
+
+		Expect(response.Code).To(Equal(http.StatusBadRequest), response.Body.String())
+		var diagnostic struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Hint    string         `json:"hint"`
+			Context map[string]any `json:"context"`
+		}
+		Expect(json.Unmarshal(response.Body.Bytes(), &diagnostic)).To(Succeed())
+		Expect(diagnostic.Code).To(Equal("invalid_query"))
+		Expect(diagnostic.Message).To(ContainSubstring("parse error near"))
+		Expect(diagnostic.Hint).ToNot(BeEmpty())
+		Expect(diagnostic.Context).To(HaveKeyWithValue("line", float64(1)))
+		Expect(diagnostic.Context).To(HaveKeyWithValue("column", BeNumerically(">", 1)))
+	})
+
 	It("lists files from every module checkout head without sending symbol payloads", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
 		workspace := GinkgoT().TempDir()
@@ -189,6 +215,19 @@ var _ = Describe("serve", func() {
 		Expect(queryResult.Total).To(Equal(1))
 		Expect(queryResult.Matches).To(HaveLen(1))
 		Expect(queryResult.Matches[0].Symbol).To(ContainSubstring("Run"))
+
+		missing := httptest.NewRecorder()
+		missingRequest := httptest.NewRequest(http.MethodPost, "/api/v1/modules/query", strings.NewReader(`{"args":["browser.Missing"]}`))
+		missingRequest.Header.Set("Content-Type", "application/json")
+		handler.ServeHTTP(missing, missingRequest)
+		Expect(missing.Code).To(Equal(http.StatusNotFound), missing.Body.String())
+		var missingError struct {
+			Code string `json:"code"`
+			Hint string `json:"hint"`
+		}
+		Expect(json.Unmarshal(missing.Body.Bytes(), &missingError)).To(Succeed())
+		Expect(missingError.Code).To(Equal("symbol_not_found"))
+		Expect(missingError.Hint).ToNot(BeEmpty())
 	})
 
 	It("queries every indexed module root when neither root nor snapshot is sent", func(ctx SpecContext) {

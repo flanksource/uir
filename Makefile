@@ -3,7 +3,8 @@ ARCH = $(shell uname -m | sed 's/x86_64/amd64/')
 
 LOCALBIN ?= $(shell pwd)/.bin
 export PATH := $(LOCALBIN):$(PATH)
-GOWORK ?= off
+# Use the ignored local workspace when present; fresh checkouts use go.mod.
+GOWORK ?= auto
 export GOWORK
 
 GOLANGCI_LINT_VERSION ?= v2.6.2
@@ -23,6 +24,16 @@ build: web-build binary ## Build the browser, compile every package, and link th
 .PHONY: binary
 binary: | $(LOCALBIN) ## Link the UIR CLI into .bin/uir (requires built web/dist)
 	CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION)" -o $(LOCALBIN)/uir ./cmd/uir
+
+.PHONY: fixture-corpus
+fixture-corpus: GOWORK = auto
+fixture-corpus: binary ## Index the five local Flanksource checkouts for Gavel query fixtures
+	mkdir -p .tmp
+	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../commons --no-workspace-uses
+	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../clicky --no-workspace-uses
+	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../commons-db --no-workspace-uses
+	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../gavel --no-workspace-uses
+	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../captain --no-workspace-uses
 
 .PHONY: install
 install: web-build ## Install the UIR CLI with embedded browser assets

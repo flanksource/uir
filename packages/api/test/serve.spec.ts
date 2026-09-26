@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { addModules, browseModule, getSystemInfo, listModuleHeads, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors } from "../../../web/src/api";
+import { ApiError, addModules, browseModule, getSystemInfo, listModuleHeads, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -27,6 +27,29 @@ const saveDeclaration = {
   kind: "definition", ...scope, symbol: "method:example.org/refs/store.Store:Save#()", source: "store/store.go:5:14",
   path: "store/store.go", line: 5, column: 14, end_line: 5, end_column: 18, role: "definition", symbol_id: saveID, coverage: "indexed",
 };
+
+it("unwraps structured query errors and keeps their hint and position", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: "invalid_query", message: "Invalid query syntax", hint: "Enter a symbol after &",
+    context: { line: 1, column: 12 }, trace: "trace-1",
+  }), { status: 400, headers: { "Content-Type": "application/json" } })));
+
+  await expect(runModuleQuery("func:Save &", scope.root, snapshot)).rejects.toMatchObject({
+    name: "ApiError", status: 400, code: "invalid_query", message: "Invalid query syntax",
+    hint: "Enter a symbol after &", context: { line: 1, column: 12 }, trace: "trace-1",
+  } satisfies Partial<ApiError>);
+});
+
+it("shows a server error message and hint without the HTTP 500 wrapper", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: "internal_error", message: "symbol lookup failed", hint: "Check the selected snapshot", trace: "trace-2",
+  }), { status: 500, headers: { "Content-Type": "application/json" } })));
+
+  await expect(runModuleQuery("func:Save <", scope.root, snapshot)).rejects.toMatchObject({
+    name: "ApiError", status: 500, code: "internal_error", message: "symbol lookup failed",
+    hint: "Check the selected snapshot", trace: "trace-2",
+  } satisfies Partial<ApiError>);
+});
 
 it.each([
   {
@@ -138,7 +161,7 @@ it("sends explicit add and reindex inputs and reports server failures", async ()
   expect(fetcher.mock.calls[0]).toEqual(["/api/v1/modules/add", expect.objectContaining({
     method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, "no-workspace-uses": true }),
   })]);
-  await expect(reindexModules("/repo", true, false)).rejects.toThrow("500 Internal Server Error: index failed");
+  await expect(reindexModules("/repo", true, false)).rejects.toThrow("index failed");
   expect(fetcher.mock.calls[1]).toEqual(["/api/v1/modules/reindex", expect.objectContaining({
     method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, force: false }),
   })]);
