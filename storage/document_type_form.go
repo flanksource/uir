@@ -20,7 +20,7 @@ func TypeForm(version int, symbol DocumentSymbol) (string, error) {
 		}
 		return "", nil
 	}
-	if version == DocumentFormatVersion {
+	if version >= 2 && version <= DocumentFormatVersion {
 		switch symbol.TypeForm {
 		case "struct", "interface", "other", "alias":
 			actual, err := classifyTypeShape(symbol)

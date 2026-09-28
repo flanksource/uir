@@ -6,11 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// ModuleRoot is a logical Go module. Ordinal is its dense, database-local number (from 1), used as the
+// root discriminator of symbol_postings.
 type ModuleRoot struct {
 	ID        uuid.UUID `gorm:"column:id;primaryKey"`
 	RootKey   string    `gorm:"column:root_key"`
 	Name      string    `gorm:"column:name"`
 	CreatedAt time.Time `gorm:"column:created_at"`
+	Ordinal   int32     `gorm:"column:ordinal"`
 }
 
 func (ModuleRoot) TableName() string { return "modules" }
@@ -47,7 +50,8 @@ const (
 	CoverageExcluded Coverage = "excluded"
 )
 
-// ModuleSnapshot is a published index run; a row exists only once its publication committed.
+// ModuleSnapshot is a published index run; a row exists only once its publication committed. Ordinal
+// is its dense, database-local number (from 1) that symbol deltas reference.
 type ModuleSnapshot struct {
 	ID                uuid.UUID     `gorm:"column:id;primaryKey"`
 	RootID            uuid.UUID     `gorm:"column:root_id"`
@@ -63,6 +67,7 @@ type ModuleSnapshot struct {
 	Diagnostics       JSON          `gorm:"column:diagnostics"`
 	StartedAt         time.Time     `gorm:"column:started_at"`
 	CompletedAt       time.Time     `gorm:"column:completed_at"`
+	Ordinal           int64         `gorm:"column:ordinal"`
 }
 
 func (ModuleSnapshot) TableName() string { return "snapshots" }

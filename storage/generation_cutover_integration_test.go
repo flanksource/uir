@@ -65,7 +65,7 @@ var _ = Describe("previous-generation module cutover", func() {
 			}
 			assertModuleSchema(cutover)
 			Expect(cutover.Migrator().HasTable("external_sentinel")).To(BeTrue())
-			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/rebuilt", Name: "rebuilt", CreatedAt: time.Now().UTC()}
+			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/rebuilt", Name: "rebuilt", CreatedAt: time.Now().UTC(), Ordinal: 1}
 			Expect(cutover.Create(&root).Error).To(Succeed())
 		},
 		Entry("SQLite", cutoverSQLite),

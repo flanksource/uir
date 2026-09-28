@@ -21,7 +21,7 @@ var _ = Describe("UirDB", func() {
 		},
 		Entry("a missing DSN", storage.DBOptions{}, "DSN is required"),
 		Entry("an unsupported DSN scheme", storage.DBOptions{DSN: "mysql://localhost/uir"}, `unsupported database scheme "mysql"`),
-		Entry("a SQLite schema", storage.DBOptions{DSN: "sqlite://state/uir.db", Schema: "main"}, "do not support schema"),
+		Entry("a SQLite schema", storage.DBOptions{DSN: "sqlite://state/uir.db", Schema: "main"}, `schema "main": schema-scoped migrations require a PostgreSQL connection, got "sqlite"`),
 	)
 
 	It("initializes SQLite twice with enforced foreign keys", func(ctx SpecContext) {
