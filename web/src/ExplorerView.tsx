@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { Select, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
+import { Button, Select, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
 import { ServerTimingBadge, Tree } from "@flanksource/clicky-ui/data";
 import { UiFolder, UiListTree } from "@flanksource/clicky-ui/icons";
 import { MonacoProvider } from "@flanksource/clicky-ui/monaco";
 import { readModuleSource, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleSource, type ModuleSourceContent } from "./api";
 import { MissingHeadWarnings } from "./CoverageWarning";
+import { ExplorerDependencies } from "./ExplorerDependencies";
+import { ExplorerRefactorDialog } from "./ExplorerRefactorDialog";
 import { moduleHeadTree, scopedHeads, symbolTree, type HeadFileItem, type SymbolItem } from "./explorer-model";
 import { fileSelectionPatch } from "./explorer-navigation";
 import { FileTypeIcon, FolderTypeIcon } from "./file-icons";
@@ -55,7 +57,7 @@ function SourcePane({ snapshot, source, line, column }: { snapshot: string; sour
     <div className="shrink-0 border-b border-border px-3 py-2 text-xs">
       <div className="truncate font-medium" title={source.path}>{source.path}</div>
       <Muted>{source.package_path} · SHA-256 {source.content_hash.slice(0, 12)}</Muted>
-      {content.data && <div><Muted>{content.data.origin === "git" ? `Pinned Git revision ${content.data.revision}` : "Local file matches indexed hash"}</Muted></div>}
+      {content.data && <div><Muted>{content.data.origin === "git" ? `Pinned Git revision ${content.data.revision}` : content.data.origin === "snapshot" ? "Stored snapshot source" : "Local file matches indexed hash"}</Muted></div>}
     </div>
     {content.loading && <div className="p-3"><Muted>Loading source…</Muted></div>}
     {content.error && <div className="p-3"><ErrorMessage error={content.error} /></div>}
@@ -83,7 +85,7 @@ function FilePane({ files, selected, heads, route, onRoute }: { files: HeadFileI
   return <div className="flex h-full flex-col"><div className="shrink-0 p-2"><Field label="Search files"><TextInput value={route.fileSearch} onChange={(event) => onRoute({ fileSearch: event.target.value }, true)} /></Field></div>
     {heads.loading && <div className="px-3 text-sm text-muted-foreground">Loading module heads…</div>}
     {heads.error && <div className="px-3"><ErrorMessage error={heads.error} /></div>}
-    <Tree<HeadFileItem> key={`${selected?.head?.snapshot_id ?? "unselected"}:${revealVersion}`} className="min-h-0 flex-1" ariaLabel="Module heads and source files" roots={filterItems(files, route.fileSearch, (item) => item.path)} getChildren={(item) => item.children} getKey={(item) => item.id}
+    <Tree<HeadFileItem> key={revealVersion} className="min-h-0 flex-1" ariaLabel="Module heads and source files" roots={filterItems(files, route.fileSearch, (item) => item.path)} getChildren={(item) => item.children} getKey={(item) => item.id}
       selected={selected} defaultOpen={(item, depth) => Boolean(route.fileSearch) || depth < 2 ||
         Boolean(selected && item.kind === "folder" && item.head === selected.head && selected.path.startsWith(`${item.path}/`))}
       onSelect={(item) => {
@@ -107,12 +109,29 @@ function OutlinePane({ items, selected, route, onRoute }: { items: OutlineItem[]
     empty={<div className="p-3 text-sm text-muted-foreground">No indexed symbols for this file.</div>} /></div>;
 }
 
-export function ExplorerView({ route, heads, browse, locations, onRoute }: { route: Route; heads: Load<ItemsWithWarnings<ModuleHead>>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
+export function ExplorerView({ route, heads, browse, locations, onRoute, onRefresh }: { route: Route; heads: Load<ItemsWithWarnings<ModuleHead>>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void; onRefresh: () => void }) {
+  const [refactorAction, setRefactorAction] = useState<"rename" | "move" | null>(null);
   const sources = browse.data?.sources ?? EMPTY_SOURCES;
   const nodes = browse.data?.nodes ?? EMPTY_NODES;
   const selectedNode = nodes.find((node) => node.id === route.node);
   const selectedSource = sources.find((source) => source.id === route.source);
-  const files = useMemo(() => moduleHeadTree(scopedHeads(heads.data?.items ?? EMPTY_HEADS, route.module)), [heads.data, route.module]);
+  const currentHead = heads.data?.items.find((head) => head.root_key === selectedSource?.root_key && head.location === selectedSource.location);
+  const canRefactor = Boolean(selectedSource && (!route.node || selectedNode?.source_id === selectedSource.id) &&
+    (!selectedNode || selectedNode.identifier.field || selectedNode.identifier.method || selectedNode.identifier.type) &&
+    currentHead?.snapshot_id === route.snapshot);
+  const canMove = !selectedNode?.identifier.field;
+  useEffect(() => setRefactorAction(null), [route.snapshot, route.source, route.node]);
+  const files = useMemo(() => {
+    const selected = [...scopedHeads(heads.data?.items ?? EMPTY_HEADS, route.module)];
+    if (browse.data && route.module && route.location && route.snapshot && !selected.some((head) => head.snapshot_id === route.snapshot)) {
+      const currentIndex = selected.findIndex((head) => head.root_key === route.module && head.location === route.location);
+      const historical = { root_key: route.module, name: currentIndex >= 0 ? selected[currentIndex].name : route.module.split("/").at(-1) ?? route.module,
+        location: route.location, snapshot_id: route.snapshot, sources: browse.data.sources };
+      if (currentIndex >= 0) selected[currentIndex] = historical;
+      else selected.push(historical);
+    }
+    return moduleHeadTree(selected);
+  }, [browse.data, heads.data, route.location, route.module, route.snapshot]);
   const selectedFile = selectedSource && findItem(files, JSON.stringify(["file", selectedSource.root_key, route.location, route.snapshot, selectedSource.path]));
   const items = useMemo<OutlineItem[]>(() => {
     if (!route.symbolSearch) return symbolTree(nodes.filter((node) => node.source_id === route.source), nodes);
@@ -141,6 +160,8 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
       content: <SourcePane snapshot={route.snapshot} source={selectedSource} line={revealed.line} column={revealed.column} />, contentClassName: "overflow-hidden" },
     { id: "details", label: "Details", icon: <UiListTree />, location: "right", width: 320,
       content: <SymbolDetails node={selectedNode} route={route} sources={sources} onRoute={onRoute} /> },
+    { id: "dependencies", label: "Dependencies", icon: <UiListTree />, location: "right", width: 320,
+      content: <ExplorerDependencies snapshot={route.snapshot} onRoute={onRoute} /> },
   ];
 
   return <div className="flex h-full min-h-0 flex-col">
@@ -150,6 +171,8 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
         onRoute({ location: event.target.value, snapshot: next?.head_snapshot_id ?? "", source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 });
       }} options={(locations.data ?? []).map((item) => ({ value: item.canonical_path, label: item.canonical_path }))} /></Field>}
       <ServerTimingBadge metrics={browse.timing} />
+      {canRefactor && <div className="ml-auto flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setRefactorAction("rename")}>Rename {selectedNode ? "symbol" : "file"}</Button>
+        {canMove && <Button type="button" size="sm" variant="outline" onClick={() => setRefactorAction("move")}>Move {selectedNode ? "symbol" : "file"}</Button>}</div>}
     </div>
     {heads.data && <div className="shrink-0 px-3 py-2"><MissingHeadWarnings warnings={heads.data.warnings} /></div>}
     {browse.loading && <div className="p-3"><Muted>Loading snapshot…</Muted></div>}
@@ -157,5 +180,7 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
     {browse.data && route.source && !selectedSource && <div className="p-3"><ErrorMessage error={`Source ${route.source} is not in this snapshot`} /></div>}
     {browse.data && route.node && !selectedNode && <div className="p-3"><ErrorMessage error={`Symbol ${route.node} is not in this snapshot`} /></div>}
     <div className="min-h-0 flex-1"><Workspace panes={panes} storageKey="uir-explorer-workspace-v1" /></div>
+    {refactorAction && selectedSource && <ExplorerRefactorDialog key={`${route.snapshot}:${route.source}:${route.node}:${refactorAction}`} action={refactorAction} snapshot={route.snapshot} source={selectedSource} node={selectedNode} onClose={() => setRefactorAction(null)}
+      onApplied={(snapshot) => { setRefactorAction(null); onRoute({ snapshot, source: "", node: "", line: 0, column: 0 }); onRefresh(); }} />}
   </div>;
 }

@@ -1,7 +1,34 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, addModules, browseModule, getSystemInfo, listModuleHeads, listModuleLocations, listModuleSnapshots, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors } from "../../../web/src/api";
+import { ApiError, addModules, applyModuleRefactor, browseModule, getSystemInfo, listModuleDependencies, listModuleHeads, listModuleLocations, listModuleSnapshots, previewModuleRefactor, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("loads dependency edges for the selected immutable snapshot", async () => {
+  const dependencies = { captured: true, items: [{ module_path: "example.org/pricing", declared_version: "v1.0.0", target_snapshot_id: "target-1" }] };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(dependencies), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(listModuleDependencies("snapshot-1")).resolves.toEqual(dependencies);
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/dependencies?snapshot=snapshot-1", expect.objectContaining({ headers: { Accept: "application/json" } }));
+});
+
+it("previews then applies the exact selected explorer refactor", async () => {
+  const request = { snapshot: "head-1", source: "source-1", node: "node-1", action: "rename" as const, newName: "Persist" };
+  const preview = { diff: "--- /checkout/store.go\n+++ /checkout/store.go\n@@ -1 +1 @@\n-Save\n+Persist\n", preview_hash: "sha256", files: ["/checkout/store.go"] };
+  const applied = { applied: true, files: preview.files, snapshots: [{ snapshot_id: "head-2", location: "/checkout" }] };
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(preview), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(applied), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(previewModuleRefactor(request)).resolves.toEqual(preview);
+  await expect(applyModuleRefactor(request, preview.preview_hash)).resolves.toEqual(applied);
+  expect(fetcher.mock.calls).toEqual([
+    ["/api/v1/modules/refactor/preview", expect.objectContaining({ method: "POST", body: JSON.stringify({
+      snapshot: "head-1", source: "source-1", node: "node-1", action: "rename", "new-name": "Persist",
+    }) })],
+    ["/api/v1/modules/refactor/apply", expect.objectContaining({ method: "POST", body: JSON.stringify({
+      snapshot: "head-1", source: "source-1", node: "node-1", action: "rename", "new-name": "Persist", "preview-hash": "sha256",
+    }) })],
+  ]);
+});
 
 it("loads every module checkout head for the explorer tree", async () => {
   const heads = [{ root_key: "example.org/service", name: "service", location: "/checkout/service", snapshot_id: "head-1", sources: [] }];
