@@ -20,7 +20,7 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl
 var migrations embed.FS
 
 // UirDB opens the database, discards a pre-handle index, applies the schema, and then discards the
@@ -59,6 +59,7 @@ func migrate(ctx context.Context, database *gorm.DB, dsn, schema string) error {
 		commonsmigrate.WithDir("migrations"),
 		commonsmigrate.WithName("uir"),
 		commonsmigrate.WithSchema(schema),
+		commonsmigrate.WithRebuilds(),
 	}
 	if err := commonsmigrate.Apply(ctx, dsn, migrations, migrationOptions...); err != nil {
 		return fmt.Errorf("migrate UIR schema: %w", err)

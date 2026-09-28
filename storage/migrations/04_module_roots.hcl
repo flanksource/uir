@@ -110,6 +110,20 @@ table "snapshots" {
     type = text
     null = false
   }
+  column "git_commit" {
+    type = text
+    null = false
+    default = ""
+  }
+  column "module_version" {
+    type = text
+    null = false
+    default = ""
+  }
+  column "last_modified_at" {
+    type = timestamptz
+    null = true
+  }
   column "worktree_state" {
     type = text
     null = false
@@ -117,6 +131,10 @@ table "snapshots" {
   column "content_set_hash" {
     type = text
     null = false
+  }
+  column "dependency_set_hash" {
+    type = text
+    null = true
   }
   column "configuration_hash" {
     type = text

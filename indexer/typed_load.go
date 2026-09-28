@@ -34,7 +34,13 @@ type typedLoad struct {
 	ignored     map[string]bool
 	directories map[string]bool
 	parsed      map[string]string
+	loadFailure string
 }
+
+type packageLoadError struct{ err error }
+
+func (failure packageLoadError) Error() string { return failure.err.Error() }
+func (failure packageLoadError) Unwrap() error { return failure.err }
 
 // loadTyped loads every package of the root (and its test variants when includeTests is set) with
 // full type information for the whole dependency graph, in the root's directory and build variant.
@@ -47,6 +53,7 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 	}
 	config := &packages.Config{
 		Mode: typedLoadMode, Context: ctx, Dir: root.LocalPath, Env: environment, Tests: includeTests, Fset: token.NewFileSet(),
+		BuildFlags: []string{"-mod=readonly"},
 		ParseFile: func(fileSet *token.FileSet, filename string, source []byte) (*ast.File, error) {
 			mutex.Lock()
 			parsed[filename] = hashBytes(source)
@@ -57,9 +64,12 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 	if len(root.Variant.BuildTags) > 0 {
 		config.BuildFlags = []string{"-tags=" + strings.Join(root.Variant.BuildTags, ",")}
 	}
+	if root.ModFile != "" {
+		config.BuildFlags = append(config.BuildFlags, "-modfile="+root.ModFile)
+	}
 	roots, err := loadPackages(config, "./...")
 	if err != nil {
-		return typedLoad{}, fmt.Errorf("load Go packages of %q: %w", root.RootKey, err)
+		return typedLoad{}, packageLoadError{fmt.Errorf("load Go packages of %q: %w", root.RootKey, err)}
 	}
 	load := typedLoad{
 		root: root, origins: map[*types.Package]packageOrigin{}, files: map[string]typedFile{},
@@ -127,6 +137,9 @@ type packageState struct {
 // information, or a file the load did not type-check is syntax; any other error is partial.
 func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, error) {
 	state := packageState{typed: map[string]typedFile{}, excluded: map[string]string{}}
+	if load.loadFailure != "" {
+		state.diagnostics = append(state.diagnostics, packageDiagnostic{Message: load.loadFailure})
+	}
 	unmapped := 0
 	variants := map[string]*packages.Package{}
 	for _, file := range files {

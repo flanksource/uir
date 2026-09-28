@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // buildVariant is the single build configuration a snapshot is indexed under. BuildTags is empty
@@ -20,6 +21,7 @@ type buildVariant struct {
 	GOARCH     string
 	CGOEnabled string
 	GoVersion  string
+	GoFlags    string
 	BuildTags  []string
 	GoWorkOff  bool
 }
@@ -34,11 +36,19 @@ type goEnvironment struct {
 type manifestFile struct {
 	Key         string
 	ContentHash string
+	ModifiedAt  time.Time
 }
 
 func readGoEnvironment(ctx context.Context, directory string) (goEnvironment, error) {
-	command := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOVERSION", "GOWORK")
+	return readGoEnvironmentWithWork(ctx, directory, false)
+}
+
+func readGoEnvironmentWithWork(ctx context.Context, directory string, workOff bool) (goEnvironment, error) {
+	command := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOVERSION", "GOWORK", "GOFLAGS")
 	command.Dir = directory
+	if workOff {
+		command.Env = append(os.Environ(), "GOWORK=off")
+	}
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
@@ -55,7 +65,7 @@ func readGoEnvironment(ctx context.Context, directory string) (goEnvironment, er
 		}
 	}
 	environment := goEnvironment{Variant: buildVariant{
-		GOOS: values["GOOS"], GOARCH: values["GOARCH"], CGOEnabled: values["CGO_ENABLED"], GoVersion: values["GOVERSION"],
+		GOOS: values["GOOS"], GOARCH: values["GOARCH"], CGOEnabled: values["CGO_ENABLED"], GoVersion: values["GOVERSION"], GoFlags: values["GOFLAGS"],
 	}}
 	if workFile := values["GOWORK"]; workFile != "" && workFile != "off" {
 		environment.WorkFile = workFile
@@ -87,7 +97,11 @@ func readManifests(moduleDirectory, workFile string) ([]manifestFile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read dependency manifest %q: %w", manifest.path, err)
 		}
-		manifests = append(manifests, manifestFile{Key: manifest.key, ContentHash: hashBytes(content)})
+		info, err := os.Stat(manifest.path)
+		if err != nil {
+			return nil, fmt.Errorf("stat dependency manifest %q: %w", manifest.path, err)
+		}
+		manifests = append(manifests, manifestFile{Key: manifest.key, ContentHash: hashBytes(content), ModifiedAt: info.ModTime().UTC()})
 	}
 	return manifests, nil
 }

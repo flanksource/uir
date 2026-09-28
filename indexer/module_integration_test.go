@@ -51,7 +51,8 @@ var _ = Describe("module indexing", func() {
 		var dirtySnapshot storage.ModuleSnapshot
 		Expect(database.Where("id = ?", dirty[0].SnapshotID).First(&dirtySnapshot).Error).To(Succeed())
 		Expect(dirtySnapshot.WorktreeState).To(Equal(storage.WorktreeDirty))
-		Expect(dirtySnapshot.Revision).To(Equal(snapshot.Revision))
+		Expect(dirtySnapshot.GitCommit).To(Equal(snapshot.Revision))
+		Expect(dirtySnapshot.Revision).To(HavePrefix("git-" + snapshot.Revision + "-dirty-"))
 	})
 
 	It("records a snapshot that indexes a Git-ignored Go file as dirty until the file is tracked", func(ctx SpecContext) {

@@ -33,7 +33,7 @@ func reusableHead(ctx context.Context, database *gorm.DB, root discoveredRoot, f
 	if err != nil || !found {
 		return uuid.Nil, false, err
 	}
-	if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash {
+	if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash || head.DependencySetHash == nil || len(root.Dependencies) > 0 {
 		return uuid.Nil, false, nil
 	}
 	siblings, err := workspaceSiblingImports(root)

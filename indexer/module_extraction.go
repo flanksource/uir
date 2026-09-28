@@ -3,7 +3,10 @@ package indexer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"go/types"
+	"path/filepath"
 	"sort"
 
 	"github.com/flanksource/uir/storage"
@@ -57,7 +60,17 @@ type extractedPosting struct {
 func extractModule(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (moduleExtraction, error) {
 	load, err := loadTyped(ctx, loadPackages, root, includeTests)
 	if err != nil {
-		return moduleExtraction{}, err
+		var loadFailure packageLoadError
+		if !root.Historical || !errors.As(err, &loadFailure) {
+			return moduleExtraction{}, err
+		}
+		load = typedLoad{
+			root: root, origins: map[*types.Package]packageOrigin{}, files: map[string]typedFile{},
+			ignored: map[string]bool{}, directories: map[string]bool{}, parsed: map[string]string{}, loadFailure: err.Error(),
+		}
+		for _, file := range root.Files {
+			load.directories[filepath.Dir(file.AbsolutePath)] = true
+		}
 	}
 	resolver := newSymbolResolver(load.origins)
 	shapes, builder := newExportShapes(resolver, &load), newDocumentBuilder(resolver)
@@ -96,6 +109,9 @@ func extractPackage(load *typedLoad, shapes *exportShapes, builder *documentBuil
 	state, err := load.classifyPackage(files)
 	if err != nil {
 		return extractedPackage{}, err
+	}
+	if load.root.Historical && state.coverage == storage.CoveragePartial {
+		state.coverage = storage.CoverageSyntax
 	}
 	imports, err := shapes.importsOf(state.variants)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir/storage"
+	"gorm.io/gorm"
 )
 
 type ModuleSourceContent struct {
@@ -67,7 +68,22 @@ func (pipeline *Pipeline) ReadModuleSource(ctx context.Context, snapshotID, path
 	} else if !errors.Is(fileErr, os.ErrNotExist) {
 		return ModuleSourceContent{}, fmt.Errorf("resolve source %q: %w", path, fileErr)
 	}
-	if !pinnedGitRevision.MatchString(scope.snapshot.Revision) {
+	if scope.snapshot.WorktreeState != storage.WorktreeClean {
+		var blob storage.SourceBlob
+		if err := pipeline.database.WithContext(ctx).Where("content_hash = ?", source.ContentHash).Take(&blob).Error; err == nil {
+			if contentHash(blob.Content) != source.ContentHash {
+				return ModuleSourceContent{}, fmt.Errorf("stored source %q does not match indexed content hash", path)
+			}
+			return ModuleSourceContent{Path: path, Content: string(blob.Content), Origin: "snapshot", Revision: scope.snapshot.Revision, SnapshotID: snapshotID}, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return ModuleSourceContent{}, fmt.Errorf("load stored source %q: %w", path, err)
+		}
+	}
+	commit := scope.snapshot.GitCommit
+	if commit == "" && scope.snapshot.WorktreeState == storage.WorktreeClean {
+		commit = scope.snapshot.Revision
+	}
+	if !pinnedGitRevision.MatchString(commit) {
 		return ModuleSourceContent{}, fmt.Errorf("source %q has changed since snapshot %s and no pinned Git revision can recover it", path, snapshotID)
 	}
 	command := exec.CommandContext(ctx, "git", "-C", resolvedRoot, "rev-parse", "--show-toplevel")
@@ -83,13 +99,13 @@ func (pipeline *Pipeline) ReadModuleSource(ctx context.Context, snapshotID, path
 	if err != nil || !filepath.IsLocal(relative) {
 		return ModuleSourceContent{}, fmt.Errorf("source %q escapes Git repository %q", path, repoRoot)
 	}
-	command = exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "blob", scope.snapshot.Revision+":"+filepath.ToSlash(relative))
+	command = exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "blob", commit+":"+filepath.ToSlash(relative))
 	content, err := command.Output()
 	if err != nil {
-		return ModuleSourceContent{}, fmt.Errorf("read Git source %q at %s: %w", path, scope.snapshot.Revision, err)
+		return ModuleSourceContent{}, fmt.Errorf("read Git source %q at %s: %w", path, commit, err)
 	}
 	if contentHash(content) != source.ContentHash {
-		return ModuleSourceContent{}, fmt.Errorf("git source %q at %s does not match indexed content hash", path, scope.snapshot.Revision)
+		return ModuleSourceContent{}, fmt.Errorf("git source %q at %s does not match indexed content hash", path, commit)
 	}
 	return ModuleSourceContent{Path: path, Content: string(content), Origin: "git", Revision: scope.snapshot.Revision, SnapshotID: snapshotID}, nil
 }

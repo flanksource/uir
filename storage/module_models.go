@@ -58,8 +58,12 @@ type ModuleSnapshot struct {
 	LocationID        uuid.UUID     `gorm:"column:location_id"`
 	BaseSnapshotID    *uuid.UUID    `gorm:"column:base_snapshot_id"`
 	Revision          string        `gorm:"column:revision"`
+	GitCommit         string        `gorm:"column:git_commit"`
+	ModuleVersion     string        `gorm:"column:module_version"`
+	LastModifiedAt    *time.Time    `gorm:"column:last_modified_at"`
 	WorktreeState     WorktreeState `gorm:"column:worktree_state"`
 	ContentSetHash    string        `gorm:"column:content_set_hash"`
+	DependencySetHash *string       `gorm:"column:dependency_set_hash"`
 	ConfigurationHash string        `gorm:"column:configuration_hash"`
 	ContextHash       string        `gorm:"column:context_hash"`
 	Coverage          Coverage      `gorm:"column:coverage"`
