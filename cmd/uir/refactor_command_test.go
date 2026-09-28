@@ -22,4 +22,20 @@ var _ = Describe("explorer refactor commands", func() {
 		Expect(err).To(Succeed())
 		Expect(args).To(Equal([]string{"move", "file", "store/store.go", "model/store.go"}))
 	})
+
+	It("maps a type move and rejects a field move", func() {
+		source := query.ModuleSourceView{Path: "store/store.go", PackagePath: "example.org/service/store"}
+		typeNode := &query.ModuleNodeView{Identifier: uir.Identifier{Type: "Store"}}
+		args, err := refactorArgs(refactorOptions{Action: "move", Destination: "model/store.go"}, source, typeNode, "state.db", "")
+		Expect(err).To(Succeed())
+		Expect(args).To(Equal([]string{"move", "type", "Store", "model/store.go", "--package", source.PackagePath}))
+		field := &query.ModuleNodeView{Identifier: uir.Identifier{Type: "Store", Field: "Name"}}
+		_, err = refactorArgs(refactorOptions{Action: "move", Destination: "model/store.go"}, source, field, "state.db", "")
+		Expect(err).To(MatchError(ContainSubstring("field move")))
+	})
+
+	It("rejects a destination that escapes the module", func() {
+		_, err := refactorArgs(refactorOptions{Action: "move", Destination: "../outside.go"}, query.ModuleSourceView{Path: "store/store.go"}, nil, "state.db", "")
+		Expect(err).To(MatchError(ContainSubstring("module-relative")))
+	})
 })

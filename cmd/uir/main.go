@@ -30,11 +30,12 @@ const (
 type runtimeContextKey struct{}
 
 type commandRuntime struct {
-	DSN      string
-	Schema   string
-	database *gorm.DB
-	owned    bool
-	mu       sync.Mutex
+	DSN        string
+	Schema     string
+	GopatchBin string
+	database   *gorm.DB
+	owned      bool
+	mu         sync.Mutex
 }
 
 func main() {
@@ -73,6 +74,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)
 	registerModuleCommands(root)
+	registerRefactorCommands(root, runtime)
 	registerDiffCommand(root)
 	registerHistoryCommand(root)
 	registerSystemInfoCommand(root)

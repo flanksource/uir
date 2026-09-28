@@ -107,7 +107,7 @@ func (scope rootScope) selectSnapshot(ctx context.Context, database *gorm.DB, co
 		return scope.overrideSnapshot(ctx, database, commit, override, flag)
 	}
 	var snapshots []storage.ModuleSnapshot
-	if err := database.WithContext(ctx).Where("root_id = ? AND revision = ?", scope.root.ID, commit).
+	if err := database.WithContext(ctx).Where("root_id = ? AND (git_commit = ? OR revision = ?)", scope.root.ID, commit, commit).
 		Order("completed_at DESC").Order("started_at DESC").Order("id").Find(&snapshots).Error; err != nil {
 		return storage.ModuleSnapshot{}, fmt.Errorf("load snapshots of commit %s: %w", commit, err)
 	}
@@ -138,7 +138,7 @@ func (scope rootScope) overrideSnapshot(ctx context.Context, database *gorm.DB, 
 	switch {
 	case snapshot.RootID != scope.root.ID:
 		return storage.ModuleSnapshot{}, fmt.Errorf("%s snapshot %s does not belong to root %q", flag, id, scope.root.RootKey)
-	case snapshot.Revision != commit:
+	case snapshot.GitCommit != commit && snapshot.Revision != commit:
 		return storage.ModuleSnapshot{}, fmt.Errorf("%s snapshot %s records revision %s, not %s", flag, id, snapshot.Revision, commit)
 	}
 	return snapshot, nil

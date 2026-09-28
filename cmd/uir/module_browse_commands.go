@@ -6,6 +6,8 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +22,26 @@ type moduleContentOptions struct {
 	Path       string `flag:"path" help:"Module-relative source path" required:"true"`
 }
 
+type moduleDependenciesOptions struct {
+	SnapshotID string `flag:"snapshot" help:"Immutable snapshot UUID" required:"true"`
+}
+
 func registerModuleBrowseCommands(root *cobra.Command) {
+	dependencies := clicky.AddNamedCommandWithContext("dependencies", root, moduleDependenciesOptions{}, func(ctx context.Context, options moduleDependenciesOptions) (storage.SnapshotDependenciesResult, error) {
+		id, err := uuid.Parse(options.SnapshotID)
+		if err != nil {
+			return storage.SnapshotDependenciesResult{}, err
+		}
+		database, err := databaseFor(ctx)
+		if err != nil {
+			return storage.SnapshotDependenciesResult{}, err
+		}
+		return storage.ModuleDependencies(ctx, database, id)
+	})
+	dependencies.Short = "List declared dependencies and target snapshots"
+	setModuleRoute(dependencies, "modules/dependencies")
+	dependencies.Annotations["clicky/operation-method"] = http.MethodGet
+
 	heads := clicky.AddNamedCommandWithContext("heads", root, struct{}{}, func(ctx context.Context, _ struct{}) (query.ItemsWithWarnings[query.ModuleHeadFiles], error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
