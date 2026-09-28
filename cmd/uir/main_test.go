@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/commons/properties"
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -18,6 +19,8 @@ var _ = Describe("UIR module CLI", func() {
 	It("stores the default database under the home config directory", func(ctx SpecContext) {
 		home := GinkgoT().TempDir()
 		GinkgoT().Setenv("HOME", home)
+		GinkgoT().Setenv(dsnEnv, "")
+		GinkgoT().Setenv(schemaEnv, "")
 		runtime := &commandRuntime{}
 		_, err := runtime.Database(ctx)
 		Expect(err).ToNot(HaveOccurred())
@@ -25,6 +28,55 @@ var _ = Describe("UIR module CLI", func() {
 		Expect(runtime.DSN).To(Equal(filepath.Join(home, ".config", "uir", "uir.db")))
 		_, err = os.Stat(runtime.DSN)
 		Expect(err).ToNot(HaveOccurred())
+	})
+
+	Describe("database selection from the environment", func() {
+		var home, envDSN, flagDSN string
+		BeforeEach(func() {
+			home = GinkgoT().TempDir()
+			GinkgoT().Setenv("HOME", home)
+			envDSN = filepath.Join(GinkgoT().TempDir(), "env.db")
+			flagDSN = filepath.Join(GinkgoT().TempDir(), "flag.db")
+			GinkgoT().Setenv(dsnEnv, envDSN)
+			GinkgoT().Setenv(schemaEnv, "")
+		})
+
+		openWithArgs := func(ctx context.Context, args ...string) (*commandRuntime, error) {
+			runtime := &commandRuntime{}
+			Expect(newRootCommand(runtime).PersistentFlags().Parse(args)).To(Succeed())
+			_, err := runtime.Database(ctx)
+			DeferCleanup(func() { Expect(runtime.Close()).To(Succeed()) })
+			return runtime, err
+		}
+
+		It("opens UIR_DSN when --dsn is absent instead of the home config database", func(ctx SpecContext) {
+			runtime, err := openWithArgs(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(runtime.DSN).To(Equal(envDSN))
+			Expect(envDSN).To(BeAnExistingFile())
+			Expect(filepath.Join(home, ".config", "uir", "uir.db")).ToNot(BeAnExistingFile())
+		})
+
+		It("opens the --dsn flag over UIR_DSN", func(ctx SpecContext) {
+			runtime, err := openWithArgs(ctx, "--dsn", flagDSN)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(runtime.DSN).To(Equal(flagDSN))
+			Expect(flagDSN).To(BeAnExistingFile())
+			Expect(envDSN).ToNot(BeAnExistingFile())
+		})
+
+		It("passes UIR_SCHEMA to storage when --schema is absent", func(ctx SpecContext) {
+			GinkgoT().Setenv(schemaEnv, "tenant_env")
+			_, err := openWithArgs(ctx)
+			Expect(err).To(MatchError(ContainSubstring("tenant_env")))
+		})
+
+		It("passes the --schema flag over UIR_SCHEMA", func(ctx SpecContext) {
+			GinkgoT().Setenv(schemaEnv, "tenant_env")
+			runtime, err := openWithArgs(ctx, "--schema", "public")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(runtime.Schema).To(Equal("public"))
+		})
 	})
 
 	It("prints the linked build version", func() {
@@ -46,6 +98,15 @@ var _ = Describe("UIR module CLI", func() {
 		Expect(output.String()).To(Equal("uir version v1.2.3\n"))
 		Expect(runtime.database).To(BeNil())
 		Expect(clicky.IsLocalOnly(findCommand(root, "version"))).To(BeTrue())
+	})
+
+	It("sets commons properties from -P on any subcommand", func() {
+		const key, value = "log.level.uir-test", "trace"
+		root := newRootCommand(&commandRuntime{})
+		root.SetOut(&bytes.Buffer{})
+		root.SetArgs([]string{"version", "-P", key + "=" + value})
+		Expect(root.Execute()).To(Succeed())
+		Expect(properties.Get(key)).To(Equal(value))
 	})
 
 	It("registers the module operations without a project entity", func() {

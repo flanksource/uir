@@ -12,6 +12,7 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/shutdown"
+	"github.com/flanksource/commons/properties"
 	"github.com/flanksource/uir/storage"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
@@ -19,6 +20,12 @@ import (
 
 // version is set at link time by `make binary VERSION=...`.
 var version = "dev"
+
+// dsnEnv and schemaEnv supply --dsn and --schema when the flags are not set.
+const (
+	dsnEnv    = "UIR_DSN"
+	schemaEnv = "UIR_SCHEMA"
+)
 
 type runtimeContextKey struct{}
 
@@ -60,8 +67,9 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 		Version:      version,
 		SilenceUsage: true,
 	}
-	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path (default ~/.config/uir/uir.db)")
-	root.PersistentFlags().StringVar(&runtime.Schema, "schema", "", "PostgreSQL schema")
+	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path (default $"+dsnEnv+", then ~/.config/uir/uir.db)")
+	root.PersistentFlags().StringVar(&runtime.Schema, "schema", "", "PostgreSQL schema (default $"+schemaEnv+")")
+	properties.BindFlags(root.PersistentFlags())
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)
 	registerModuleCommands(root)
@@ -88,6 +96,12 @@ func (runtime *commandRuntime) Database(ctx context.Context) (*gorm.DB, error) {
 	defer runtime.mu.Unlock()
 	if runtime.database != nil {
 		return runtime.database, nil
+	}
+	if runtime.DSN == "" {
+		runtime.DSN = os.Getenv(dsnEnv)
+	}
+	if runtime.Schema == "" {
+		runtime.Schema = os.Getenv(schemaEnv)
 	}
 	if runtime.DSN == "" {
 		home, err := os.UserHomeDir()
