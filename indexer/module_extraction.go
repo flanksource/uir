@@ -33,7 +33,8 @@ type extractedPackage struct {
 	diagnostics     []packageDiagnostic
 }
 
-// extractedDocument is one file's document with the symbol rows and postings it needs.
+// extractedDocument is one file's document with the symbol rows and postings it needs, and the
+// fingerprints of every canonical symbol it declares.
 type extractedDocument struct {
 	inputHash       string
 	coverage        storage.Coverage
@@ -41,7 +42,15 @@ type extractedDocument struct {
 	symbolCount     int
 	occurrenceCount int
 	symbolIDs       []string
-	postings        []storage.SymbolPosting
+	postings        []extractedPosting
+	definitions     []definition
+}
+
+// extractedPosting is one posting of a document before its ordinal and the symbol's handle exist.
+type extractedPosting struct {
+	symbolID    string
+	role        storage.PostingRole
+	occurrences int
 }
 
 // extractModule type-checks the root, hashes each package's inputs, and renders every document.
@@ -164,24 +173,32 @@ func withSymbolFacts(document extractedDocument, rows map[string]storage.Symbol)
 		}
 	}
 	document.symbolIDs = sortedKeys(needed)
-	document.postings = make([]storage.SymbolPosting, 0, len(counts))
+	document.postings = make([]extractedPosting, 0, len(counts))
 	for key, occurrences := range counts {
-		document.postings = append(document.postings, storage.SymbolPosting{SymbolID: key.symbol, Role: key.role, OccurrenceCount: occurrences})
+		document.postings = append(document.postings, extractedPosting{symbolID: key.symbol, role: key.role, occurrences: occurrences})
 	}
 	sort.Slice(document.postings, func(i, j int) bool {
 		left, right := document.postings[i], document.postings[j]
-		return left.SymbolID < right.SymbolID || (left.SymbolID == right.SymbolID && left.Role < right.Role)
+		return left.symbolID < right.symbolID || (left.symbolID == right.symbolID && left.role < right.role)
 	})
+	for _, symbol := range content.Symbols {
+		if document.definitions, err = appendDefinition(document.definitions, symbol.ID, symbol.ShapeHash, symbol.BodyHash); err != nil {
+			return extractedDocument{}, err
+		}
+	}
 	return document, nil
 }
 
-type postingKey struct{ symbol, role string }
+type postingKey struct {
+	symbol string
+	role   storage.PostingRole
+}
 
 // countSymbolFacts counts a document's postings and collects every symbol id it names, checking each
 // against the known rows and each entry's kind and visibility against its row.
 func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.Symbol) (map[postingKey]int, map[string]bool, error) {
 	counts, needed := map[postingKey]int{}, map[string]bool{}
-	count := func(id, role string) error {
+	count := func(id string, role storage.PostingRole) error {
 		row, known := rows[id]
 		if !known {
 			return fmt.Errorf("symbol %s is not a known symbol", id)
@@ -199,18 +216,23 @@ func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.S
 		if row := rows[*symbol.ID]; row.Kind != symbol.Kind || row.Visibility != symbol.Visibility {
 			return nil, nil, fmt.Errorf("symbol %s is a %s %s entry but a %s %s row", *symbol.ID, symbol.Visibility, symbol.Kind, row.Visibility, row.Kind)
 		}
-		if err := count(*symbol.ID, "definition"); err != nil {
+		if err := count(*symbol.ID, storage.RoleDefinition); err != nil {
 			return nil, nil, err
 		}
 		for _, implemented := range symbol.Implements {
-			if err := count(implemented, "implements"); err != nil {
+			if err := count(implemented, storage.RoleImplements); err != nil {
+				return nil, nil, err
+			}
+		}
+		for _, embedded := range symbol.Embeds {
+			if err := count(embedded, storage.RoleEmbeds); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
 	for _, occurrence := range content.Occurrences {
 		if occurrence.Symbol != nil {
-			if err := count(*occurrence.Symbol, "reference"); err != nil {
+			if err := count(*occurrence.Symbol, storage.RoleReference); err != nil {
 				return nil, nil, err
 			}
 		}

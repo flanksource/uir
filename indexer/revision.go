@@ -66,7 +66,10 @@ func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptio
 		return result, err
 	}
 	defer func() { err = errors.Join(err, cleanup()) }()
-	modulePath := filepath.Join(worktree, relative)
+	modulePath, err := filepath.EvalSymlinks(filepath.Join(worktree, relative))
+	if err != nil {
+		return result, fmt.Errorf("canonicalize historical module at %q: %w", relative, err)
+	}
 	roots, err := discoverModules(ctx, modulePath, options.IncludeTests)
 	if err != nil {
 		return result, err
@@ -95,7 +98,7 @@ func (indexer *Indexer) publishRevision(ctx context.Context, root discoveredRoot
 	if err != nil {
 		return result, fmt.Errorf("extract historical module %q: %w", root.RootKey, err)
 	}
-	err = indexer.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+	err = storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
 		var stored storage.ModuleRoot
 		if loadErr := transaction.Where("id = ?", location.RootID).Take(&stored).Error; loadErr != nil {
 			return fmt.Errorf("load root of historical module: %w", loadErr)

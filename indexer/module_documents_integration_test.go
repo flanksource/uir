@@ -63,7 +63,7 @@ func mustJSON(value any) storage.JSON {
 
 func activeDocumentIDs(ctx context.Context, database *gorm.DB, snapshotID string) map[string]uuid.UUID {
 	GinkgoHelper()
-	active, err := storage.ActiveDocuments(ctx, database, uuid.MustParse(snapshotID))
+	active, err := storage.ActiveDocuments(ctx, database, uuid.MustParse(snapshotID), storage.ActiveDocumentOptions{Content: true})
 	Expect(err).ToNot(HaveOccurred())
 	ids := map[string]uuid.UUID{}
 	for path, document := range active {
