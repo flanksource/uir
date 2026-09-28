@@ -1,5 +1,16 @@
 import { Callout } from "@flanksource/clicky-ui/data";
-import type { ModuleQueryCoverage } from "./api";
+import type { MissingHeadWarning, ModuleQueryCoverage } from "./api";
+
+export function MissingHeadWarnings({ warnings }: { warnings: MissingHeadWarning[] }) {
+  if (!warnings.length) return null;
+  return <Callout variant="warning" label="Missing index" title={`${warnings.length} ${warnings.length === 1 ? "checkout" : "checkouts"} skipped`}>
+    <ul className="m-0 list-none p-0 text-xs">
+      {warnings.map((warning) => <li key={`${warning.root_key}:${warning.location}`} className="break-all">
+        <code>{warning.root_key}</code> · {warning.location} · {warning.message}
+      </li>)}
+    </ul>
+  </Callout>;
+}
 
 export function CoverageWarning({ coverage }: { coverage: ModuleQueryCoverage[] }) {
   if (!coverage.length) return null;

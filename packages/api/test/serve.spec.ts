@@ -5,9 +5,10 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("loads every module checkout head for the explorer tree", async () => {
   const heads = [{ root_key: "example.org/service", name: "service", location: "/checkout/service", snapshot_id: "head-1", sources: [] }];
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(heads), { status: 200 }));
+  const warnings = [{ root_key: "example.org/missing", location: "/checkout/missing", message: "registered checkout has no indexed head; run `uir reindex --all`" }];
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: heads, warnings }), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(listModuleHeads()).resolves.toEqual(heads);
+  await expect(listModuleHeads()).resolves.toEqual({ items: heads, warnings });
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/heads", expect.objectContaining({ headers: { Accept: "application/json" } }));
 });
 
@@ -66,6 +67,7 @@ it.each([
       declarations: [saveDeclaration],
       symbols: [{ id: saveID, module_key: scope.root, package_path: "example.org/refs/store", kind: "method", owner: "Store", name: "Save", visibility: "exported", parameter_types: [] }],
       coverage: [brokenPartial],
+      warnings: [],
       stages: [{ name: "parse", value: "incoming" }, { name: "coverage", value: "incomplete: 1 package is not fully indexed (1 partial)" }],
     },
   },
@@ -73,7 +75,7 @@ it.each([
     name: "search rows in the same envelope",
     expression: 'store.Store.Save',
     envelope: {
-      operation: "resolve", total: 1, matches: [{ ...saveDeclaration, kind: "symbol" }], declarations: [], symbols: [], coverage: [brokenPartial],
+      operation: "resolve", total: 1, matches: [{ ...saveDeclaration, kind: "symbol" }], declarations: [], symbols: [], coverage: [brokenPartial], warnings: [],
       stages: [{ name: "parse", value: "resolve" }],
     },
   },
@@ -81,7 +83,7 @@ it.each([
     name: "module scoped package selector on a binary relation",
     expression: "func:Save < pkg:example.org/refs:app/**",
     envelope: {
-      operation: "incoming", total: 0, matches: [], declarations: [], symbols: [], coverage: [brokenPartial],
+      operation: "incoming", total: 0, matches: [], declarations: [], symbols: [], coverage: [brokenPartial], warnings: [],
       stages: [{ name: "parse", value: "incoming" }],
     },
   },
@@ -99,7 +101,7 @@ it.each([
 
 it("gets scoped canonical symbol suggestions for query completion", async () => {
   const symbols = [{ id: saveID, query_name: "example.org/refs/store.Store.Save", package_path: "example.org/refs/store", kind: "method", name: "Save" }];
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(symbols), { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: symbols, warnings: [] }), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   await expect(suggestModuleSymbols("store.Store.S", scope.root, snapshot)).resolves.toEqual(symbols);
   expect(fetcher).toHaveBeenCalledWith(`/api/v1/modules/suggest?prefix=store.Store.S&root=example.org%2Frefs&snapshot=${snapshot}`, expect.objectContaining({ headers: { Accept: "application/json" } }));
@@ -107,7 +109,7 @@ it("gets scoped canonical symbol suggestions for query completion", async () => 
 
 it("gets module scoped relative package completions", async () => {
   const choices = ["pkg:example.org/refs:app", "pkg:example.org/refs:app/sub"];
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(choices), { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: choices, warnings: [] }), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   await expect(suggestTypedSelectors("pkg:example.org/refs:app", scope.root, snapshot)).resolves.toEqual(choices);
   expect(fetcher).toHaveBeenCalledWith(`/api/v1/modules/suggest-selectors?prefix=pkg%3Aexample.org%2Frefs%3Aapp&root=example.org%2Frefs&snapshot=${snapshot}`, expect.objectContaining({ headers: { Accept: "application/json" } }));
@@ -115,13 +117,40 @@ it("gets module scoped relative package completions", async () => {
 
 it("posts an unscoped PEG query across every module root", async () => {
   const expression = 'example.org/refs/store.Store.Save <';
-  const envelope = { operation: "incoming", total: 0, matches: [], declarations: [], symbols: [], coverage: [], stages: [] };
+  const warnings = [{ root_key: "example.org/missing", location: "/checkout/missing", message: "registered checkout has no indexed head; run `uir reindex --all`" }];
+  const envelope = { operation: "incoming", total: 0, matches: [], declarations: [], symbols: [], coverage: [], warnings, stages: [] };
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200, headers: { "Server-Timing": "total;dur=7" } }));
   vi.stubGlobal("fetch", fetcher);
   await expect(runModuleQuery(expression, "", "")).resolves.toEqual({ data: envelope, timing: [{ name: "total", duration: 7, counters: {} }] });
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
     method: "POST",
     body: JSON.stringify({ args: [expression], root: "", snapshot: "" }),
+  }));
+});
+
+it("posts structured flags without a positional expression", async () => {
+  const envelope = { operation: "set", total: 1, matches: [{ kind: "module", source: scope.root, symbol: `module:${scope.root}` }], declarations: [], symbols: [], coverage: [], warnings: [], stages: [] };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200, headers: { "Server-Timing": "total;dur=1" } }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(runModuleQuery("", scope.root, snapshot, { modules: true, packages: true, include: ["example.org/refs/**"] })).resolves.toMatchObject({ data: envelope });
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
+    method: "POST", body: JSON.stringify({ root: scope.root, snapshot, modules: true, packages: true, include: ["example.org/refs/**"] }),
+  }));
+});
+
+it("posts a bare symbol glob unchanged and returns its expanded symbols", async () => {
+  const expression = "github.com/flanksource/clicky.Exec*";
+  const symbols = ["Exec", "Execf"].map((name) => ({ query_name: `github.com/flanksource/clicky.${name}`, kind: "var" }));
+  const envelope = {
+    operation: "resolve", total: 2, symbols,
+    matches: symbols.map((symbol) => ({ kind: "symbol", query_name: symbol.query_name })),
+    declarations: [], coverage: [], warnings: [], stages: [],
+  };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(envelope), { status: 200, headers: { "Server-Timing": "total;dur=1" } }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(runModuleQuery(expression, "github.com/flanksource/clicky", "")).resolves.toMatchObject({ data: envelope });
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
+    method: "POST", body: JSON.stringify({ args: [expression], root: "github.com/flanksource/clicky", snapshot: "" }),
   }));
 });
 
@@ -161,8 +190,17 @@ it("sends explicit add and reindex inputs and reports server failures", async ()
   expect(fetcher.mock.calls[0]).toEqual(["/api/v1/modules/add", expect.objectContaining({
     method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, "no-workspace-uses": true }),
   })]);
-  await expect(reindexModules("/repo", true, false)).rejects.toThrow("index failed");
+  await expect(reindexModules({ path: "/repo", includeTests: true, force: false })).rejects.toThrow("index failed");
   expect(fetcher.mock.calls[1]).toEqual(["/api/v1/modules/reindex", expect.objectContaining({
-    method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, force: false }),
+    method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, force: false, all: false }),
   })]);
+});
+
+it("requests reindex of registered checkouts with missing heads", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(reindexModules({ all: true })).resolves.toEqual([]);
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/reindex", expect.objectContaining({
+    method: "POST", body: JSON.stringify({ "include-tests": false, force: false, all: true }),
+  }));
 });

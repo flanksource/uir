@@ -25,15 +25,32 @@ build: web-build binary ## Build the browser, compile every package, and link th
 binary: | $(LOCALBIN) ## Link the UIR CLI into .bin/uir (requires built web/dist)
 	CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION)" -o $(LOCALBIN)/uir ./cmd/uir
 
+# The query fixture corpus database; a PostgreSQL DSN benchmarks the same fixtures on PostgreSQL.
+UIR_CORPUS_DSN ?= $(CURDIR)/.tmp/uir-corpus.db
+UIR_CORPUS_SCHEMA ?=
+GAVEL_FLAGS ?=
+
+.PHONY: fixture-corpus-env
+fixture-corpus-env: ## Point the Gavel query fixtures at UIR_CORPUS_DSN via .tmp/uir-corpus.env
+	mkdir -p .tmp
+	printf "UIR_DSN='%s'\nUIR_SCHEMA='%s'\n" '$(UIR_CORPUS_DSN)' '$(UIR_CORPUS_SCHEMA)' > .tmp/uir-corpus.env
+
 .PHONY: fixture-corpus
 fixture-corpus: GOWORK = auto
-fixture-corpus: binary ## Index the five local Flanksource checkouts for Gavel query fixtures
+fixture-corpus: binary fixture-corpus-env ## Index the five local Flanksource checkouts (fixtures/bench/index-corpus.md) for Gavel query fixtures
+	UIR_DSN='$(UIR_CORPUS_DSN)' UIR_SCHEMA='$(UIR_CORPUS_SCHEMA)' gavel fixtures fixtures/bench/index-corpus.md $(GAVEL_FLAGS)
+
+# The scripted commons history database; a SQLite path must lie under .tmp/ and is recreated on every run,
+# a PostgreSQL DSN (with an optional schema) must be dropped by hand first.
+UIR_HISTORY_DSN ?= $(CURDIR)/.tmp/uir-history.db
+UIR_HISTORY_SCHEMA ?=
+
+.PHONY: fixture-history
+fixture-history: GOWORK = auto
+fixture-history: binary ## Build and diff the scripted 20-commit commons history (fixtures/bench/history.md) in UIR_HISTORY_DSN
 	mkdir -p .tmp
-	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../commons --no-workspace-uses
-	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../clicky --no-workspace-uses
-	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../commons-db --no-workspace-uses
-	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../gavel --no-workspace-uses
-	env -u GOWORK $(LOCALBIN)/uir --dsn $(CURDIR)/.tmp/uir-corpus.db add $(CURDIR)/../captain --no-workspace-uses
+	printf "HISTORY_DSN='%s'\nHISTORY_SCHEMA='%s'\n" '$(UIR_HISTORY_DSN)' '$(UIR_HISTORY_SCHEMA)' > .tmp/uir-history.env
+	HISTORY_DSN='$(UIR_HISTORY_DSN)' HISTORY_SCHEMA='$(UIR_HISTORY_SCHEMA)' gavel fixtures fixtures/bench/history.md $(GAVEL_FLAGS)
 
 .PHONY: install
 install: web-build ## Install the UIR CLI with embedded browser assets

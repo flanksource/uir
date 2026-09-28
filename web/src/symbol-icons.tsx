@@ -8,14 +8,19 @@ const symbolIcons = {
   record: UiRecord1,
   method: UiMethod6,
   function: UiFunction1,
+  func: UiFunction1,
   constructor: UiMethod2,
   record_field: UiField3,
   column: UiColumn,
   index: UiIndex,
   function_variable: UiVariable6,
   package_variable: UiVariable6,
+  var: UiVariable6,
   annotation: UiAnnotation,
   constant: UiConstant1,
+  const: UiConstant1,
+  type: UiClass3,
+  field: UiField3,
 } as const;
 
 export function symbolIcon(nodeType: string) {

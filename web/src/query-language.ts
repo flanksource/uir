@@ -13,15 +13,15 @@ export function registerQueryLanguage(monaco: Monaco): void {
     tokenizer: { root: [
       [/\s+/, "white"],
       [/<<[1-8]?|>>[1-8]?|[<>=&|]/, "operator"],
-      [/[+-]?(?:pkg|mod|func|field|struct):/, "keyword"],
-      [/:impl|:methods|~w|[+-]pkg|-f/, "keyword"],
+      [/[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):/, "keyword"],
+      [/:impl|:inherits|:methods|~w|[+-]pkg|-f/, "keyword"],
       [/[()]/, "delimiter.parenthesis"],
-      [/[A-Za-z_][A-Za-z0-9_./*?@#$!\-]*/, "identifier"],
+      [/[A-Za-z_*?][A-Za-z0-9_./*?@#$!\-]*/, "identifier"],
     ] },
   });
   monaco.languages.setLanguageConfiguration(queryLanguageId, {
     brackets: [["(", ")"]],
-    wordPattern: /[A-Za-z_][A-Za-z0-9_./-]*/g,
+    wordPattern: /[A-Za-z_*?][A-Za-z0-9_./*?-]*/g,
   });
 }
 
@@ -85,12 +85,16 @@ export function queryCompletionProvider(monaco: Monaco, options: {
           kind: monaco.languages.CompletionItemKind.Operator, range,
         }))] };
       }
-	  if (/^(?:pkg|mod|func|field|struct)$/.test(context.prefix)) {
+	  if (/^(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path)$/.test(context.prefix)) {
 	    return { suggestions: querySyntaxCompletions(context).map((option) => ({
 	      label: option.label, insertText: option.insert, detail: option.help, documentation: option.help,
 	      kind: monaco.languages.CompletionItemKind.Operator, range,
 	    })) };
 	  }
+      if (/[*?]/.test(context.prefix)) {
+        reportError("");
+        return { suggestions: [] };
+      }
       const selected = scope();
       if (!selected) return { suggestions: [] };
       const controller = new AbortController();

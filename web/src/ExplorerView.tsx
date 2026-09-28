@@ -4,7 +4,8 @@ import { Select, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-u
 import { ServerTimingBadge, Tree } from "@flanksource/clicky-ui/data";
 import { UiFolder, UiListTree } from "@flanksource/clicky-ui/icons";
 import { MonacoProvider } from "@flanksource/clicky-ui/monaco";
-import { readModuleSource, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleSource, type ModuleSourceContent } from "./api";
+import { readModuleSource, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleSource, type ModuleSourceContent } from "./api";
+import { MissingHeadWarnings } from "./CoverageWarning";
 import { moduleHeadTree, scopedHeads, symbolTree, type HeadFileItem, type SymbolItem } from "./explorer-model";
 import { fileSelectionPatch } from "./explorer-navigation";
 import { FileTypeIcon, FolderTypeIcon } from "./file-icons";
@@ -67,7 +68,7 @@ function SourcePane({ snapshot, source, line, column }: { snapshot: string; sour
   </div>;
 }
 
-function FilePane({ files, selected, heads, route, onRoute }: { files: HeadFileItem[]; selected?: HeadFileItem; heads: Load<ModuleHead[]>; route: Route; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
+function FilePane({ files, selected, heads, route, onRoute }: { files: HeadFileItem[]; selected?: HeadFileItem; heads: Load<ItemsWithWarnings<ModuleHead>>; route: Route; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
   const locallySelectedSource = useRef("");
   const [revealVersion, setRevealVersion] = useState(0);
   useEffect(() => {
@@ -106,12 +107,12 @@ function OutlinePane({ items, selected, route, onRoute }: { items: OutlineItem[]
     empty={<div className="p-3 text-sm text-muted-foreground">No indexed symbols for this file.</div>} /></div>;
 }
 
-export function ExplorerView({ route, heads, browse, locations, onRoute }: { route: Route; heads: Load<ModuleHead[]>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
+export function ExplorerView({ route, heads, browse, locations, onRoute }: { route: Route; heads: Load<ItemsWithWarnings<ModuleHead>>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
   const sources = browse.data?.sources ?? EMPTY_SOURCES;
   const nodes = browse.data?.nodes ?? EMPTY_NODES;
   const selectedNode = nodes.find((node) => node.id === route.node);
   const selectedSource = sources.find((source) => source.id === route.source);
-  const files = useMemo(() => moduleHeadTree(scopedHeads(heads.data ?? EMPTY_HEADS, route.module)), [heads.data, route.module]);
+  const files = useMemo(() => moduleHeadTree(scopedHeads(heads.data?.items ?? EMPTY_HEADS, route.module)), [heads.data, route.module]);
   const selectedFile = selectedSource && findItem(files, JSON.stringify(["file", selectedSource.root_key, route.location, route.snapshot, selectedSource.path]));
   const items = useMemo<OutlineItem[]>(() => {
     if (!route.symbolSearch) return symbolTree(nodes.filter((node) => node.source_id === route.source), nodes);
@@ -150,6 +151,7 @@ export function ExplorerView({ route, heads, browse, locations, onRoute }: { rou
       }} options={(locations.data ?? []).map((item) => ({ value: item.canonical_path, label: item.canonical_path }))} /></Field>}
       <ServerTimingBadge metrics={browse.timing} />
     </div>
+    {heads.data && <div className="shrink-0 px-3 py-2"><MissingHeadWarnings warnings={heads.data.warnings} /></div>}
     {browse.loading && <div className="p-3"><Muted>Loading snapshot…</Muted></div>}
     {browse.error && <div className="p-3"><ErrorMessage error={browse.error} /></div>}
     {browse.data && route.source && !selectedSource && <div className="p-3"><ErrorMessage error={`Source ${route.source} is not in this snapshot`} /></div>}

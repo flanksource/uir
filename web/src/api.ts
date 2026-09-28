@@ -98,6 +98,7 @@ export type ModuleHead = { root_key: string; name: string; location: string; sna
 export type ModuleSourceContent = { path: string; content: string; origin: "local" | "git"; revision: string; snapshot_id: string };
 export type ModuleQueryRow = {
   kind: string;
+  node_kind?: string;
   symbol: string;
   root: string;
   location: string;
@@ -110,6 +111,9 @@ export type ModuleQueryRow = {
   end_line?: number;
   end_column?: number;
   role?: string;
+  relation?: string;
+  source_id?: string;
+  source_name?: string;
   symbol_id?: string;
   enclosing_id?: string;
   enclosing_key?: string;
@@ -130,6 +134,8 @@ export type ModuleQuerySymbol = {
   parameter_types: unknown;
 };
 export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: number };
+export type MissingHeadWarning = { root_key: string; location: string; message: string };
+export type ItemsWithWarnings<T> = { items: T[]; warnings: MissingHeadWarning[] };
 export type ModuleQueryResult = {
   operation: unknown;
   total: number;
@@ -137,6 +143,7 @@ export type ModuleQueryResult = {
   declarations: ModuleQueryRow[];
   symbols: ModuleQuerySymbol[];
   coverage: ModuleQueryCoverage[];
+  warnings: MissingHeadWarning[];
   stages: { name: string; value: string }[];
   path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
 };
@@ -214,7 +221,7 @@ export function listModuleRoots(): Promise<ModuleRoot[]> {
   return request(moduleURL(""));
 }
 
-export function listModuleHeads(): Promise<ModuleHead[]> {
+export function listModuleHeads(): Promise<ItemsWithWarnings<ModuleHead>> {
   return request(moduleURL("heads"));
 }
 
@@ -238,32 +245,41 @@ export function readModuleSource(snapshot: string, path: string): Promise<Module
   return request(moduleURL("content", { snapshot, path }));
 }
 
-export async function runModuleQuery(expression: string, root: string, snapshot: string): Promise<TimedResponse<ModuleQueryResult>> {
-  const result = await timedRequest<unknown>(moduleURL("query"), { method: "POST", body: JSON.stringify({ args: [expression], root, snapshot }) });
+export type StructuredQueryOptions = {
+  methods?: boolean; vars?: boolean; types?: boolean; modules?: boolean; packages?: boolean;
+  callers?: boolean; calls?: boolean; implements?: boolean; inherits?: boolean;
+  include?: string[]; exclude?: string[];
+};
+
+export async function runModuleQuery(expression: string, root: string, snapshot: string, options: StructuredQueryOptions = {}): Promise<TimedResponse<ModuleQueryResult>> {
+  const result = await timedRequest<unknown>(moduleURL("query"), { method: "POST", body: JSON.stringify({ ...(expression ? { args: [expression] } : {}), root, snapshot, ...options }) });
   if (!isQueryResult(result.data)) throw new Error(`Query response is not a result envelope: ${JSON.stringify(result.data).slice(0, 200)}`);
   return { data: result.data, timing: result.timing };
 }
 
-export function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
-  return request(moduleURL("suggest", { prefix, root, snapshot }), { signal });
+export async function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
+  return (await request<ItemsWithWarnings<ModuleQuerySymbol>>(moduleURL("suggest", { prefix, root, snapshot }), { signal })).items;
 }
 
-export function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<string[]> {
-  return request(moduleURL("suggest-selectors", { prefix, root, snapshot }), { signal });
+export async function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<string[]> {
+  return (await request<ItemsWithWarnings<string>>(moduleURL("suggest-selectors", { prefix, root, snapshot }), { signal })).items;
 }
 
 function isQueryResult(value: unknown): value is ModuleQueryResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
-  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "stages"].every((key) => Array.isArray(result[key]));
+  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "warnings", "stages"].every((key) => Array.isArray(result[key]));
 }
 
 export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexResult[]> {
   return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, "no-workspace-uses": true }) });
 }
 
-export function reindexModules(path: string, includeTests: boolean, force: boolean): Promise<ModuleIndexResult[]> {
-  return request(moduleURL("reindex"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, force }) });
+export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexResult[]> {
+  return request(moduleURL("reindex"), { method: "POST", body: JSON.stringify({
+    ...(options.path ? { args: [options.path] } : {}), "include-tests": options.includeTests ?? false,
+    force: options.force ?? false, all: options.all ?? false,
+  }) });
 }
 
 export function listGitHistory(root: string, location: string): Promise<GitHistory> {

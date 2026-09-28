@@ -22,7 +22,7 @@ describe("query palette result navigation", () => {
     const candidate = { ...row, kind: "candidate", path: undefined, symbol_id: "symbol-1" };
     const result: ModuleQueryResult = { operation: "callers", total: 2, matches: [row, candidate], declarations: [],
       symbols: [{ id: "symbol-1", module_key: "example.org/shop", package_path: "example.org/shop/store", kind: "method", name: "Save",
-        query_name: "example.org/shop/store.Store.Save", visibility: "exported", parameter_types: [] }], coverage: [], stages: [] };
+        query_name: "example.org/shop/store.Store.Save", visibility: "exported", parameter_types: [] }], coverage: [], warnings: [], stages: [] };
     expect(queryPaletteRows(result)).toEqual({ matches: [row], candidates: [candidate] });
     expect(queryPaletteRows({ ...result, path: { calls: [{ ...row, kind: "path" }], symbols: [] } }))
       .toEqual({ matches: [{ ...row, kind: "path" }], candidates: [] });

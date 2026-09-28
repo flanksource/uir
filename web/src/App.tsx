@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell, Button, Combobox, CommandPaletteTrigger, type CommandGroup } from "@flanksource/clicky-ui/components";
 import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
+import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
 import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
 import { queryExamples, queryScope, type QueryExample } from "./query-model";
 import { QueryCommandPalette } from "./QueryCommandPalette";
@@ -60,7 +60,7 @@ function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath
     setError("");
     setMessage("");
     try {
-      const results = action === "add" ? await addModules(path.trim(), includeTests) : await reindexModules(path.trim(), includeTests, force);
+      const results = action === "add" ? await addModules(path.trim(), includeTests) : await reindexModules({ path: path.trim(), includeTests, force });
       if (!results.length) throw new Error(`No Go modules found under ${path}`);
       setMessage(`${action === "add" ? "Added" : "Reindexed"} ${results.length} module ${results.length === 1 ? "root" : "roots"}`);
       onSuccess(results);
@@ -127,7 +127,7 @@ export function App() {
   }, [route.location, route.snapshot, selectedLocation]);
   const snapshots = useLoad<Page<ModuleSnapshot>>(route.module && route.location ? () => listModuleSnapshots(route.module, route.location, route.offset) : null,
     `snapshots:${route.module}:${route.location}:${route.offset}:${refresh}`);
-  const heads = useLoad<ModuleHead[]>(route.view === "explorer" ? listModuleHeads : null, `heads:${route.view}:${refresh}`);
+  const heads = useLoad<ItemsWithWarnings<ModuleHead>>(route.view === "explorer" ? listModuleHeads : null, `heads:${route.view}:${refresh}`);
   const browseActive = route.view === "explorer" || route.view === "query" || searchOpen;
   const browse = useTimedLoad<ModuleBrowse>(route.snapshot && browseActive ? () => browseModule(route.snapshot) : null,
     `browse:${route.snapshot}:${browseActive ? "active" : "idle"}:${refresh}`);

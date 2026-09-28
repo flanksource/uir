@@ -30,8 +30,8 @@ it("opens the task manager at its own route", () => {
 });
 
 it("round trips a Git comparison and selected log commit through the history URL", () => {
-  const route = readRoute({ pathname: "/history", search: "?module=example.org%2Fservice&compareFrom=main&compareTo=pr%3A12&logCommit=abc123" });
-  expect(route).toMatchObject({ view: "history", compareFrom: "main", compareTo: "pr:12", logCommit: "abc123" });
+  const route = readRoute({ pathname: "/history", search: "?module=example.org%2Fservice&compareFrom=main&compareTo=pr%3A12&logCommit=abc123&historyGroup=file&historyLayout=sidebar&historySearch=fix" });
+  expect(route).toMatchObject({ view: "history", compareFrom: "main", compareTo: "pr:12", logCommit: "abc123", historyGroup: "file", historyLayout: "sidebar", historySearch: "fix" });
   expect(readRoute(new URL(routeURL(route), "http://localhost"))).toEqual(route);
 });
 
