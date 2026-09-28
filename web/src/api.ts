@@ -46,6 +46,9 @@ export type ModuleSnapshot = {
   root_key: string;
   canonical_path: string;
   base_snapshot_id?: string;
+  git_commit?: string;
+  module_version?: string;
+  last_modified_at?: string;
   revision: string;
   worktree_state: "clean" | "dirty" | "unknown";
   coverage: "indexed" | "partial" | "syntax" | "excluded";
@@ -95,7 +98,12 @@ export type ModuleNode = {
 
 export type ModuleBrowse = { sources: ModuleSource[]; nodes: ModuleNode[] };
 export type ModuleHead = { root_key: string; name: string; location: string; snapshot_id: string; sources: ModuleSource[] };
-export type ModuleSourceContent = { path: string; content: string; origin: "local" | "git"; revision: string; snapshot_id: string };
+export type ModuleSourceContent = { path: string; content: string; origin: "local" | "git" | "snapshot"; revision: string; snapshot_id: string };
+export type ModuleDependency = { module_path: string; declared_version: string; indirect: boolean; replace_path?: string; replace_version?: string; selected_version?: string; target_snapshot_id?: string; target_root_key?: string; target_location?: string; unresolved_reason?: string };
+export type ModuleDependencies = { captured: boolean; items: ModuleDependency[] };
+export type ModuleRefactorRequest = { snapshot: string; source: string; node?: string; action: "rename" | "move"; newName?: string; destination?: string };
+export type ModuleRefactorPreview = { diff: string; preview_hash: string; files: string[] };
+export type ModuleRefactorApply = { applied: boolean; files: string[]; snapshots: ModuleIndexResult[]; index_error?: string };
 export type ModuleQueryRow = {
   kind: string;
   node_kind?: string;
@@ -243,6 +251,27 @@ export function browseModule(snapshot: string): Promise<TimedResponse<ModuleBrow
 
 export function readModuleSource(snapshot: string, path: string): Promise<ModuleSourceContent> {
   return request(moduleURL("content", { snapshot, path }));
+}
+
+export function listModuleDependencies(snapshot: string): Promise<ModuleDependencies> {
+  return request(moduleURL("dependencies", { snapshot }));
+}
+
+function refactorBody(refactor: ModuleRefactorRequest, previewHash?: string): string {
+  return JSON.stringify({ snapshot: refactor.snapshot, source: refactor.source,
+    ...(refactor.node ? { node: refactor.node } : {}), action: refactor.action,
+    ...(refactor.newName ? { "new-name": refactor.newName } : {}),
+    ...(refactor.destination ? { destination: refactor.destination } : {}),
+    ...(previewHash ? { "preview-hash": previewHash } : {}),
+  });
+}
+
+export function previewModuleRefactor(refactor: ModuleRefactorRequest): Promise<ModuleRefactorPreview> {
+  return request(moduleURL("refactor/preview"), { method: "POST", body: refactorBody(refactor) });
+}
+
+export function applyModuleRefactor(refactor: ModuleRefactorRequest, previewHash: string): Promise<ModuleRefactorApply> {
+  return request(moduleURL("refactor/apply"), { method: "POST", body: refactorBody(refactor, previewHash) });
 }
 
 export type StructuredQueryOptions = {

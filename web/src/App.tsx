@@ -164,7 +164,7 @@ export function App() {
     sidebarFooter={<SystemDetails />}
     bodyHeader={<span>{selectedRoot?.name || route.module || "All modules"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
     bodyActions={<Row><TaskManagerButton basePath="/api/v1" kind="module-index" tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
-    {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} heads={heads} browse={browse} locations={locations} onRoute={setRoute} /></Suspense> : <PageLayout>
+    {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} heads={heads} browse={browse} locations={locations} onRoute={setRoute} onRefresh={() => setRefresh((current) => current + 1)} /></Suspense> : <PageLayout>
       {roots.loading && <Muted>Loading module roots…</Muted>}
       <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
