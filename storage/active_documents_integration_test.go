@@ -34,7 +34,7 @@ var _ = Describe("active document membership", func() {
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openDB(ctx, options())
 			now := time.Now().UTC()
-			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now}
+			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now, Ordinal: 1}
 			location := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: "/workspace/service", Kind: "git", CreatedAt: now}
 			base := publishedSnapshot(location, nil, "main", 1, now)
 			edited := publishedSnapshot(location, &base.ID, "edit", 1, now)
@@ -55,21 +55,21 @@ var _ = Describe("active document membership", func() {
 					InputHash: hash, Coverage: storage.CoverageSyntax, FileCount: 2, Diagnostics: storage.JSON(`[]`)})
 			}
 
-			historical, err := storage.ActiveDocuments(ctx, database, base.ID)
+			historical, err := storage.ActiveDocuments(ctx, database, base.ID, storage.ActiveDocumentOptions{Content: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(documentIDs(historical)).To(Equal(map[string]uuid.UUID{"alpha.go": baseDocs[0].ID, "beta.go": baseDocs[1].ID}))
-			current, err := storage.ActiveDocuments(ctx, database, edited.ID)
+			current, err := storage.ActiveDocuments(ctx, database, edited.ID, storage.ActiveDocumentOptions{Content: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(documentIDs(current)).To(Equal(map[string]uuid.UUID{"alpha.go": editedDocs[0].ID, "beta.go": editedDocs[1].ID}))
-			reused, err := storage.ActiveDocuments(ctx, database, revisionOnly.ID)
+			reused, err := storage.ActiveDocuments(ctx, database, revisionOnly.ID, storage.ActiveDocumentOptions{Content: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(documentIDs(reused)).To(Equal(documentIDs(current)))
 
 			Expect(database.Model(&storage.PackageCoverage{}).Where("snapshot_id = ?", revisionOnly.ID).Update("input_hash", digest("never extracted")).Error).To(Succeed())
-			_, err = storage.ActiveDocuments(ctx, database, revisionOnly.ID)
+			_, err = storage.ActiveDocuments(ctx, database, revisionOnly.ID, storage.ActiveDocumentOptions{Content: true})
 			Expect(err).To(MatchError(ContainSubstring(`has no document for "alpha.go"`)))
 			Expect(database.Model(&storage.PackageCoverage{}).Where("snapshot_id = ?", edited.ID).Update("file_count", 1).Error).To(Succeed())
-			_, err = storage.ActiveDocuments(ctx, database, edited.ID)
+			_, err = storage.ActiveDocuments(ctx, database, edited.ID, storage.ActiveDocumentOptions{Content: true})
 			Expect(err).To(MatchError(ContainSubstring("records 1 files, effective sources have 2")))
 		},
 		Entry("SQLite", func() storage.DBOptions {

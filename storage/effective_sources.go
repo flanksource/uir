@@ -14,14 +14,15 @@ const maxBaseChainDepth = 100_000
 
 const revisionLookupBatch = 256
 
-// effectiveDeltasSQL walks the base chain of one snapshot and returns the first delta per path
-// (newest link first), tombstones included, together with the chain's tail and root count so a
-// truncated chain, a dangling base, or a chain spanning roots fails instead of resolving short.
-// A snapshot that does not exist yields no rows.
-var effectiveDeltasSQL = fmt.Sprintf(`WITH RECURSIVE chain(id, base_id, root_id, depth) AS (
-  SELECT id, base_snapshot_id, root_id, 0 FROM %[1]s WHERE id = ?
+// baseChainSQL is the head of every query over a snapshot's base chain: chain walks the bases of one
+// snapshot (bound as the first parameter, the depth cap as the second), and tail and roots describe
+// the walk so checkBaseChain can reject a truncated chain, a dangling base, or a chain spanning roots.
+// Each link carries its ordinal, which symbol deltas are keyed by. A snapshot that does not exist
+// yields an empty chain and no row.
+var baseChainSQL = fmt.Sprintf(`WITH RECURSIVE chain(id, base_id, root_id, ordinal, depth) AS (
+  SELECT id, base_snapshot_id, root_id, ordinal, 0 FROM %[1]s WHERE id = ?
   UNION ALL
-  SELECT s.id, s.base_snapshot_id, s.root_id, c.depth + 1
+  SELECT s.id, s.base_snapshot_id, s.root_id, s.ordinal, c.depth + 1
   FROM %[1]s s JOIN chain c ON s.id = c.base_id
   WHERE c.depth < ?
 ),
@@ -30,16 +31,38 @@ tail AS (
 ),
 roots AS (
   SELECT COUNT(DISTINCT root_id) AS root_count FROM chain
-),
+)`, ModuleSnapshot{}.TableName())
+
+// effectiveDeltasSQL returns the first delta per path (newest link first), tombstones included.
+var effectiveDeltasSQL = baseChainSQL + fmt.Sprintf(`,
 ranked AS (
   SELECT d.path_key, d.root_id, d.revision_id, d.operation,
          ROW_NUMBER() OVER (PARTITION BY d.path_key ORDER BY c.depth) AS path_rank
-  FROM %[2]s d JOIN chain c ON c.id = d.snapshot_id
+  FROM %[1]s d JOIN chain c ON c.id = d.snapshot_id
 )
 SELECT t.depth AS tail_depth, t.base_id AS tail_base_id, r.root_count,
        e.path_key, e.root_id, e.revision_id, e.operation
-FROM tail t CROSS JOIN roots r LEFT JOIN ranked e ON e.path_rank = 1`,
-	ModuleSnapshot{}.TableName(), SourceDelta{}.TableName())
+FROM tail t CROSS JOIN roots r LEFT JOIN ranked e ON e.path_rank = 1`, SourceDelta{}.TableName())
+
+// baseChain is the part of every base-chain row that describes the walk.
+type baseChain struct {
+	TailDepth  int
+	TailBaseID *uuid.UUID
+	RootCount  int
+}
+
+// check fails when the walk stopped at the depth cap, reached a missing base, or crossed roots.
+func (chain baseChain) check(snapshotID uuid.UUID) error {
+	switch {
+	case chain.TailBaseID != nil && chain.TailDepth >= maxBaseChainDepth:
+		return fmt.Errorf("snapshot %s base chain exceeds %d base links: base cycle or runaway history", snapshotID, maxBaseChainDepth)
+	case chain.TailBaseID != nil:
+		return fmt.Errorf("snapshot %s base chain references missing snapshot %s", snapshotID, *chain.TailBaseID)
+	case chain.RootCount != 1:
+		return fmt.Errorf("snapshot %s base chain spans %d roots", snapshotID, chain.RootCount)
+	}
+	return nil
+}
 
 type effectiveDeltaRow struct {
 	TailDepth  int
@@ -73,14 +96,8 @@ func effectiveDeltas(ctx context.Context, database *gorm.DB, snapshotID uuid.UUI
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("snapshot %s does not exist", snapshotID)
 	}
-	chain := rows[0]
-	switch {
-	case chain.TailBaseID != nil && chain.TailDepth >= maxBaseChainDepth:
-		return nil, fmt.Errorf("snapshot %s base chain exceeds %d base links: base cycle or runaway history", snapshotID, maxBaseChainDepth)
-	case chain.TailBaseID != nil:
-		return nil, fmt.Errorf("snapshot %s base chain references missing snapshot %s", snapshotID, *chain.TailBaseID)
-	case chain.RootCount != 1:
-		return nil, fmt.Errorf("snapshot %s base chain spans %d roots", snapshotID, chain.RootCount)
+	if err := (baseChain{TailDepth: rows[0].TailDepth, TailBaseID: rows[0].TailBaseID, RootCount: rows[0].RootCount}).check(snapshotID); err != nil {
+		return nil, err
 	}
 	deltas := make([]SourceDelta, 0, len(rows))
 	for _, row := range rows {

@@ -142,13 +142,20 @@ var _ = Describe("DecodeDocument", func() {
 		Entry("an undeclared enclosing key", func(_ *storage.Document, content *storage.DocumentContent) {
 			content.Occurrences[0].EnclosingKey = "v1:[]"
 		}, "is not declared"),
-		Entry("an unsupported format version", func(_ *storage.Document, content *storage.DocumentContent) { content.Version = 3 }, "format version 3"),
+		Entry("an unsupported format version", func(_ *storage.Document, content *storage.DocumentContent) { content.Version = storage.DocumentFormatVersion + 1 }, "format version 4"),
 	)
 
 	It("round-trips a valid typed document", func() {
 		document, source, content := typedWorkerDocument()
 		decoded, err := storage.DecodeDocument(encodeDocument(document, content), source)
 		Expect(err).ToNot(HaveOccurred())
+		Expect(decoded).To(Equal(content))
+	})
+	It("reads typed documents from format 2 without embedding facts", func() {
+		document, source, content := typedWorkerDocument()
+		content.Version = 2
+		decoded, err := storage.DecodeDocument(encodeDocument(document, content), source)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(decoded).To(Equal(content))
 	})
 
@@ -166,6 +173,13 @@ var _ = Describe("DecodeDocument", func() {
 		Entry("a type form that disagrees with its shape", storage.CoverageIndexed, func(content *storage.DocumentContent) {
 			content.Symbols[0].TypeForm = "interface"
 		}, "shape is \"struct\""),
+		Entry("an embedding edge on a non-type declaration", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Symbols[1].Embeds = []string{digest("base")}
+		}, "only a type can embed"),
+		Entry("an embedding edge in format 2", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Version = 2
+			content.Symbols[0].Embeds = []string{digest("base")}
+		}, "require document format 3"),
 		Entry("an unproven declaration with a shape hash in a partial document", storage.CoveragePartial, func(content *storage.DocumentContent) {
 			content.Symbols[1].ID = nil
 		}, "only a partial document keeps an unproven declaration"),

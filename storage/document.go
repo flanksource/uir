@@ -10,7 +10,7 @@ import (
 )
 
 // DocumentFormatVersion is the version of DocumentContent written to documents.content.
-const DocumentFormatVersion = 2
+const DocumentFormatVersion = 3
 
 // Range is [start_line, start_utf16_column, end_line, end_utf16_column], one-based.
 type Range [4]int
@@ -46,6 +46,7 @@ type DocumentSymbol struct {
 	Extent       Range          `json:"extent"`
 	ExtentBytes  ByteSpan       `json:"extent_bytes"`
 	Implements   []string       `json:"implements,omitempty"`
+	Embeds       []string       `json:"embeds,omitempty"`
 	Identifier   uir.Identifier `json:"identifier"`
 	ParentKey    string         `json:"parent_key,omitempty"`
 	ChildSlot    string         `json:"child_slot,omitempty"`
@@ -115,8 +116,8 @@ func DecodeDocument(document Document, source SourceRevision) (DocumentContent, 
 
 func validateDocumentContent(document Document, content DocumentContent) error {
 	switch {
-	case content.Version != 1 && content.Version != DocumentFormatVersion:
-		return fmt.Errorf("format version %d, expected 1 or %d", content.Version, DocumentFormatVersion)
+	case content.Version < 1 || content.Version > DocumentFormatVersion:
+		return fmt.Errorf("format version %d, expected 1 through %d", content.Version, DocumentFormatVersion)
 	case content.PackagePath != document.PackagePath && content.PackagePath != document.PackagePath+"_test":
 		return fmt.Errorf("content package %q does not match package %q", content.PackagePath, document.PackagePath)
 	case content.Symbols == nil || content.Occurrences == nil || content.Diagnostics == nil:
@@ -149,7 +150,7 @@ func validateDocumentContent(document Document, content DocumentContent) error {
 
 func validateSyntaxContent(content DocumentContent) error {
 	for index, symbol := range content.Symbols {
-		if symbol.ID != nil || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || symbol.TypeForm != "" {
+		if symbol.ID != nil || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || len(symbol.Embeds) > 0 || symbol.TypeForm != "" {
 			return fmt.Errorf("symbol %d (%s): a syntax symbol has no id, shape_hash, or implements", index, symbol.Key)
 		}
 	}

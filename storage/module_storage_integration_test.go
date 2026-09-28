@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/flanksource/uir/storage"
@@ -18,13 +19,16 @@ func digest(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// snapshotOrdinals hands test snapshots distinct ordinals, as documentOrdinals does for documents.
+var snapshotOrdinals atomic.Int64
+
 func publishedSnapshot(location storage.ModuleLocation, base *uuid.UUID, revision string, packages int, now time.Time) storage.ModuleSnapshot {
 	return storage.ModuleSnapshot{
 		ID: uuid.New(), RootID: location.RootID, LocationID: location.ID, BaseSnapshotID: base,
 		Revision: revision, WorktreeState: storage.WorktreeClean, ContentSetHash: digest("content " + revision),
 		ConfigurationHash: digest("configuration"), ContextHash: digest("context " + revision),
 		Coverage: storage.CoverageSyntax, PackageCount: packages, Diagnostics: storage.JSON(`[]`),
-		StartedAt: now, CompletedAt: now,
+		StartedAt: now, CompletedAt: now, Ordinal: snapshotOrdinals.Add(1),
 	}
 }
 
@@ -32,11 +36,15 @@ func sourceRevision(root storage.ModuleRoot, path, content string) storage.Sourc
 	return storage.SourceRevision{ID: uuid.New(), RootID: root.ID, PathKey: path, ContentHash: digest(content), PackagePath: root.RootKey, SizeBytes: int64(len(content))}
 }
 
+// documentOrdinals hands test documents distinct ordinals; each spec opens a fresh database, so the
+// numbers only need to be unique, not dense.
+var documentOrdinals atomic.Int64
+
 func syntaxDocument(revision storage.SourceRevision, inputHash string) storage.Document {
 	return storage.Document{
 		ID: uuid.New(), RootID: revision.RootID, PathKey: revision.PathKey, SourceRevisionID: revision.ID,
 		PackagePath: revision.PackagePath, InputHash: inputHash, IndexerVersion: "test", Coverage: storage.CoverageSyntax,
-		Content: storage.JSON(`{"version":1}`),
+		Content: storage.JSON(`{"version":1}`), Ordinal: documentOrdinals.Add(1),
 	}
 }
 
@@ -44,7 +52,7 @@ var _ = Describe("module root storage", func() {
 	It("applies child file deltas over a primary snapshot", func(ctx context.Context) {
 		database := openDB(ctx, storage.DBOptions{DSN: filepath.Join(GinkgoT().TempDir(), "deltas.db")})
 		now := time.Now().UTC()
-		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now}
+		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now, Ordinal: 1}
 		location := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: "/workspace/service", Kind: "git", CreatedAt: now}
 		base := publishedSnapshot(location, nil, "main", 1, now)
 		child := publishedSnapshot(location, &base.ID, "feature", 1, now)
@@ -75,7 +83,7 @@ var _ = Describe("module root storage", func() {
 	It("keeps two checkout heads beneath one stable module root", func(ctx context.Context) {
 		database := openDB(ctx, storage.DBOptions{DSN: filepath.Join(GinkgoT().TempDir(), "modules.db")})
 		now := time.Now().UTC()
-		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now}
+		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now, Ordinal: 1}
 		Expect(database.Create(&root).Error).To(Succeed())
 		primary := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: "/workspace/service", Kind: "git", CreatedAt: now}
 		worktree := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: "/workspace/service-feature", Kind: "git", CreatedAt: now}

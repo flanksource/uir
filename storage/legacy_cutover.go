@@ -21,7 +21,7 @@ var legacyTables = []string{
 func discardLegacyTables(ctx context.Context, database *gorm.DB) error {
 	return database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if tx.Name() == "sqlite" {
-			if err := checkLegacySQLiteReferences(tx); err != nil {
+			if err := checkSQLiteReferences(tx, "legacy", legacyTables); err != nil {
 				return err
 			}
 		}
@@ -37,17 +37,19 @@ func discardLegacyTables(ctx context.Context, database *gorm.DB) error {
 	})
 }
 
-func checkLegacySQLiteReferences(tx *gorm.DB) error {
+// checkSQLiteReferences fails when a table outside discarded has a foreign key to one of them, since
+// SQLite would otherwise drop a referenced table. generation names the discarded tables in errors.
+func checkSQLiteReferences(tx *gorm.DB, generation string, discarded []string) error {
 	var tables []string
 	if err := tx.Raw("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").Scan(&tables).Error; err != nil {
-		return fmt.Errorf("list SQLite tables before legacy cutover: %w", err)
+		return fmt.Errorf("list SQLite tables before %s cutover: %w", generation, err)
 	}
-	legacy := make(map[string]bool, len(legacyTables))
-	for _, name := range legacyTables {
-		legacy[name] = true
+	dropped := make(map[string]bool, len(discarded))
+	for _, name := range discarded {
+		dropped[name] = true
 	}
 	for _, table := range tables {
-		if legacy[table] {
+		if dropped[table] {
 			continue
 		}
 		var references []struct {
@@ -58,8 +60,8 @@ func checkLegacySQLiteReferences(tx *gorm.DB) error {
 			return fmt.Errorf("inspect foreign keys of SQLite table %s: %w", table, err)
 		}
 		for _, reference := range references {
-			if legacy[reference.Table] {
-				return fmt.Errorf("cannot discard legacy table %s: external table %s references it", reference.Table, table)
+			if dropped[reference.Table] {
+				return fmt.Errorf("cannot discard %s table %s: external table %s references it", generation, reference.Table, table)
 			}
 		}
 	}

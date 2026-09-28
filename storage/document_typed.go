@@ -26,7 +26,7 @@ func validateTypedContent(content DocumentContent, partial bool) error {
 		switch {
 		case !declaredSymbolKinds[symbol.Kind]:
 			return fmt.Errorf("%s: a file cannot declare a %q symbol", subject, symbol.Kind)
-		case symbol.ID == nil && (!partial || symbol.ShapeHash != "" || len(symbol.Implements) > 0):
+		case symbol.ID == nil && (!partial || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || len(symbol.Embeds) > 0):
 			return fmt.Errorf("%s: only a partial document keeps an unproven declaration, without shape_hash or implements", subject)
 		case symbol.ID != nil && (len(*symbol.ID) != 64 || len(symbol.ShapeHash) != 64):
 			return fmt.Errorf("%s: a typed symbol requires a 64-character id and shape_hash", subject)
@@ -37,6 +37,17 @@ func validateTypedContent(content DocumentContent, partial bool) error {
 		for _, implemented := range symbol.Implements {
 			if len(implemented) != 64 {
 				return fmt.Errorf("%s: implements %q is not a symbol id", subject, implemented)
+			}
+		}
+		if content.Version < 3 && len(symbol.Embeds) > 0 {
+			return fmt.Errorf("%s: embedding facts require document format 3", subject)
+		}
+		if symbol.Kind != "type" && len(symbol.Embeds) > 0 {
+			return fmt.Errorf("%s: only a type can embed another type", subject)
+		}
+		for _, embedded := range symbol.Embeds {
+			if len(embedded) != 64 {
+				return fmt.Errorf("%s: embeds %q is not a symbol id", subject, embedded)
 			}
 		}
 		if symbol.ID != nil {

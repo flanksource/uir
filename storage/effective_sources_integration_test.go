@@ -61,10 +61,13 @@ type moduleFixture struct {
 	now      time.Time
 }
 
+// fixtureRootOrdinal is the ordinal of the one root a module fixture registers in its fresh database.
+const fixtureRootOrdinal int32 = 1
+
 func newModuleFixture(database *gorm.DB, canonicalPath string) moduleFixture {
 	GinkgoHelper()
 	now := time.Now().UTC()
-	root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now}
+	root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/service", Name: "service", CreatedAt: now, Ordinal: fixtureRootOrdinal}
 	location := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: canonicalPath, Kind: "git", CreatedAt: now}
 	createAll(database, &root, &location)
 	return moduleFixture{root: root, location: location, now: now}

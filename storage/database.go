@@ -20,31 +20,23 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl
 var migrations embed.FS
 
+// UirDB opens the database, discards a pre-handle index, applies the schema, and then discards the
+// uir_-prefixed legacy tables. The pre-handle cutover must precede migration, which cannot reconcile
+// the current schema onto those tables.
 func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if strings.TrimSpace(options.DSN) == "" {
 		return nil, errors.New("UIR database DSN is required")
 	}
-	migrationOptions := []commonsmigrate.Option{
-		commonsmigrate.WithDir("migrations"),
-		commonsmigrate.WithName("uir"),
-	}
-	if options.Schema != "" {
-		migrationOptions = append(migrationOptions, commonsmigrate.WithSchema(options.Schema))
-	}
-	if err := commonsmigrate.Apply(ctx, options.DSN, migrations, migrationOptions...); err != nil {
-		return nil, fmt.Errorf("migrate UIR schema: %w", err)
-	}
-
-	connection := options.DSN
+	connection, schema := options.DSN, defaultSchema
 	if options.Schema != "" && options.Schema != defaultSchema {
 		var err error
-		connection, err = commonsmigrate.ConnectionForSchema(options.DSN, options.Schema)
-		if err != nil {
-			return nil, fmt.Errorf("scope UIR PostgreSQL connection: %w", err)
+		if connection, err = commonsmigrate.ConnectionForSchema(options.DSN, options.Schema); err != nil {
+			return nil, fmt.Errorf("scope UIR connection to schema %q: %w", options.Schema, err)
 		}
+		schema = options.Schema
 	}
 	database, err := commonsdb.NewGorm(connection, commonsdb.DefaultGormConfig())
 	if err != nil {
@@ -53,10 +45,25 @@ func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if err := ping(ctx, database); err != nil {
 		return nil, err
 	}
-	if err := discardLegacyTables(ctx, database); err != nil {
+	if err := migrate(ctx, database, options.DSN, schema); err != nil {
 		return nil, errors.Join(err, closeDatabase(database))
 	}
 	return database, nil
+}
+
+func migrate(ctx context.Context, database *gorm.DB, dsn, schema string) error {
+	if err := discardPreHandleGeneration(ctx, database, schema); err != nil {
+		return err
+	}
+	migrationOptions := []commonsmigrate.Option{
+		commonsmigrate.WithDir("migrations"),
+		commonsmigrate.WithName("uir"),
+		commonsmigrate.WithSchema(schema),
+	}
+	if err := commonsmigrate.Apply(ctx, dsn, migrations, migrationOptions...); err != nil {
+		return fmt.Errorf("migrate UIR schema: %w", err)
+	}
+	return discardLegacyTables(ctx, database)
 }
 
 func closeDatabase(database *gorm.DB) error {

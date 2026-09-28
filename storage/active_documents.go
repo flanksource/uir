@@ -15,12 +15,20 @@ type ActiveDocument struct {
 	Document Document
 }
 
+// ActiveDocumentOptions selects what ActiveDocuments loads with each document row.
+type ActiveDocumentOptions struct {
+	// Content loads each document's content. Without it the documents carry only their membership,
+	// source revision, coverage, and ordinal, so a reader can find the paths it needs before it reads
+	// any content, then load those with DocumentContents.
+	Content bool
+}
+
 const documentLookupBatch = 256
 
 // ActiveDocuments derives a snapshot's path_key → document membership: effective sources give each
 // path's revision, the snapshot's package_coverage rows give each package's input hash, and each
 // document is looked up by (root_id, path_key, input_hash). Any gap between the three is an error.
-func ActiveDocuments(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (map[string]ActiveDocument, error) {
+func ActiveDocuments(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID, options ActiveDocumentOptions) (map[string]ActiveDocument, error) {
 	if database == nil {
 		return nil, fmt.Errorf("load active documents for snapshot %s: database is required", snapshotID)
 	}
@@ -44,23 +52,8 @@ func ActiveDocuments(ctx context.Context, database *gorm.DB, snapshotID uuid.UUI
 	result := make(map[string]ActiveDocument, len(paths))
 	for start := 0; start < len(paths); start += documentLookupBatch {
 		batch := paths[start:min(start+documentLookupBatch, len(paths))]
-		hashes := make([]string, 0, len(batch))
-		for _, path := range batch {
-			hashes = append(hashes, inputHashes[sources[path].PackagePath])
-		}
-		var documents []Document
-		if err := database.WithContext(ctx).Where("root_id = ? AND path_key IN ? AND input_hash IN ?", snapshot.RootID, batch, hashes).Find(&documents).Error; err != nil {
-			return nil, fmt.Errorf("load documents for snapshot %s: %w", snapshotID, err)
-		}
-		for _, document := range documents {
-			source := sources[document.PathKey]
-			if document.InputHash != inputHashes[source.PackagePath] {
-				continue
-			}
-			if document.SourceRevisionID != source.ID {
-				return nil, fmt.Errorf("document %s for %q describes revision %s, snapshot %s has %s", document.ID, document.PathKey, document.SourceRevisionID, snapshotID, source.ID)
-			}
-			result[document.PathKey] = ActiveDocument{Source: source, Document: document}
+		if err := addActiveDocuments(ctx, database, activeBatch{snapshot: snapshot, paths: batch, sources: sources, inputHashes: inputHashes, content: options.Content}, result); err != nil {
+			return nil, err
 		}
 	}
 	for _, path := range paths {
@@ -69,6 +62,43 @@ func ActiveDocuments(ctx context.Context, database *gorm.DB, snapshotID uuid.UUI
 		}
 	}
 	return result, nil
+}
+
+// activeBatch is one batch of a snapshot's paths with what their document lookup needs.
+type activeBatch struct {
+	snapshot    ModuleSnapshot
+	paths       []string
+	sources     map[string]SourceRevision
+	inputHashes map[string]string
+	content     bool
+}
+
+// addActiveDocuments looks up one batch of paths' documents by (root_id, path_key, input_hash), with
+// or without content, and adds each one that matches its path's package input hash to result.
+func addActiveDocuments(ctx context.Context, database *gorm.DB, batch activeBatch, result map[string]ActiveDocument) error {
+	hashes := make([]string, 0, len(batch.paths))
+	for _, path := range batch.paths {
+		hashes = append(hashes, batch.inputHashes[batch.sources[path].PackagePath])
+	}
+	query := database.WithContext(ctx)
+	if !batch.content {
+		query = query.Omit("content")
+	}
+	var documents []Document
+	if err := query.Where("root_id = ? AND path_key IN ? AND input_hash IN ?", batch.snapshot.RootID, batch.paths, hashes).Find(&documents).Error; err != nil {
+		return fmt.Errorf("load documents for snapshot %s: %w", batch.snapshot.ID, err)
+	}
+	for _, document := range documents {
+		source := batch.sources[document.PathKey]
+		if document.InputHash != batch.inputHashes[source.PackagePath] {
+			continue
+		}
+		if document.SourceRevisionID != source.ID {
+			return fmt.Errorf("document %s for %q describes revision %s, snapshot %s has %s", document.ID, document.PathKey, document.SourceRevisionID, batch.snapshot.ID, source.ID)
+		}
+		result[document.PathKey] = ActiveDocument{Source: source, Document: document}
+	}
+	return nil
 }
 
 func packageInputHashes(ctx context.Context, database *gorm.DB, snapshot ModuleSnapshot, sources map[string]SourceRevision) (map[string]string, error) {

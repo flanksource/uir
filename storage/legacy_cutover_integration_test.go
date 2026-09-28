@@ -29,7 +29,7 @@ var _ = Describe("legacy project cutover", func() {
 			}
 			Expect(database.Exec("CREATE TABLE external_sentinel (id TEXT PRIMARY KEY)").Error).To(Succeed())
 			Expect(database.Exec("INSERT INTO external_sentinel (id) VALUES (?)", "keep-me").Error).To(Succeed())
-			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/retained", Name: "retained", CreatedAt: time.Now()}
+			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/retained", Name: "retained", CreatedAt: time.Now(), Ordinal: 1}
 			Expect(database.Create(&root).Error).To(Succeed())
 
 			cutover := openDB(ctx, config)

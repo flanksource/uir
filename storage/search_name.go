@@ -45,15 +45,16 @@ func SearchPrefixUpperBound(prefix string) (string, bool, error) {
 }
 
 // UpsertSymbols inserts symbol rows and, for an id that already exists, refreshes the columns derived
-// from the name and declaration: search_name and visibility. The identity columns stay as stored, so
-// callers still verify them against the rows they expected.
+// from the name and declaration: search_name and visibility. The identity columns and the handle stay
+// as stored, so callers still verify them against the rows they expected. Rows carry the handles
+// AssignSymbolHandles gave them; a handle a concurrent publisher took first is ErrAllocationConflict.
 func UpsertSymbols(ctx context.Context, database *gorm.DB, rows []Symbol, batchSize int) error {
 	upsert := clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"search_name", "visibility"}),
 	}
 	if err := database.WithContext(ctx).Clauses(upsert).CreateInBatches(rows, batchSize).Error; err != nil {
-		return fmt.Errorf("upsert %d symbols: %w", len(rows), err)
+		return allocationConflict(err, fmt.Sprintf("upsert %d symbols", len(rows)))
 	}
 	return nil
 }

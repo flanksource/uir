@@ -45,10 +45,6 @@ table "symbols" {
     type = jsonb
     null = false
   }
-  column "handle" {
-    type = bigint
-    null = false
-  }
 
   primary_key { columns = [column.id] }
   foreign_key "symbols_owner_id_fkey" {
@@ -58,11 +54,9 @@ table "symbols" {
     on_delete   = NO_ACTION
   }
   unique "symbols_canonical_key_key" { columns = [column.canonical_key] }
-  unique "symbols_handle_key" { columns = [column.handle] }
   index "symbols_lookup_idx" { columns = [column.module_key, column.package_path, column.kind, column.owner_id, column.name] }
   index "symbols_search_idx" { columns = [column.search_name, column.module_key, column.id] }
   check "symbols_id_check" { expr = "length(id) = 64" }
-  check "symbols_handle_check" { expr = "handle >= 0" }
   check "symbols_identity_version_check" { expr = "identity_version >= 1" }
   check "symbols_kind_check" { expr = "kind IN ('package', 'type', 'func', 'method', 'field', 'var', 'const', 'builtin')" }
   check "symbols_visibility_check" { expr = "visibility IN ('exported', 'internal')" }
@@ -120,10 +114,6 @@ table "documents" {
     type = jsonb
     null = false
   }
-  column "ordinal" {
-    type = bigint
-    null = false
-  }
 
   primary_key { columns = [column.id] }
   foreign_key "documents_root_id_fkey" {
@@ -140,9 +130,7 @@ table "documents" {
   }
   unique "documents_root_id_id_key" { columns = [column.root_id, column.id] }
   unique "documents_root_id_path_key_input_hash_key" { columns = [column.root_id, column.path_key, column.input_hash] }
-  unique "documents_ordinal_key" { columns = [column.ordinal] }
   index "documents_source_idx" { columns = [column.source_revision_id] }
-  check "documents_ordinal_check" { expr = "ordinal >= 1" }
   check "documents_input_hash_check" { expr = "length(input_hash) = 64" }
   check "documents_path_key_check" { expr = "length(path_key) > 0" }
   check "documents_indexer_version_check" { expr = "length(indexer_version) > 0" }
@@ -152,26 +140,23 @@ table "documents" {
   check "documents_excluded_check" { expr = "(coverage <> 'excluded' OR (symbol_count = 0 AND occurrence_count = 0))" }
 }
 
-// symbol_postings keys every row by compact surrogates: the document's ordinal, the root's ordinal as
-// the discriminator a reference lookup filters on, the symbol's H64a handle, and the role as 0
-// (definition), 1 (reference), or 2 (implements).
 table "symbol_postings" {
   schema = schema.public
 
-  column "document_ordinal" {
-    type = bigint
+  column "document_id" {
+    type = uuid
     null = false
   }
-  column "root_ordinal" {
-    type = integer
+  column "root_id" {
+    type = uuid
     null = false
   }
-  column "symbol_handle" {
-    type = bigint
+  column "symbol_id" {
+    type = text
     null = false
   }
   column "role" {
-    type = integer
+    type = text
     null = false
   }
   column "occurrence_count" {
@@ -179,27 +164,21 @@ table "symbol_postings" {
     null = false
   }
 
-  primary_key { columns = [column.document_ordinal, column.symbol_handle, column.role] }
+  primary_key { columns = [column.document_id, column.symbol_id, column.role] }
   foreign_key "symbol_postings_document_fkey" {
-    columns     = [column.document_ordinal]
-    ref_columns = [table.documents.column.ordinal]
+    columns     = [column.root_id, column.document_id]
+    ref_columns = [table.documents.column.root_id, table.documents.column.id]
     on_update   = NO_ACTION
     on_delete   = CASCADE
   }
-  foreign_key "symbol_postings_root_fkey" {
-    columns     = [column.root_ordinal]
-    ref_columns = [table.modules.column.ordinal]
-    on_update   = NO_ACTION
-    on_delete   = CASCADE
-  }
-  foreign_key "symbol_postings_symbol_fkey" {
-    columns     = [column.symbol_handle]
-    ref_columns = [table.symbols.column.handle]
+  foreign_key "symbol_postings_symbol_id_fkey" {
+    columns     = [column.symbol_id]
+    ref_columns = [table.symbols.column.id]
     on_update   = NO_ACTION
     on_delete   = NO_ACTION
   }
-  index "symbol_postings_symbol_idx" { columns = [column.symbol_handle, column.role, column.root_ordinal, column.document_ordinal] }
-  check "symbol_postings_role_check" { expr = "role IN (0, 1, 2, 3)" }
+  index "symbol_postings_symbol_idx" { columns = [column.symbol_id, column.role, column.root_id, column.document_id] }
+  check "symbol_postings_role_check" { expr = "role IN ('definition', 'reference', 'implements')" }
   check "symbol_postings_occurrence_count_check" { expr = "occurrence_count >= 1" }
 }
 

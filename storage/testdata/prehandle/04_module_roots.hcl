@@ -19,16 +19,10 @@ table "modules" {
     type = timestamptz
     null = false
   }
-  column "ordinal" {
-    type = integer
-    null = false
-  }
 
   primary_key { columns = [column.id] }
   unique "modules_root_key_key" { columns = [column.root_key] }
-  unique "modules_ordinal_key" { columns = [column.ordinal] }
   check "modules_root_key_check" { expr = "length(root_key) > 0" }
-  check "modules_ordinal_check" { expr = "ordinal >= 1" }
 }
 
 table "locations" {
@@ -146,10 +140,6 @@ table "snapshots" {
     type = timestamptz
     null = false
   }
-  column "ordinal" {
-    type = bigint
-    null = false
-  }
 
   primary_key { columns = [column.id] }
   foreign_key "snapshots_root_id_fkey" {
@@ -172,7 +162,6 @@ table "snapshots" {
   }
   unique "snapshots_root_id_id_key" { columns = [column.root_id, column.id] }
   unique "snapshots_location_id_id_key" { columns = [column.location_id, column.id] }
-  unique "snapshots_ordinal_key" { columns = [column.ordinal] }
   index "snapshots_location_started_idx" { columns = [column.location_id, column.started_at] }
   index "snapshots_base_idx" { columns = [column.base_snapshot_id] }
   index "snapshots_root_revision_idx" { columns = [column.root_id, column.revision] }
@@ -181,7 +170,6 @@ table "snapshots" {
   check "snapshots_context_hash_check" { expr = "length(context_hash) = 64" }
   check "snapshots_coverage_check" { expr = "coverage IN ('indexed', 'partial', 'syntax', 'excluded')" }
   check "snapshots_package_count_check" { expr = "package_count >= 0" }
-  check "snapshots_ordinal_check" { expr = "ordinal >= 1" }
 }
 
 table "location_heads" {

@@ -40,6 +40,17 @@ func OpenReadOnly(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open existing UIR database: %w", err)
 	}
+	schema := options.Schema
+	if schema == "" {
+		schema = defaultSchema
+	}
+	preHandle, err := isPreHandle(ctx, database, schema)
+	if err != nil {
+		return nil, errors.Join(err, closeDatabase(database))
+	}
+	if preHandle {
+		return nil, errors.Join(errors.New("database predates compact symbol handles; open it read-write once or run uir reindex"), closeDatabase(database))
+	}
 	var count int
 	if err := database.WithContext(ctx).Raw("SELECT COUNT(*) FROM symbols WHERE 1 = 0").Scan(&count).Error; err != nil {
 		return nil, errors.Join(fmt.Errorf("UIR index schema is unavailable: %w", err), closeDatabase(database))
