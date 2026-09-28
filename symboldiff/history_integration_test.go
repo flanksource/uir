@@ -3,11 +3,42 @@ package symboldiff
 import (
 	"path/filepath"
 
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Git history for a registered root", func() {
+	It("compares a selected commit with its first parent and indexes the missing parent on demand", func(ctx SpecContext) {
+		database := openDatabase(ctx, sqliteOptions())
+		repo := newRepository()
+		repo.write(map[string]*string{"go.mod": text("module " + shopRoot + "\n\ngo 1.26\n"), "cart.go": text(cartBefore)})
+		from := repo.commit("Add cart")
+		repo.write(map[string]*string{"cart.go": text(cartAfter)})
+		to := repo.commit("Change cart")
+		head := repo.index(ctx, database)
+
+		result, err := DiffCommit(ctx, database, CommitOptions{RootKey: shopRoot, Commit: to, Visibility: VisibilityAll, Stat: true})
+		Expect(err).ToNot(HaveOccurred())
+		Expect([]string{result.From.Commit, result.To.Commit}).To(Equal([]string{from, to}))
+		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
+		locations, err := storage.ModuleLocations(ctx, database, shopRoot)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(locations[0].HeadSnapshotID.String()).To(Equal(head))
+		Expect(repo.git("rev-parse", "HEAD")).To(Equal(to))
+		Expect(repo.git("status", "--porcelain")).To(BeEmpty())
+	})
+
+	It("rejects an initial commit because it has no parent", func(ctx SpecContext) {
+		database := openDatabase(ctx, sqliteOptions())
+		repo := newRepository()
+		repo.write(map[string]*string{"go.mod": text("module " + shopRoot + "\n\ngo 1.26\n"), "cart.go": text(cartBefore)})
+		first := repo.commit("Add cart")
+		repo.index(ctx, database)
+		_, err := DiffCommit(ctx, database, CommitOptions{RootKey: shopRoot, Commit: first, Visibility: VisibilityAll})
+		Expect(err).To(MatchError(ContainSubstring("has no parent to compare")))
+	})
+
 	It("lists a pull request ref and compares its fetched head", func(ctx SpecContext) {
 		database := openDatabase(ctx, sqliteOptions())
 		repo := newRepository()

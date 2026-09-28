@@ -37,6 +37,43 @@ type History struct {
 	PullRequestError string           `json:"pull_request_error,omitempty"`
 }
 
+type CommitOptions struct {
+	RootKey      string
+	Commit       string
+	Visibility   Visibility
+	Stat         bool
+	IncludeTests bool
+}
+
+// DiffCommit compares a commit with its first parent and indexes missing clean snapshots.
+func DiffCommit(ctx context.Context, database *gorm.DB, options CommitOptions) (Result, error) {
+	scope, err := loadRootScope(ctx, database, options.RootKey)
+	if err != nil {
+		return Result{}, err
+	}
+	commit, err := scope.resolveCommit(ctx, options.Commit)
+	if err != nil {
+		return Result{}, err
+	}
+	checkout, err := scope.checkoutFor(ctx, commit)
+	if err != nil {
+		return Result{}, err
+	}
+	output, err := git(ctx, checkout, "rev-list", "--parents", "-n", "1", commit)
+	if err != nil {
+		return Result{}, err
+	}
+	parents := strings.Fields(string(output))
+	if len(parents) == 0 || parents[0] != commit {
+		return Result{}, fmt.Errorf("git returned no parent record for commit %s", commit)
+	}
+	if len(parents) == 1 {
+		return Result{}, fmt.Errorf("commit %s has no parent to compare", commit)
+	}
+	return Diff(ctx, database, Options{RootKey: options.RootKey, From: parents[1], To: commit,
+		Visibility: options.Visibility, Stat: options.Stat, AutoIndex: true, IncludeTests: options.IncludeTests})
+}
+
 func ListHistory(ctx context.Context, database *gorm.DB, rootKey, location string, limit int) (History, error) {
 	if limit < 1 || limit > 200 {
 		return History{}, fmt.Errorf("history limit %d must be from 1 through 200", limit)
