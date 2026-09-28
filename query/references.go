@@ -52,7 +52,7 @@ func (pipeline *Pipeline) FindReferences(ctx context.Context, request ReferenceR
 		if err != nil {
 			return nil, err
 		}
-		scopes = append(scopes, selected...)
+		scopes = append(scopes, selected.scopes...)
 	}
 	index, err := newIndexContext(ctx, pipeline.database, scopes)
 	if err != nil {

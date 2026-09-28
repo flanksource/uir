@@ -16,7 +16,7 @@ type scopeDocument struct {
 
 // scopeDocuments reads a snapshot's active documents through the membership derivation, in path order.
 func (pipeline *Pipeline) scopeDocuments(ctx context.Context, scope moduleScope) ([]scopeDocument, error) {
-	active, err := storage.ActiveDocuments(ctx, pipeline.database, scope.snapshot.ID)
+	active, err := storage.ActiveDocuments(ctx, pipeline.database, scope.snapshot.ID, storage.ActiveDocumentOptions{Content: true})
 	if err != nil {
 		return nil, err
 	}

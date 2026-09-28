@@ -26,6 +26,11 @@ type ModuleSymbol struct {
 func (symbol ModuleSymbol) identifier() uir.Identifier {
 	identifier := uir.Identifier{Module: symbol.ModuleKey, Package: symbol.PackagePath}
 	switch symbol.Kind {
+	case "module":
+		identifier.NodeType = uir.NodeTypeModule
+		identifier.Package = ""
+	case "package":
+		identifier.NodeType = uir.NodeTypePackage
 	case "type":
 		identifier.Type, identifier.NodeType = symbol.Name, uir.NodeTypeType
 	case "func":

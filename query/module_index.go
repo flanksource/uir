@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,58 +40,101 @@ type scopedPosting struct {
 	symbol   string
 }
 
+// rootDocument is a document active in at least one scope of its root, with those scope positions.
+type rootDocument struct {
+	id     uuid.UUID
+	path   string
+	scopes []int
+}
+
+// rootDocuments is the union of the active documents of the scopes that select one root, keyed by
+// document ordinal, which is what postings store; ordinals is the same set sorted.
+type rootDocuments struct {
+	ordinal   int32
+	scopes    []int
+	ordinals  []int64
+	documents map[int64]rootDocument
+}
+
 // indexContext answers symbol queries from postings intersected with each scope's active set, and
-// decodes only the documents a posting selected, once each.
+// decodes only the documents a posting selected, once each. It maps symbol ids to handles and learns
+// each snapshot's defined symbols at most once per query.
 type indexContext struct {
 	database *gorm.DB
 	scopes   []indexScope
+	roots    []rootDocuments
 	decoded  map[uuid.UUID]decodedDocument
+	handles  symbolHandles
+	defined  map[uuid.UUID]map[int64]bool
 }
 
 func newIndexContext(ctx context.Context, database *gorm.DB, scopes []moduleScope) (*indexContext, error) {
-	index := &indexContext{database: database, scopes: make([]indexScope, 0, len(scopes)), decoded: map[uuid.UUID]decodedDocument{}}
-	for _, scope := range scopes {
-		active, err := storage.ActiveDocuments(ctx, database, scope.snapshot.ID)
+	index := &indexContext{
+		database: database, scopes: make([]indexScope, 0, len(scopes)), decoded: map[uuid.UUID]decodedDocument{},
+		handles: newSymbolHandles(), defined: map[uuid.UUID]map[int64]bool{},
+	}
+	roots := map[int32]int{}
+	for position, scope := range scopes {
+		active, err := storage.ActiveDocuments(ctx, database, scope.snapshot.ID, storage.ActiveDocumentOptions{Content: true})
 		if err != nil {
 			return nil, err
 		}
+		root, found := roots[scope.root.Ordinal]
+		if !found {
+			root, roots[scope.root.Ordinal] = len(index.roots), len(index.roots)
+			index.roots = append(index.roots, rootDocuments{ordinal: scope.root.Ordinal, documents: map[int64]rootDocument{}})
+		}
+		index.roots[root].scopes = append(index.roots[root].scopes, position)
 		documents := make(map[uuid.UUID]storage.ActiveDocument, len(active))
 		for _, document := range active {
 			documents[document.Document.ID] = document
+			entry := index.roots[root].documents[document.Document.Ordinal]
+			if entry.scopes != nil && entry.id != document.Document.ID {
+				return nil, fmt.Errorf("documents %s and %s of root %q share ordinal %d", entry.id, document.Document.ID, scope.root.RootKey, document.Document.Ordinal)
+			}
+			entry.id, entry.path, entry.scopes = document.Document.ID, document.Document.PathKey, append(entry.scopes, position)
+			index.roots[root].documents[document.Document.Ordinal] = entry
 		}
 		index.scopes = append(index.scopes, indexScope{moduleScope: scope, documents: documents})
+	}
+	for position := range index.roots {
+		index.roots[position].ordinals = slices.Sorted(maps.Keys(index.roots[position].documents))
 	}
 	return index, nil
 }
 
 // postings returns the postings of the symbols with one of the roles whose documents are active in a
-// scope, one entry per scope that activates the document, ordered by scope, path, and symbol.
+// scope, one entry per scope that activates the document, ordered by scope, path, and symbol. Postings
+// are stored by symbol handle, root ordinal, and document ordinal; ids map to handles once per query.
 func (index *indexContext) postings(ctx context.Context, symbolIDs []string, roles ...string) ([]scopedPosting, error) {
 	if len(symbolIDs) == 0 {
 		return nil, nil
 	}
-	active := map[uuid.UUID]map[uuid.UUID]bool{}
-	var roots []uuid.UUID
-	for _, scope := range index.scopes {
-		if active[scope.root.ID] == nil {
-			active[scope.root.ID] = map[uuid.UUID]bool{}
-			roots = append(roots, scope.root.ID)
-		}
-		for id := range scope.documents {
-			active[scope.root.ID][id] = true
+	handles, err := index.handlesOf(ctx, symbolIDs)
+	if err != nil {
+		return nil, err
+	}
+	codes := make([]storage.PostingRole, len(roles))
+	for i, role := range roles {
+		if codes[i], err = storage.ParsePostingRole(role); err != nil {
+			return nil, err
 		}
 	}
+	definitionsOnly := slices.Equal(codes, []storage.PostingRole{storage.RoleDefinition})
 	var found []scopedPosting
-	for _, rootID := range roots {
-		rows, err := rootPostings(ctx, index.database, symbolIDs, roles, rootID, active[rootID])
+	for _, root := range index.roots {
+		rootHandles := handles
+		if definitionsOnly {
+			rootHandles = slices.DeleteFunc(slices.Clone(handles), func(handle int64) bool { return index.knownUndefined(root, handle) })
+		}
+		rows, err := rootPostings(ctx, index.database, rootHandles, codes, root)
 		if err != nil {
 			return nil, err
 		}
 		for _, row := range rows {
-			for position, scope := range index.scopes {
-				if document, ok := scope.documents[row.DocumentID]; ok && scope.root.ID == rootID {
-					found = append(found, scopedPosting{scope: position, path: document.Document.PathKey, document: row.DocumentID, symbol: row.SymbolID})
-				}
+			document := root.documents[row.DocumentOrdinal]
+			for _, position := range document.scopes {
+				found = append(found, scopedPosting{scope: position, path: document.path, document: document.id, symbol: index.handles.byHandle[row.SymbolHandle]})
 			}
 		}
 	}
@@ -100,44 +145,41 @@ func (index *indexContext) postings(ctx context.Context, symbolIDs []string, rol
 	return found, nil
 }
 
-// rootPostings intersects one root's postings of (symbols, roles) with its active documents, reading
-// whichever side is smaller: the posting range when it holds no more rows than the active set, and
-// otherwise the active documents in IN batches probing the posting index.
-func rootPostings(ctx context.Context, database *gorm.DB, symbolIDs, roles []string, rootID uuid.UUID, active map[uuid.UUID]bool) ([]storage.SymbolPosting, error) {
-	documents := make([]uuid.UUID, 0, len(active))
-	for id := range active {
-		documents = append(documents, id)
+// rootPostings intersects one root's postings of (symbols, roles) with its active documents over the
+// (symbol_handle, role, root_ordinal, document_ordinal) index, reading whichever side is smaller: the
+// root's posting range when it holds no more rows than the active set, and otherwise the active
+// document ordinals in IN batches probing the posting key. The range read is bounded at one row past
+// the active set, which is both the count that decides and the rows it returns.
+func rootPostings(ctx context.Context, database *gorm.DB, handles []int64, roles []storage.PostingRole, root rootDocuments) ([]storage.SymbolPosting, error) {
+	if len(root.ordinals) == 0 {
+		return nil, nil
 	}
-	sort.Slice(documents, func(i, j int) bool { return documents[i].String() < documents[j].String() })
 	var found []storage.SymbolPosting
-	for start := 0; start < len(symbolIDs); start += lookupBatch {
-		symbols := symbolIDs[start:min(start+lookupBatch, len(symbolIDs))]
+	for start := 0; start < len(handles); start += lookupBatch {
+		symbols := handles[start:min(start+lookupBatch, len(handles))]
 		selected := func() *gorm.DB {
-			return database.WithContext(ctx).Model(&storage.SymbolPosting{}).Where("symbol_id IN ? AND role IN ? AND root_id = ?", symbols, roles, rootID)
+			return database.WithContext(ctx).Model(&storage.SymbolPosting{}).Select("document_ordinal", "symbol_handle").
+				Where("symbol_handle IN ? AND role IN ? AND root_ordinal = ?", symbols, roles, root.ordinal)
 		}
-		var count int64
-		if err := selected().Count(&count).Error; err != nil {
-			return nil, fmt.Errorf("count %v postings of %d symbols in root %s: %w", roles, len(symbols), rootID, err)
+		var rows []storage.SymbolPosting
+		if err := selected().Limit(len(root.ordinals) + 1).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("load %v postings of %d symbols in root %d: %w", roles, len(symbols), root.ordinal, err)
 		}
-		if count <= int64(len(documents)) {
-			var rows []storage.SymbolPosting
-			if err := selected().Select("document_id", "symbol_id").Find(&rows).Error; err != nil {
-				return nil, fmt.Errorf("load %v postings of %d symbols in root %s: %w", roles, len(symbols), rootID, err)
-			}
+		if len(rows) <= len(root.ordinals) {
 			for _, row := range rows {
-				if active[row.DocumentID] {
+				if _, ok := root.documents[row.DocumentOrdinal]; ok {
 					found = append(found, row)
 				}
 			}
 			continue
 		}
-		for offset := 0; offset < len(documents); offset += lookupBatch {
-			var rows []storage.SymbolPosting
-			batch := documents[offset:min(offset+lookupBatch, len(documents))]
-			if err := selected().Where("document_id IN ?", batch).Select("document_id", "symbol_id").Find(&rows).Error; err != nil {
-				return nil, fmt.Errorf("probe %v postings of %d symbols in root %s: %w", roles, len(symbols), rootID, err)
+		for offset := 0; offset < len(root.ordinals); offset += lookupBatch {
+			var probed []storage.SymbolPosting
+			batch := root.ordinals[offset:min(offset+lookupBatch, len(root.ordinals))]
+			if err := selected().Where("document_ordinal IN ?", batch).Find(&probed).Error; err != nil {
+				return nil, fmt.Errorf("probe %v postings of %d symbols in root %d: %w", roles, len(symbols), root.ordinal, err)
 			}
-			found = append(found, rows...)
+			found = append(found, probed...)
 		}
 	}
 	return found, nil
@@ -189,7 +231,8 @@ func (index *indexContext) match(posting scopedPosting, document decodedDocument
 func (index *indexContext) declarationMatch(posting scopedPosting, document decodedDocument, kind, role string, entry storage.DocumentSymbol) ModuleMatch {
 	match := index.match(posting, document, kind)
 	match.Line, match.Column, match.EndLine, match.EndColumn = rangePosition(entry.Name)
-	match.Role, match.Identifier, match.SymbolID = role, entry.Identifier, *entry.ID
+	match.Role, match.NodeKind, match.Identifier, match.SymbolID = role, entry.Kind, entry.Identifier, *entry.ID
+	match.Declaration, match.DefinitionLine = entry.Shape, &entry.Extent[0]
 	return match
 }
 
@@ -206,6 +249,7 @@ func (index *indexContext) occurrenceMatch(posting scopedPosting, document decod
 	if occurrence.Enclosing != nil {
 		enclosing := document.entries[*occurrence.Enclosing]
 		match.EnclosingID, match.EnclosingKey, match.Identifier = *occurrence.Enclosing, enclosing.Key, enclosing.Identifier
+		match.Declaration, match.DefinitionLine = enclosing.Shape, &enclosing.Extent[0]
 	}
 	return match
 }

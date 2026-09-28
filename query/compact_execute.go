@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-
-	"github.com/flanksource/uir/storage"
 )
 
 type compactValue struct {
@@ -54,6 +52,8 @@ func expressionOperation(expression *Expr) Operation {
 			return OperationDefinition
 		case expression.Relation == ":impl":
 			return OperationImplementers
+		case expression.Relation == ":inherits":
+			return OperationInheritors
 		case expression.Relation == ":methods":
 			return OperationMethods
 		case expression.Relation == "~w":
@@ -113,7 +113,7 @@ func (index *compactIndex) evaluate(ctx context.Context, expression *Expr, resul
 		if len(symbols) == 0 {
 			return compactValue{}, &UnresolvedSymbolError{Symbol: expression.Symbol, Coverage: coverageSummary(result.Coverage)}
 		}
-		if len(symbols) > 1 && !strings.HasSuffix(expression.Symbol, ".*") {
+		if len(symbols) > 1 && !strings.ContainsAny(expression.Symbol, "*?") {
 			return compactValue{}, ambiguousSymbols{symbols: symbols}
 		}
 		matches, err := index.symbolRows(ctx, symbols)
@@ -148,9 +148,22 @@ func (index *compactIndex) evaluateModifiers(ctx context.Context, expression *Ex
 	}
 	groups := map[string]*group{}
 	for _, modifier := range expression.Modifiers {
-		matched, err := index.resolveSelector(ctx, modifier.Selector)
-		if err != nil {
-			return compactValue{}, err
+		var matched compactValue
+		if modifier.Selector.Kind == "path" {
+			glob, err := compileSelectorGlob(modifier.Selector.Pattern)
+			if err != nil {
+				return compactValue{}, err
+			}
+			for _, symbol := range value.symbols {
+				if pathMatchesSymbol(glob, modifier.Selector.Pattern, symbol) {
+					matched.symbols = append(matched.symbols, symbol)
+				}
+			}
+		} else {
+			matched, err = index.resolveSelector(ctx, modifier.Selector)
+			if err != nil {
+				return compactValue{}, err
+			}
 		}
 		selected := groups[modifier.Selector.Kind]
 		if selected == nil {
@@ -190,6 +203,24 @@ func (index *compactIndex) evaluateModifiers(ctx context.Context, expression *Ex
 		result.Stages = append(result.Stages, ResolutionStage{Name: "modifier", Value: fmt.Sprintf("%d rows have no canonical projected symbol", omitted)})
 	}
 	return value, nil
+}
+
+func pathMatchesSymbol(glob selectorGlob, pattern string, symbol ModuleSymbol) bool {
+	paths := []string{symbol.ModuleKey, symbol.PackagePath, symbol.QueryName}
+	for parent := symbol.QueryName; parent != symbol.PackagePath && strings.HasPrefix(parent, symbol.PackagePath+"."); {
+		parent = parent[:strings.LastIndex(parent, ".")]
+		paths = append(paths, parent)
+	}
+	for parent := symbol.PackagePath; parent != symbol.ModuleKey && strings.HasPrefix(parent, symbol.ModuleKey+"/"); {
+		parent = parent[:strings.LastIndex(parent, "/")]
+		paths = append(paths, parent)
+	}
+	for _, path := range paths {
+		if glob.matches(path) || strings.HasSuffix(pattern, "/**") && strings.TrimSuffix(pattern, "/**") == path {
+			return true
+		}
+	}
+	return false
 }
 
 func (index *compactIndex) evaluateSet(ctx context.Context, expression *Expr, result *ModuleQueryResult) (compactValue, error) {
@@ -241,7 +272,14 @@ func (index *compactIndex) evaluateSet(ctx context.Context, expression *Expr, re
 		symbols = append(symbols, symbol)
 	}
 	slices.SortFunc(symbols, func(a, b ModuleSymbol) int { return strings.Compare(a.QueryName, b.QueryName) })
-	matches, err := index.symbolRows(ctx, symbols)
+	var matches []ModuleMatch
+	if expression.Kind == ExprUnion && (expression.Left.Kind == ExprRelation || expression.Right.Kind == ExprRelation) {
+		matches = append(matches, left.matches...)
+		matches = append(matches, right.matches...)
+		sortMatches(matches)
+	} else {
+		matches, err = index.symbolRows(ctx, symbols)
+	}
 	matches = slices.DeleteFunc(matches, func(match ModuleMatch) bool {
 		return len(selectedScopes[match.SymbolID]) > 0 && match.SnapshotID != "" && !selectedScopes[match.SymbolID][matchScope(match)]
 	})
@@ -273,217 +311,16 @@ func projectedID(expression *Expr, match ModuleMatch) string {
 	return match.SymbolID
 }
 
-func (index *compactIndex) evaluateRelation(ctx context.Context, expression *Expr, result *ModuleQueryResult) (compactValue, error) {
-	left, err := index.evaluate(ctx, expression.Left, result)
-	if err != nil {
-		return compactValue{}, err
-	}
-	if strings.HasPrefix(expression.Relation, "<<") {
-		value, err := index.transitiveCallers(ctx, left.symbols, expression.Depth, expression.Filters, result)
-		if err != nil || expression.Right == nil {
-			return value, err
-		}
-		value.targets = left.symbols
-		return index.filterRelationRight(ctx, value, expression, result)
-	}
-	var matches []ModuleMatch
-	for _, target := range left.symbols {
-		rows, err := index.relationRows(ctx, target, expression.Relation, result)
-		if err != nil {
-			return compactValue{}, fmt.Errorf("%s %s: %w", target.QueryName, expression.Relation, err)
-		}
-		matches = append(matches, rows...)
-	}
-	if len(left.matches) > 0 {
-		activeScopes := map[string]map[string]bool{}
-		for _, match := range left.matches {
-			if activeScopes[match.RootKey] == nil {
-				activeScopes[match.RootKey] = map[string]bool{}
-			}
-			activeScopes[match.RootKey][matchScope(match)] = true
-		}
-		matches = slices.DeleteFunc(matches, func(match ModuleMatch) bool {
-			return len(activeScopes[match.RootKey]) > 0 && !activeScopes[match.RootKey][matchScope(match)]
-		})
-	}
-	matches, err = applyCompactFilters(matches, expression.Relation, expression.Filters)
-	if err != nil {
-		return compactValue{}, err
-	}
-	symbols, err := index.project(ctx, matches, expression.Relation, result)
-	if err != nil {
-		return compactValue{}, err
-	}
-	value := compactValue{symbols: symbols, targets: left.symbols, matches: matches}
-	if expression.Right != nil {
-		value, err = index.filterRelationRight(ctx, value, expression, result)
-		if err != nil {
-			return compactValue{}, err
-		}
-	}
-	if len(left.symbols) == 1 && expression.Left.Kind == ExprSymbol && expression.Relation != "=" {
-		value.declarations, err = index.declarations(ctx, []string{left.symbols[0].ID}, "definition")
-	}
-	return value, err
-}
-
-func (index *compactIndex) filterRelationRight(ctx context.Context, value compactValue, expression *Expr, result *ModuleQueryResult) (compactValue, error) {
-	right, err := index.evaluate(ctx, expression.Right, result)
-	if err != nil {
-		return compactValue{}, err
-	}
-	allowed := map[string]bool{}
-	scoped := map[string]map[string]bool{}
-	callables := 0
-	for _, symbol := range right.symbols {
-		allowed[symbol.ID] = true
-		if callable(symbol) {
-			callables++
-		}
-	}
-	for _, match := range right.matches {
-		id := projectedID(expression.Right, match)
-		if id != "" && match.SnapshotID != "" {
-			if scoped[id] == nil {
-				scoped[id] = map[string]bool{}
-			}
-			scoped[id][matchScope(match)] = true
-		}
-	}
-	if expression.Relation == ">" && len(right.symbols) > 0 && callables == 0 {
-		return compactValue{}, fmt.Errorf("outgoing relation requires a function or method on the right")
-	}
-	value.matches = slices.DeleteFunc(value.matches, func(match ModuleMatch) bool {
-		id := match.SymbolID
-		if expression.Relation == "<" || expression.Relation == "~w" {
-			id = match.EnclosingID
-		}
-		return !allowed[id] || len(scoped[id]) > 0 && !scoped[id][matchScope(match)]
-	})
-	value.symbols, err = index.project(ctx, value.matches, expression.Relation, result)
-	return value, err
-}
-
 func matchScope(match ModuleMatch) string {
 	return match.RootKey + "\x00" + match.Location + "\x00" + match.SnapshotID
-}
-
-func (index *compactIndex) relationRows(ctx context.Context, target ModuleSymbol, relation string, result *ModuleQueryResult) ([]ModuleMatch, error) {
-	switch relation {
-	case "<":
-		if target.Kind == "func" || target.Kind == "method" {
-			dispatch := target.Kind == "method"
-			if dispatch {
-				owner, err := index.declarations(ctx, []string{target.OwnerID}, "definition")
-				if err != nil {
-					return nil, err
-				}
-				if len(owner) == 0 {
-					dispatch = false
-					result.Stages = append(result.Stages, ResolutionStage{Name: "dispatch", Value: "receiver declaration outside selected snapshots"})
-				}
-			}
-			partial := &ModuleQueryResult{}
-			if err := index.callers(ctx, target, dispatch, partial); err != nil {
-				return nil, err
-			}
-			return partial.Matches, nil
-		}
-		return index.occurrences(ctx, target.ID, map[string]bool{target.ID: true}, "reference", func(occurrence storage.DocumentOccurrence) bool {
-			return occurrence.Role != "definition"
-		})
-	case ">":
-		if target.Kind != "func" && target.Kind != "method" {
-			return nil, fmt.Errorf("outgoing calls require a function or method, got %s", target.Kind)
-		}
-		return index.callees(ctx, target)
-	case "=":
-		return index.declarations(ctx, []string{target.ID}, "definition")
-	case ":impl":
-		return index.implementations(ctx, target)
-	case ":methods":
-		if target.Kind != "type" {
-			return nil, fmt.Errorf("methods require a type, got %s", target.Kind)
-		}
-		var rows []storage.Symbol
-		if err := index.database.WithContext(ctx).Where("owner_id = ? AND kind = ?", target.ID, "method").Find(&rows).Error; err != nil {
-			return nil, fmt.Errorf("load methods of %s: %w", target.QueryName, err)
-		}
-		methods, err := index.activeSymbols(ctx, rows)
-		if err != nil {
-			return nil, err
-		}
-		return index.symbolRows(ctx, methods)
-	case "~w":
-		return index.occurrences(ctx, target.ID, map[string]bool{target.ID: true}, "reference", func(occurrence storage.DocumentOccurrence) bool {
-			return occurrence.Role == "write"
-		})
-	}
-	return nil, fmt.Errorf("unknown relation %q", relation)
-}
-
-func applyCompactFilters(matches []ModuleMatch, relation string, filters []Filter) ([]ModuleMatch, error) {
-	for _, filter := range filters {
-		if filter.Kind == "~w" && relation != "<" && relation != "~w" {
-			return nil, fmt.Errorf("~w applies only to incoming references, not %s", relation)
-		}
-		matches = slices.DeleteFunc(matches, func(match ModuleMatch) bool {
-			switch filter.Kind {
-			case "-f":
-				return strings.HasSuffix(match.Path, filter.Value)
-			case "+pkg":
-				return !matchesPackageFilter(match.PackagePath, filter.Value)
-			case "-pkg":
-				return matchesPackageFilter(match.PackagePath, filter.Value)
-			case "~w":
-				return match.Role != "write"
-			}
-			return true
-		})
-	}
-	return matches, nil
-}
-
-func matchesPackageFilter(packagePath, value string) bool {
-	if strings.HasSuffix(value, "/...") {
-		prefix := strings.TrimSuffix(value, "/...")
-		return packagePath == prefix || strings.HasPrefix(packagePath, prefix+"/")
-	}
-	if strings.Contains(value, "/") {
-		return packagePath == value
-	}
-	return packagePath == value || strings.HasSuffix(packagePath, "/"+value)
-}
-
-func (index *compactIndex) project(ctx context.Context, matches []ModuleMatch, relation string, result *ModuleQueryResult) ([]ModuleSymbol, error) {
-	ids := map[string]bool{}
-	omitted := 0
-	for _, match := range matches {
-		id := match.SymbolID
-		if relation == "<" || relation == "~w" {
-			id = match.EnclosingID
-		}
-		if id == "" {
-			omitted++
-			continue
-		}
-		ids[id] = true
-	}
-	if omitted > 0 {
-		result.Stages = append(result.Stages, ResolutionStage{Name: "projection", Value: fmt.Sprintf("%d occurrences have no canonical symbol", omitted)})
-	}
-	keys := make([]string, 0, len(ids))
-	for id := range ids {
-		keys = append(keys, id)
-	}
-	slices.Sort(keys)
-	return index.symbolsByID(ctx, keys)
 }
 
 func (index *compactIndex) symbolRows(ctx context.Context, symbols []ModuleSymbol) ([]ModuleMatch, error) {
 	ids := make([]string, 0, len(symbols))
 	for _, symbol := range symbols {
-		ids = append(ids, symbol.ID)
+		if symbol.Kind != "module" && symbol.Kind != "package" {
+			ids = append(ids, symbol.ID)
+		}
 	}
 	rows, err := index.declarations(ctx, ids, "symbol")
 	if err != nil {
@@ -494,6 +331,14 @@ func (index *compactIndex) symbolRows(ctx context.Context, symbols []ModuleSymbo
 		defined[row.SymbolID] = true
 	}
 	for _, symbol := range symbols {
+		if symbol.Kind == "module" || symbol.Kind == "package" {
+			selected, err := index.resolveSelector(ctx, Selector{Kind: symbol.Kind, Pattern: symbol.PackagePath})
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, selected.matches...)
+			continue
+		}
 		if !defined[symbol.ID] {
 			rows = append(rows, ModuleMatch{Kind: "symbol", SymbolID: symbol.ID, Identifier: symbol.identifier()})
 		}

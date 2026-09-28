@@ -102,6 +102,44 @@ func (index *indexContext) implementations(ctx context.Context, target ModuleSym
 	return matches, nil
 }
 
+func (index *indexContext) embedders(ctx context.Context, target ModuleSymbol) ([]ModuleMatch, error) {
+	if target.Kind != "type" {
+		return nil, fmt.Errorf("inheritance requires a type, %s is a %s", target.Name, target.Kind)
+	}
+	postings, err := index.postings(ctx, []string{target.ID}, "embeds")
+	if err != nil {
+		return nil, err
+	}
+	var matches []ModuleMatch
+	for _, posting := range postings {
+		document, err := index.document(posting)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range document.content.Symbols {
+			if entry.ID != nil && slices.Contains(entry.Embeds, target.ID) {
+				matches = append(matches, index.declarationMatch(posting, document, "inheritance", "embeds", entry))
+			}
+		}
+	}
+	return matches, nil
+}
+
+func (index *indexContext) requireEmbeddingFacts() error {
+	for position, scope := range index.scopes {
+		for id := range scope.documents {
+			document, err := index.document(scopedPosting{scope: position, document: id})
+			if err != nil {
+				return err
+			}
+			if document.content.Version < 3 {
+				return fmt.Errorf("snapshot %s lacks embedding facts; reindex its checkout", scope.snapshot.ID)
+			}
+		}
+	}
+	return nil
+}
+
 // callers lists the call occurrences of the target and, with dispatch, of the interface methods the
 // target's receiver type implements in each scope.
 func (index *indexContext) callers(ctx context.Context, target ModuleSymbol, dispatch bool, result *ModuleQueryResult) error {
@@ -160,6 +198,9 @@ func (index *indexContext) dispatchMethods(ctx context.Context, target ModuleSym
 		batch := interfaces[start:min(start+lookupBatch, len(interfaces))]
 		if err := index.database.WithContext(ctx).Where("owner_id IN ? AND kind = ? AND search_name = ? AND name = ?", batch, "method", storage.SearchName(target.Name), target.Name).Order("id").Find(&rows).Error; err != nil {
 			return nil, fmt.Errorf("load interface methods named %s: %w", target.Name, err)
+		}
+		if err := index.remember(rows); err != nil {
+			return nil, err
 		}
 		for _, row := range rows {
 			same, err := sameParameters(row.ParameterTypes, target.ParameterTypes)

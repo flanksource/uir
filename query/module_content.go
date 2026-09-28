@@ -32,7 +32,8 @@ func (pipeline *Pipeline) ReadModuleSource(ctx context.Context, snapshotID, path
 	if !filepath.IsLocal(path) {
 		return ModuleSourceContent{}, fmt.Errorf("source path %q must be local to its module root", path)
 	}
-	scopes, err := pipeline.moduleScopes(ctx, ModuleScopeOptions{SnapshotID: snapshotID}, false)
+	selection, err := pipeline.moduleScopes(ctx, ModuleScopeOptions{SnapshotID: snapshotID}, false)
+	scopes := selection.scopes
 	if err != nil {
 		return ModuleSourceContent{}, err
 	}
