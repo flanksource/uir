@@ -8,6 +8,7 @@ import (
 
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/storage"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -22,8 +23,8 @@ func (side selectedSide) info() Side {
 }
 
 // Diff compares two commits of one root: the newest clean snapshot of each (or the explicit
-// overrides), their changed documents, symbols classified by identity, and with Stat the line counts
-// of every symbol from hash-verified Git blobs.
+// overrides), their changed files, symbols classified by identity from symbol deltas, and with Stat
+// the line counts of every symbol from hash-verified Git blobs.
 func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, error) {
 	visibility, err := ParseVisibility(string(options.Visibility))
 	if err != nil {
@@ -43,19 +44,10 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	activeBefore, err := storage.ActiveDocuments(ctx, database, before.snapshot.ID)
+	files, pairings, markers, err := compareSnapshots(ctx, database, [2]selectedSide{before, after}, visibility, options.Stat)
 	if err != nil {
 		return Result{}, err
 	}
-	activeAfter, err := storage.ActiveDocuments(ctx, database, after.snapshot.ID)
-	if err != nil {
-		return Result{}, err
-	}
-	files, err := changedFiles(activeBefore, activeAfter)
-	if err != nil {
-		return Result{}, err
-	}
-	pairings := matchSymbols(files)
 	result := Result{RootKey: scope.root.RootKey, From: before.info(), To: after.info(), Visibility: visibility, Stat: options.Stat, Packages: []PackageDiff{}}
 	var attribution *lineAttribution
 	var manifests []FileDiff
@@ -64,7 +56,6 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 			return Result{}, err
 		}
 	}
-	markers := coverageMarkers{before: activeBefore, after: activeAfter}
 	rows, err := buildRows(pairings, attribution, markers, visibility)
 	if err != nil {
 		return Result{}, err
@@ -112,6 +103,29 @@ func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, option
 			sides[0].snapshot.ID, sides[1].snapshot.ID, sides[0].snapshot.ConfigurationHash, sides[1].snapshot.ConfigurationHash)
 	}
 	return sides[0], sides[1], nil
+}
+
+// compareSnapshots finds the changed files from both snapshots' document headers, classifies their
+// symbols from symbol deltas, and reads only the documents the output needs: all changed ones with
+// line counts, otherwise keyed and excluded ones and those holding shapes of visible rows.
+func compareSnapshots(ctx context.Context, database *gorm.DB, sides [2]selectedSide, visibility Visibility, stat bool) ([]changedFile, []*pairing, coverageMarkers, error) {
+	var headers [2]map[string]storage.ActiveDocument
+	for index, side := range sides {
+		var err error
+		if headers[index], err = storage.ActiveDocuments(ctx, database, side.snapshot.ID, storage.ActiveDocumentOptions{}); err != nil {
+			return nil, nil, coverageMarkers{}, err
+		}
+	}
+	files := changedFiles(headers[0], headers[1])
+	plan, err := planSymbols(ctx, database, [2]uuid.UUID{sides[0].snapshot.ID, sides[1].snapshot.ID}, files, visibility, stat)
+	if err != nil {
+		return nil, nil, coverageMarkers{}, err
+	}
+	if err := readDocuments(ctx, database, files, plan.read); err != nil {
+		return nil, nil, coverageMarkers{}, err
+	}
+	pairings, err := pairSymbols(ctx, database, files, plan, stat)
+	return files, pairings, coverageMarkers{before: headers[0], after: headers[1]}, err
 }
 
 // statLines locates both commits' checkouts, attributes lines, and compares the manifests. A missing
@@ -196,8 +210,11 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 			return nil, err
 		}
 		row.Lines, row.Note = count, note
-		reported := pair.reported()
-		rows = append(rows, reportedRow{row: row, pair: pair, path: reported.file.path, pkg: reported.file.active.Source.PackagePath, visible: pair.visibleAs(visibility)})
+		reported, visible := pair.reported(), pair.visibleAs(visibility)
+		if visible && !pair.shapesRead() {
+			return nil, fmt.Errorf("the %s row of %s in %q shows a shape whose document was not read", pair.class, row.DisplayName(), reported.file.path)
+		}
+		rows = append(rows, reportedRow{row: row, pair: pair, path: reported.file.path, pkg: reported.file.active.Source.PackagePath, visible: visible})
 	}
 	groupRetypedPairs(rows)
 	sort.SliceStable(rows, func(i, j int) bool {

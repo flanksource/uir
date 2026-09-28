@@ -23,6 +23,21 @@ func checkoutSource(suffix string) *string {
 }
 
 var _ = Describe("commit-to-snapshot selection", func() {
+	It("indexes historical commits when the checkout scratch directory is a symlink", func(ctx SpecContext) {
+		database := openDatabase(ctx, sqliteOptions())
+		repo := newRepository()
+		Expect(os.Symlink(GinkgoT().TempDir(), filepath.Join(repo.path, ".tmp"))).To(Succeed())
+		repo.write(map[string]*string{".gitignore": text(".tmp\n"), "go.mod": text("module " + shopRoot + "\n\ngo 1.26\n"), "cart.go": text(cartBefore)})
+		from := repo.commit("shop before")
+		repo.write(map[string]*string{"cart.go": text(cartAfter)})
+		to := repo.commit("shop after")
+		repo.index(ctx, database)
+
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
+	})
+
 	It("type-checks a historical worktree even when its parent workspace names only the current checkout", func(ctx SpecContext) {
 		database := openDatabase(ctx, sqliteOptions())
 		parent := GinkgoT().TempDir()
