@@ -20,6 +20,12 @@ uir diff <from>..<to> --root <module> [--visibility exported|internal|all] [--st
 
 The command is a Clicky operation, so `--format json`, `--format yaml`, `--format markdown`, and `--format html` all render the same typed result, and `uir serve` exposes it as `POST /api/v1/modules/diff` with a body such as `{"args": ["<from>..<to>"], "root": "example.org/service", "visibility": "all", "stat": true, "auto-index": true}`. `uir history --root <module> [--location <checkout>]` and `GET /api/v1/modules/history` list local branches, recent commits, and up to 50 pull request refs from `origin` for the browser's History view. A `pr:<number>` revision fetches that pull request head from `origin` when selected.
 
+To inspect one Git commit as change history, use `uir history show <commit> --root <module>`. It compares that commit with its first parent, indexes either missing clean snapshot on demand, and shows all symbol changes with line counts by default. `--visibility exported|internal|all`, `--include-tests`, and `--stat=false` control the result. An initial commit has no parent and returns an error; use `uir diff` with an explicit range when comparing other revisions.
+
+```sh
+uir history show HEAD --root example.org/ledger
+```
+
 ```sh
 uir diff HEAD~1..HEAD --root example.org/ledger --visibility all --stat
 ```
@@ -34,20 +40,26 @@ For each commit the diff takes the root's snapshots whose `revision` equals the 
 
 ## Changed files
 
-Both snapshots' active documents are derived with `storage.ActiveDocuments`. A path whose document id is equal on both sides is skipped without being read. A path present on one side only is an added or removed file. A path whose document changed only because a sibling in its package changed (same bytes, new input hash) is read, its symbols compare equal, and the file is omitted.
+Both snapshots' active documents are derived with `storage.ActiveDocuments` without their content: changed-file detection compares document headers only (id, ordinal, coverage, revision). A path whose document id is equal on both sides is skipped without being read. A path present on one side only is an added or removed file. A path whose document changed only because a sibling in its package changed (same bytes, new input hash) is a changed file, but its symbols' fingerprints compare equal, so without `--stat` it is omitted without its document being decoded.
 
 ## Classification
 
-Every symbol entry of every changed file, on both sides, is matched across the whole diff: first by canonical symbol id, so a symbol that moved to another file is still one symbol, then by `key` wherever one side has no id (a `syntax` document, or an unproven declaration in a `partial` document).
+Symbols are matched across the whole diff by identity, so a symbol that moved to another file is still one symbol. For changed `indexed` documents outside a package that is `syntax` or `partial` on either side, classification reads no document: both snapshots' effective symbols (`storage.EffectiveSymbols`, from the [symbol deltas](symbol-index-storage.md#symbol-membership-which-symbols-a-snapshot-defines)) give each defined symbol's shape and body fingerprints, the first eight bytes of its `shape_hash` and `body_hash`, and the `definition` postings of each side's changed documents say which of them define each symbol. A symbol declared once on each side it appears on is classified by its handle:
 
 | Class | Condition |
 | --- | --- |
 | `added` | only on the new side |
 | `removed` | only on the old side |
-| `signature` | both sides have an id and `shape_hash` differs |
-| `body` | `shape_hash` equal (or not comparable), `body_hash` differs |
-| `moved` | hashes equal, `path_key` differs |
-| omitted | hashes and path equal |
+| `signature` | both sides, shape fingerprint differs |
+| `body` | shape fingerprint equal, body fingerprint differs |
+| `moved` | fingerprints equal, defining `path_key` differs |
+| omitted | fingerprints and path equal |
+
+A package with a `syntax` or `partial` changed document on either side, and a symbol declared more than once on a side (every `func init` of a package shares one canonical id), are matched over their decoded documents instead: first by canonical symbol id, then by `key` wherever one side has no id (a `syntax` document, or an unproven declaration in a `partial` document). Those rows use the same classes, compare the full `shape_hash` and `body_hash`, and treat `shape_hash` as not comparable when either side has no id.
+
+### Which documents are read
+
+A document is decoded only when the output needs it. With `--stat`, every changed document is read, for its symbol extents. Otherwise the diff reads the documents of `syntax`, `partial`, and `excluded` files, both sides of a symbol declared more than once, and, for a row the visibility filter shows, the new side of an `added` symbol, the old side of a `removed` one, and both sides of a `signature` change, whose shapes the row prints. A shown `body` or `moved` row prints no shape and is named from the `symbols` row and its owners' names. The chosen documents' content is loaded in one batched read (`storage.DocumentContents`).
 
 `body_hash` digests the declaration's tokens without comments or whitespace, so a comment added inside a function leaves every hash equal. With `--stat`, such a symbol whose lines did change is reported as `body` with the note `comments or layout only; body_hash unchanged`, so the file's totals stay the sum of its rows. Without `--stat` it is not reported.
 
@@ -108,6 +120,7 @@ The plain form (non-TTY output, `String()`) prints unchanged lines with two spac
 | Commit with no snapshot, or only dirty snapshots | The command fails and names the commit or the dirty snapshots. |
 | Override snapshot of another root or another revision | The command fails. |
 | Different configuration hashes | The command fails. |
+| A symbol that a changed document defines is not effective on exactly the sides whose changed documents define it, or a symbol whose effective fingerprints differ is declared by no changed document | The command fails naming the symbol handle, because the symbol deltas are inconsistent with the documents. |
 | No registered checkout contains a commit (`--stat`) | The result's `lines_error` and every file's `lines_error` say so; symbol rows are still reported, and manifests are not compared. |
 | Blob unreadable, or its hash differs from the source revision (`--stat`) | That file's `lines_error` states the path, commit, and both hashes; its rows are reported without counts, and every other file completes. A moved symbol whose other file failed fails its destination file's counts with the reason. |
 | Manifest on a dirty snapshot (`--stat`) | The manifest's `lines_error` says its bytes cannot be verified. |

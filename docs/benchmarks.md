@@ -304,10 +304,11 @@ Do not add `head_documents`. The measured derivation per head is 1 ms of CTE plu
 
 These are proposed, not implemented; each lies outside this step's scope.
 
-- **Content-free membership** (`storage/active_documents.go`). Select `documents` without `content` in `ActiveDocuments`, and load `content` for the selected ids only, in `query/module_index.go` (`indexContext.document`) and `symboldiff`.
+- **Content-free membership** (`storage/active_documents.go`). Select `documents` without `content` in `ActiveDocuments`, and load `content` for the selected ids only, in `query/module_index.go` (`indexContext.document`) and `symboldiff`. Partly landed with compact handles (2026-09-27): `ActiveDocuments` takes `ActiveDocumentOptions{Content}` and `symboldiff` reads membership without content, loading the documents it needs with `DocumentContents`; the query layer still passes `Content: true`.
 - **Consumed sibling shapes** (storage schema). Persist `(snapshot_id, import_path, export_shape_hash)` for each workspace-sibling import. `reusableHead` can then skip roots that import siblings, too.
 - **Ignored files and `clean`** (`indexer/discovery.go`). Either skip Git-ignored `.go` files in discovery, or count them as making the worktree `dirty`, so that `clean` implies commit bytes.
 - **Per-document symbol table** and the **per-file input hash**, from [Document size](#document-size).
+- **Compact symbol handles and symbol deltas.** [symbol-compact-ids.md](symbol-compact-ids.md) measures bit-packed 64-bit handles and per-snapshot symbol deltas on SQLite and PostgreSQL. With handles, postings shrink 3–7×, the database 16–22 %, and query fixtures run 15–29 % faster. Landed 2026-09-27; the plans above predate it and show the earlier `(symbol_id, role, root_id)` posting key.
 
 ## Commands
 
