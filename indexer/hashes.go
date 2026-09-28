@@ -76,6 +76,7 @@ func configurationHash(includeTests bool, variant buildVariant) string {
 	digest.text(variant.GOARCH)
 	digest.text(variant.CGOEnabled)
 	digest.text(variant.GoVersion)
+	digest.text(variant.GoFlags)
 	digest.count(len(tags))
 	for _, tag := range tags {
 		digest.text(tag)

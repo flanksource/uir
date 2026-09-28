@@ -10,6 +10,7 @@ import (
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ModuleOptions struct {
@@ -58,6 +59,19 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 			}
 		}
 	}
+	for i := range roots {
+		roots[i].Dependencies, err = readDependencies(ctx, roots[i])
+		if err != nil {
+			return nil, fmt.Errorf("read dependencies of module %q: %w", roots[i].RootKey, err)
+		}
+	}
+	ctx = withActivePaths(ctx, roots)
+	if err := indexer.indexLocalDependencies(ctx, roots, options.IncludeTests); err != nil {
+		return nil, err
+	}
+	if err := indexer.indexVersionedDependencies(ctx, roots, options.IncludeTests); err != nil {
+		return nil, err
+	}
 	extractions := make([]moduleExtraction, 0, len(roots))
 	for _, root := range roots {
 		head, reusable, err := reusableHead(ctx, indexer.database, root, options.Force)
@@ -73,6 +87,9 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 			return nil, fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, err)
 		}
 		extractions = append(extractions, extraction)
+	}
+	if err := verifyIndexInputs(ctx, indexer.database, roots, options.IncludeTests); err != nil {
+		return nil, err
 	}
 	var results []ModuleResult
 	err = storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
@@ -138,7 +155,8 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	}
 	unchanged := base.hasHead && !options.Force && base.snapshot.Revision == discovered.Revision &&
 		base.snapshot.ContentSetHash == discovered.ContentSetHash &&
-		base.snapshot.ConfigurationHash == discovered.ConfigurationHash && base.snapshot.ContextHash == extraction.contextHash
+		base.snapshot.ConfigurationHash == discovered.ConfigurationHash && base.snapshot.ContextHash == extraction.contextHash &&
+		base.snapshot.DependencySetHash != nil && *base.snapshot.DependencySetHash == dependencyHash(discovered.Dependencies)
 	if extraction.reusedHead != uuid.Nil {
 		if !base.hasHead || base.snapshot.ID != extraction.reusedHead {
 			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("location %s head moved from snapshot %s during indexing", location.ID, extraction.reusedHead)
@@ -193,6 +211,21 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err := storage.CreateSnapshot(ctx, database, &snapshot); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
+	if snapshot.WorktreeState != storage.WorktreeClean {
+		for _, file := range publication.extraction.root.Files {
+			blob := storage.SourceBlob{ContentHash: file.ContentHash, Content: file.Content}
+			if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&blob).Error; err != nil {
+				return storage.ModuleSnapshot{}, fmt.Errorf("store source %q of snapshot %s: %w", file.PathKey, snapshot.ID, err)
+			}
+		}
+	}
+	for _, dependency := range publication.extraction.root.Dependencies {
+		edge := dependency.Edge
+		edge.SnapshotID = snapshot.ID
+		if err := database.WithContext(ctx).Create(&edge).Error; err != nil {
+			return storage.ModuleSnapshot{}, fmt.Errorf("publish dependency %q of snapshot %s: %w", edge.ModulePath, snapshot.ID, err)
+		}
+	}
 	if err := createSourceDeltas(ctx, database, snapshot, previous, current); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
@@ -216,12 +249,18 @@ func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 	discovered := publication.extraction.root
 	snapshot := storage.ModuleSnapshot{
 		ID: uuid.New(), RootID: publication.root.ID, LocationID: publication.location.ID,
-		Revision: discovered.Revision, WorktreeState: discovered.WorktreeState,
+		Revision: discovered.Revision, GitCommit: discovered.GitCommit, ModuleVersion: discovered.ModuleVersion, WorktreeState: discovered.WorktreeState,
 		ContentSetHash: discovered.ContentSetHash, ConfigurationHash: discovered.ConfigurationHash,
 		ContextHash: publication.extraction.contextHash, Coverage: publication.extraction.coverage,
 		PackageCount: len(publication.extraction.packages), Diagnostics: publication.extraction.diagnostics,
 		StartedAt: publication.startedAt, CompletedAt: time.Now().UTC(),
 	}
+	if discovered.WorktreeState != storage.WorktreeClean {
+		modified := discovered.LastModifiedAt
+		snapshot.LastModifiedAt = &modified
+	}
+	hash := dependencyHash(discovered.Dependencies)
+	snapshot.DependencySetHash = &hash
 	if publication.base.snapshot.ID != uuid.Nil {
 		baseID := publication.base.snapshot.ID
 		snapshot.BaseSnapshotID = &baseID

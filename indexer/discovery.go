@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,10 +25,16 @@ type discoveredRoot struct {
 	LocalPath         string
 	Kind              string
 	Revision          string
+	GitCommit         string
+	ModuleVersion     string
+	Historical        bool
+	ModFile           string
+	LastModifiedAt    time.Time
 	WorktreeState     storage.WorktreeState
 	RepositoryURI     string
 	ContentSetHash    string
 	ConfigurationHash string
+	Dependencies      []dependencyObservation
 	Variant           buildVariant
 	WorkFile          string
 	Files             []discoveredFile
@@ -44,7 +51,8 @@ type discoveredFile struct {
 }
 
 func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, includeTests bool) error {
-	root.Revision = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
+	root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
+	root.Revision = root.GitCommit
 	root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
 	moduleCache := map[string]string{}
 	err := filepath.WalkDir(root.LocalPath, func(current string, entry fs.DirEntry, walkErr error) error {
@@ -68,7 +76,7 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		return fmt.Errorf("discover Go sources in root %q: %w", root.RootKey, err)
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].PathKey < root.Files[j].PathKey })
-	if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.Revision, root.Files); err != nil {
+	if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.GitCommit, root.Files); err != nil {
 		return err
 	}
 	environment, err := readGoEnvironment(ctx, root.LocalPath)
@@ -80,9 +88,57 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		return fmt.Errorf("root %q: %w", root.RootKey, err)
 	}
 	root.ContentSetHash = contentSetHash(root.Files, manifests)
+	for _, file := range root.Files {
+		if file.ModifiedAt.After(root.LastModifiedAt) {
+			root.LastModifiedAt = file.ModifiedAt
+		}
+	}
+	for _, manifest := range manifests {
+		if manifest.ModifiedAt.After(root.LastModifiedAt) {
+			root.LastModifiedAt = manifest.ModifiedAt
+		}
+	}
+	if root.GitCommit != "" && environment.WorkFile != "" {
+		dirty, err := workspaceManifestDirty(ctx, root.LocalPath, root.GitCommit, environment.WorkFile)
+		if err != nil {
+			return err
+		}
+		if dirty {
+			root.WorktreeState = storage.WorktreeDirty
+		}
+	}
+	if root.WorktreeState == storage.WorktreeDirty {
+		root.Revision = dirtyRevision(root.GitCommit, root.LastModifiedAt)
+	}
 	root.ConfigurationHash = configurationHash(includeTests, environment.Variant)
 	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
 	return nil
+}
+
+func workspaceManifestDirty(ctx context.Context, directory, commit, workFile string) (bool, error) {
+	top := gitValue(ctx, directory, "rev-parse", "--show-toplevel")
+	if top == "" {
+		return false, fmt.Errorf("find Git root for workspace of %q", directory)
+	}
+	for _, candidate := range []string{workFile, workFile + ".sum"} {
+		relative, err := filepath.Rel(top, candidate)
+		if err != nil || !filepath.IsLocal(relative) {
+			return true, nil
+		}
+		current, err := os.ReadFile(candidate)
+		if err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("read workspace manifest %q: %w", candidate, err)
+		}
+		command := exec.CommandContext(ctx, "git", "-C", top, "show", commit+":"+filepath.ToSlash(relative))
+		committed, gitErr := command.Output()
+		if gitErr != nil && os.IsNotExist(err) {
+			continue
+		}
+		if gitErr != nil || os.IsNotExist(err) || !bytes.Equal(current, committed) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func rootDirectoryAction(current, name, currentRoot string, roots []discoveredRoot) error {
