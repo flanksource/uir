@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/token"
 	"path/filepath"
-	"strings"
 
 	"github.com/flanksource/uir/query"
 )
@@ -66,7 +65,7 @@ func refactorArgs(options refactorOptions, source query.ModuleSourceView, node *
 		return append(args, "./..."), nil
 	}
 	if options.Action != "move" || options.NewName != "" || kind == "field" || !filepath.IsLocal(options.Destination) || filepath.Ext(options.Destination) != ".go" {
-		return nil, fmt.Errorf("%s move requires a module-relative .go destination, got %q", strings.Title(kind), options.Destination)
+		return nil, fmt.Errorf("%s move requires a module-relative .go destination, got %q", kind, options.Destination)
 	}
 	return []string{"move", kind, target, options.Destination, "--package", source.PackagePath}, nil
 }

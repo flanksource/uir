@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/build"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +24,14 @@ import (
 )
 
 type serveOptions struct {
-	Host string
-	Port int
-	Dev  bool
+	Host       string
+	Port       int
+	Dev        bool
+	GopatchBin string
 }
 
 func newServeCommand(runtime *commandRuntime) *cobra.Command {
-	options := serveOptions{Host: "localhost", Port: 8080}
+	options := serveOptions{Host: "localhost", Port: 8080, GopatchBin: filepath.Join(build.Default.GOPATH, "bin", "gopatch")}
 	command := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve saved UIR snapshots in a web browser",
@@ -39,6 +43,7 @@ func newServeCommand(runtime *commandRuntime) *cobra.Command {
 	command.Flags().StringVar(&options.Host, "host", options.Host, "HTTP listen host")
 	command.Flags().IntVar(&options.Port, "port", options.Port, "HTTP listen port")
 	command.Flags().BoolVar(&options.Dev, "dev", false, "Start and proxy the Vite development server")
+	command.Flags().StringVar(&options.GopatchBin, "gopatch-bin", options.GopatchBin, "Path to the gopatch executable for explorer refactors")
 	clicky.MarkLocalOnly(command)
 	return command
 }
@@ -50,6 +55,7 @@ func runServe(ctx context.Context, root *cobra.Command, runtime *commandRuntime,
 	if options.Port < 1 || options.Port > 65535 {
 		return fmt.Errorf("serve port must be between 1 and 65535, got %d", options.Port)
 	}
+	runtime.GopatchBin = options.GopatchBin
 	if _, err := runtime.Database(ctx); err != nil {
 		return fmt.Errorf("open UIR database for serve: %w", err)
 	}
@@ -123,7 +129,30 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		ui.ServeHTTP(w, r)
 	}))
 	return rpchttp.TimingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/modules/refactor/") && !localRefactorRequest(r) {
+			http.Error(w, "explorer refactors require local, same-origin access", http.StatusForbidden)
+			return
+		}
 		ctx := context.WithValue(r.Context(), runtimeContextKey{}, runtime)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})), nil
+}
+
+func localRefactorRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+		return false
+	}
+	requestHost := r.Host
+	if name, _, err := net.SplitHostPort(r.Host); err == nil {
+		requestHost = name
+	}
+	if !strings.EqualFold(requestHost, "localhost") && (net.ParseIP(requestHost) == nil || !net.ParseIP(requestHost).IsLoopback()) {
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		parsed, err := url.Parse(origin)
+		return err == nil && parsed.Scheme == "http" && strings.EqualFold(parsed.Host, r.Host)
+	}
+	return true
 }
