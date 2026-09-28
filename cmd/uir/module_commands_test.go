@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -15,6 +18,16 @@ var _ = Describe("root-level module commands", func() {
 	It("registers add, list, get, query, and reindex at the root", func() {
 		root := newRootCommand(&commandRuntime{})
 		Expect(commandNames(root)).To(ContainElements("add", "list", "get", "query", "reindex"))
+	})
+	It("rejects a path combined with reindex all", func(ctx context.Context) {
+		root := newRootCommand(&commandRuntime{})
+		root.SetArgs([]string{"reindex", "--all", "/checkout"})
+		Expect(root.ExecuteContext(ctx)).To(MatchError(ContainSubstring("reindex --all does not accept a path")))
+	})
+	It("rejects force combined with reindex all", func(ctx context.Context) {
+		root := newRootCommand(&commandRuntime{})
+		root.SetArgs([]string{"reindex", "--all", "--force"})
+		Expect(root.ExecuteContext(ctx)).To(MatchError(ContainSubstring("reindex --all does not accept --force")))
 	})
 
 	It("adds a module immediately and keeps its primary location on reindex", func(ctx context.Context) {
@@ -37,6 +50,70 @@ var _ = Describe("root-level module commands", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(again[0].Unchanged).To(BeTrue())
 		Expect(again[0].SnapshotID).To(Equal(results[0].SnapshotID))
+	})
+
+	It("warns for an unscoped query with a missing head and rejects explicit scopes", func(ctx context.Context) {
+		database := openCommandDatabase(ctx)
+		now := time.Now().UTC()
+		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/registered", Name: "registered", CreatedAt: now}
+		Expect(storage.CreateModuleRoot(ctx, database, &root)).To(Succeed())
+		checkout, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+		Expect(err).ToNot(HaveOccurred())
+		location := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: checkout, Kind: "module", CreatedAt: now}
+		Expect(database.Create(&location).Error).To(Succeed())
+		Expect(database.Create(&storage.ModulePrimary{RootID: root.ID, LocationID: location.ID}).Error).To(Succeed())
+
+		rows, err := listModuleRoots(ctx, database)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rows).To(Equal([]moduleRootRow{{RootKey: root.RootKey, Name: root.Name, Location: location.CanonicalPath}}),
+			"a root the pre-handle cutover kept is listed with no snapshot until it is reindexed")
+		result, err := queryModules(ctx, database, moduleQueryOptions{Expression: "registered.Run"})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(result.Total).To(Equal(0))
+		Expect(result.Warnings).To(Equal([]query.MissingHeadWarning{{RootKey: root.RootKey, Location: checkout,
+			Message: "registered checkout has no indexed head; run `uir reindex --all`"}}))
+		for _, options := range []moduleQueryOptions{{Expression: "registered.Run", RootKey: root.RootKey}, {Expression: "registered.Run", Location: location.CanonicalPath}} {
+			_, err = queryModules(ctx, database, options)
+			Expect(err).To(MatchError(ContainSubstring("is registered but not indexed; run `uir reindex`")), "%+v", options)
+		}
+	})
+
+	It("reindexes only registered checkouts without heads when all is requested", func(ctx context.Context) {
+		database := openCommandDatabase(ctx)
+		workspace := GinkgoT().TempDir()
+		for _, name := range []string{"indexed", "missing"} {
+			checkout := filepath.Join(workspace, name)
+			Expect(os.Mkdir(checkout, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(checkout, "go.mod"), []byte("module example.org/"+name+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(checkout, "main.go"), []byte("package "+name+"\n\nfunc Run() {}\n"), 0o644)).To(Succeed())
+			if name == "indexed" {
+				_, err := addModules(ctx, database, checkout, false)
+				Expect(err).ToNot(HaveOccurred())
+				continue
+			}
+			root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/missing", Name: name, CreatedAt: time.Now().UTC()}
+			Expect(storage.CreateModuleRoot(ctx, database, &root)).To(Succeed())
+			canonical, err := filepath.EvalSymlinks(checkout)
+			Expect(err).ToNot(HaveOccurred())
+			location := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: canonical, Kind: "module", CreatedAt: time.Now().UTC()}
+			Expect(database.Create(&location).Error).To(Succeed())
+			Expect(database.Create(&storage.ModulePrimary{RootID: root.ID, LocationID: location.ID}).Error).To(Succeed())
+		}
+		nested := filepath.Join(workspace, "missing", "nested")
+		Expect(os.Mkdir(nested, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(nested, "go.mod"), []byte("module example.org/nested\n\ngo 1.26\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(nested, "nested.go"), []byte("package nested\n\nfunc Run() {}\n"), 0o644)).To(Succeed())
+		results, err := reindexAllModules(ctx, database, false)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(results).To(HaveLen(1))
+		Expect(results[0].RootKey).To(Equal("example.org/missing"))
+		Expect(results[0].SnapshotID).ToNot(BeEmpty())
+		roots, err := listModuleRoots(ctx, database)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(roots).To(HaveLen(2), "nested unregistered modules remain outside reindex --all")
+		again, err := reindexAllModules(ctx, database, false)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(again).To(BeEmpty())
 	})
 
 	It("returns the references envelope with positioned rows, declarations, symbols, and partial coverage", func(ctx context.Context) {
@@ -87,6 +164,36 @@ var _ = Describe("root-level module commands", func() {
 		Expect(result.Declarations).ToNot(BeNil())
 		Expect(result.Symbols).ToNot(BeNil())
 		Expect(result.Coverage).To(HaveLen(1))
+	})
+	It("runs structured flags with and without a positional expression", func(ctx context.Context) {
+		database := openCommandDatabase(ctx)
+		_, err := addModules(ctx, database, writeReferencesModule(), false)
+		Expect(err).NotTo(HaveOccurred())
+		methods, err := queryModules(ctx, database, moduleQueryOptions{Methods: true, RootKey: referencesRoot})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(methods.Matches).To(ContainElement(HaveField("Symbol", "method:"+referencesRoot+"/store.Store:Save#()")))
+		callers, err := queryModules(ctx, database, moduleQueryOptions{Expression: "store.Store.Save", Methods: true, Callers: true, RootKey: referencesRoot})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(callers.Total).To(Equal(1))
+		Expect(callers.Matches[0].Relation).To(Equal("<"))
+		Expect(callers.Matches[0].SourceName).To(ContainSubstring("Store.Save"))
+		modules, err := queryModules(ctx, database, moduleQueryOptions{Modules: true, Packages: true, RootKey: referencesRoot})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(modules.Matches).To(ContainElement(HaveField("Kind", "module")))
+		Expect(modules.Matches).To(ContainElement(HaveField("Kind", "package")))
+		_, err = queryModules(ctx, database, moduleQueryOptions{RootKey: referencesRoot})
+		Expect(err).To(MatchError(ContainSubstring("expression or structured flag")))
+	})
+	It("accepts structured flags from the CLI without a positional expression", func(ctx context.Context) {
+		database := openCommandDatabase(ctx)
+		_, err := addModules(ctx, database, writeReferencesModule(), false)
+		Expect(err).NotTo(HaveOccurred())
+		runtime := &commandRuntime{database: database}
+		root := newRootCommand(runtime)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		root.SetArgs([]string{"query", "--methods", "--root", referencesRoot, "--format", "json"})
+		Expect(root.ExecuteContext(context.WithValue(ctx, runtimeContextKey{}, runtime))).To(Succeed())
 	})
 })
 

@@ -10,6 +10,8 @@ import (
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/entity"
+	"github.com/flanksource/commons/logger"
+	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
@@ -17,6 +19,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// moduleRootRow is a registered root with its primary location's head; SnapshotID is empty and
+// HeadVersion 0 while the root is registered but not indexed.
 type moduleRootRow struct {
 	RootKey     string `json:"root_key"`
 	Name        string `json:"name"`
@@ -45,25 +49,33 @@ func (row moduleRootRow) Row() map[string]any {
 // moduleQueryRow is one query match or declaration. Source is the display form of Path, Line, and
 // Column; the remaining fields are set by the index-backed operations.
 type moduleQueryRow struct {
-	Kind         string `json:"kind"`
-	Root         string `json:"root"`
-	Symbol       string `json:"symbol"`
-	Location     string `json:"location"`
-	Source       string `json:"source"`
-	SnapshotID   string `json:"snapshot_id"`
-	Path         string `json:"path,omitempty"`
-	PackagePath  string `json:"package_path,omitempty"`
-	Line         *int   `json:"line,omitempty"`
-	Column       *int   `json:"column,omitempty"`
-	EndLine      *int   `json:"end_line,omitempty"`
-	EndColumn    *int   `json:"end_column,omitempty"`
-	Role         string `json:"role,omitempty"`
-	SymbolID     string `json:"symbol_id,omitempty"`
-	EnclosingID  string `json:"enclosing_id,omitempty"`
-	EnclosingKey string `json:"enclosing_key,omitempty"`
-	Coverage     string `json:"coverage,omitempty"`
-	Dispatch     bool   `json:"dispatch,omitempty"`
-	Depth        int    `json:"depth,omitempty"`
+	Kind           string `json:"kind"`
+	NodeKind       string `json:"node_kind,omitempty"`
+	Root           string `json:"root"`
+	Symbol         string `json:"symbol"`
+	Location       string `json:"location"`
+	Source         string `json:"source"`
+	SnapshotID     string `json:"snapshot_id"`
+	Path           string `json:"path,omitempty"`
+	PackagePath    string `json:"package_path,omitempty"`
+	Line           *int   `json:"line,omitempty"`
+	Column         *int   `json:"column,omitempty"`
+	EndLine        *int   `json:"end_line,omitempty"`
+	EndColumn      *int   `json:"end_column,omitempty"`
+	Role           string `json:"role,omitempty"`
+	Relation       string `json:"relation,omitempty"`
+	SourceID       string `json:"source_id,omitempty"`
+	SourceName     string `json:"source_name,omitempty"`
+	SymbolID       string `json:"symbol_id,omitempty"`
+	EnclosingID    string `json:"enclosing_id,omitempty"`
+	EnclosingKey   string `json:"enclosing_key,omitempty"`
+	Coverage       string `json:"coverage,omitempty"`
+	Dispatch       bool   `json:"dispatch,omitempty"`
+	Depth          int    `json:"depth,omitempty"`
+	identifier     uir.Identifier
+	declaration    string
+	definitionLine *int
+	usage          string
 }
 
 type moduleCallPath struct {
@@ -71,18 +83,20 @@ type moduleCallPath struct {
 	Calls   []moduleQueryRow     `json:"calls"`
 }
 
-// moduleQueryResult is the query envelope. It is clicky.Paged, so JSON and YAML responses carry every
-// field while tabular formats render Matches.
+// moduleQueryResult is the query envelope. JSON and YAML retain every field while human-readable
+// formats render the symbol tree.
 type moduleQueryResult struct {
-	Operation    query.Operation         `json:"operation"`
-	Total        int                     `json:"total"`
-	Matches      []moduleQueryRow        `json:"matches"`
-	Declarations []moduleQueryRow        `json:"declarations"`
-	Symbols      []query.ModuleSymbol    `json:"symbols"`
-	Coverage     []query.ModuleCoverage  `json:"coverage"`
-	Stages       []query.ResolutionStage `json:"stages"`
-	Path         *moduleCallPath         `json:"path,omitempty"`
+	Operation    query.Operation            `json:"operation"`
+	Total        int                        `json:"total"`
+	Matches      []moduleQueryRow           `json:"matches"`
+	Declarations []moduleQueryRow           `json:"declarations"`
+	Symbols      []query.ModuleSymbol       `json:"symbols"`
+	Coverage     []query.ModuleCoverage     `json:"coverage"`
+	Warnings     []query.MissingHeadWarning `json:"warnings"`
+	Stages       []query.ResolutionStage    `json:"stages"`
+	Path         *moduleCallPath            `json:"path,omitempty"`
 	limit        int
+	groupBy      []string
 }
 
 func (result moduleQueryResult) PageMetadata() clicky.PageInfo {
@@ -91,13 +105,13 @@ func (result moduleQueryResult) PageMetadata() clicky.PageInfo {
 
 func (result moduleQueryResult) PageRows() any {
 	if result.Path == nil {
-		return result.Matches
+		return moduleQueryDisplay{result: result, rows: result.Matches}
 	}
 	names := make([]string, 0, len(result.Path.Symbols))
 	for _, symbol := range result.Path.Symbols {
 		names = append(names, symbol.QueryName)
 	}
-	return []map[string]any{{"path": strings.Join(names, " -> "), "hops": len(result.Path.Calls)}}
+	return moduleQueryDisplay{result: result, rows: []map[string]any{{"path": strings.Join(names, " -> "), "hops": len(result.Path.Calls)}}}
 }
 
 type moduleGetOptions struct {
@@ -114,6 +128,7 @@ type moduleAddOptions struct {
 
 type moduleReindexOptions struct {
 	Path         string `args:"true"`
+	All          bool   `flag:"all" help:"Reindex every registered checkout with no indexed head"`
 	IncludeTests bool   `flag:"include-tests" help:"Index Go test files"`
 	Force        bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
 }
@@ -130,11 +145,23 @@ type moduleSnapshotOptions struct {
 }
 
 type moduleQueryOptions struct {
-	Expression string `args:"true" required:"true"`
-	RootKey    string `flag:"root" help:"Module path to query"`
-	Location   string `flag:"location" help:"Registered checkout path"`
-	SnapshotID string `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
-	Limit      int    `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
+	Expression string   `args:"true"`
+	Methods    bool     `flag:"methods" help:"Select methods"`
+	Vars       bool     `flag:"vars" help:"Select variables"`
+	Types      bool     `flag:"types" help:"Select types"`
+	Modules    bool     `flag:"modules" help:"Select module nodes"`
+	Packages   bool     `flag:"packages" help:"Select package nodes"`
+	Callers    bool     `flag:"callers" help:"Find incoming calls"`
+	Calls      bool     `flag:"calls" help:"Find outgoing calls"`
+	Implements bool     `flag:"implements" help:"Find implementer types"`
+	Inherits   bool     `flag:"inherits" help:"Find direct embedders"`
+	Include    []string `flag:"include" help:"Include module, package, or symbol paths matching a glob"`
+	Exclude    []string `flag:"exclude" help:"Exclude module, package, or symbol paths matching a glob"`
+	GroupBy    string   `flag:"group-by" help:"Tree levels in order: module,package,file" default:"module,package,file"`
+	RootKey    string   `flag:"root" help:"Module path to query"`
+	Location   string   `flag:"location" help:"Registered checkout path"`
+	SnapshotID string   `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
+	Limit      int      `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
 }
 
 type moduleSuggestOptions struct {
@@ -227,38 +254,42 @@ func registerModuleCommands(root *cobra.Command) {
 		}
 		return queryModules(ctx, database, options)
 	})
-	queryCommand.Use = "query <expression>"
+	queryCommand.Use = "query [expression]"
 	queryCommand.Short = "Run a compact symbol query against indexed modules"
-	queryCommand.Args = cobra.ExactArgs(1)
+	queryCommand.Args = cobra.MaximumNArgs(1)
 	setModuleRoute(queryCommand, "modules/query")
-	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]query.ModuleSymbol, error) {
+	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) (query.ItemsWithWarnings[query.ModuleSymbol], error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return nil, err
+			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
 		}
 		pipeline, err := query.NewPipeline(database)
 		if err != nil {
-			return nil, err
+			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
 		}
-		return pipeline.SuggestSymbols(ctx, options.Prefix, query.ModuleScopeOptions{
+		result, err := pipeline.SuggestSymbols(ctx, options.Prefix, query.ModuleScopeOptions{
 			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
 		})
+		warnMissingHeads(ctx, result.Warnings)
+		return result, err
 	})
 	suggest.Short = "Complete a Go symbol name from indexed snapshots"
 	setModuleRoute(suggest, "modules/suggest")
 	suggest.Annotations["clicky/operation-method"] = http.MethodGet
-	selectors := clicky.AddNamedCommandWithContext("suggest-selectors", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]string, error) {
+	selectors := clicky.AddNamedCommandWithContext("suggest-selectors", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) (query.ItemsWithWarnings[string], error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return nil, err
+			return query.ItemsWithWarnings[string]{}, err
 		}
 		pipeline, err := query.NewPipeline(database)
 		if err != nil {
-			return nil, err
+			return query.ItemsWithWarnings[string]{}, err
 		}
-		return pipeline.SuggestSelectors(ctx, options.Prefix, query.ModuleScopeOptions{
+		result, err := pipeline.SuggestSelectors(ctx, options.Prefix, query.ModuleScopeOptions{
 			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
 		})
+		warnMissingHeads(ctx, result.Warnings)
+		return result, err
 	})
 	selectors.Short = "Complete typed selectors from indexed snapshots"
 	setModuleRoute(selectors, "modules/suggest-selectors")
@@ -291,6 +322,12 @@ func registerModuleCommands(root *cobra.Command) {
 	snapshots.Annotations["clicky/operation-method"] = http.MethodGet
 
 	reindex := clicky.AddNamedCommandWithContext("reindex", root, moduleReindexOptions{}, func(ctx context.Context, options moduleReindexOptions) ([]indexer.ModuleResult, error) {
+		if options.All && options.Path != "" {
+			return nil, errors.New("reindex --all does not accept a path")
+		}
+		if options.All && options.Force {
+			return nil, errors.New("reindex --all does not accept --force")
+		}
 		path := options.Path
 		if path == "" {
 			path = "."
@@ -298,6 +335,9 @@ func registerModuleCommands(root *cobra.Command) {
 		database, err := databaseFor(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if options.All {
+			return reindexAllModules(ctx, database, options.IncludeTests)
 		}
 		return indexModules(ctx, database, indexer.ModuleOptions{Path: path, IncludeTests: options.IncludeTests, Force: options.Force, ExistingOnly: true})
 	})
@@ -308,13 +348,38 @@ func registerModuleCommands(root *cobra.Command) {
 }
 
 func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOptions) (moduleQueryResult, error) {
+	groups, err := parseQueryGroupBy(options.GroupBy)
+	if err != nil {
+		return moduleQueryResult{}, err
+	}
 	pipeline, err := query.NewPipeline(database)
 	if err != nil {
 		return moduleQueryResult{}, err
 	}
-	result, err := pipeline.RunModules(ctx, options.Expression, query.ModuleScopeOptions{
-		RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
-	})
+	structured := query.StructuredOptions{Include: options.Include, Exclude: options.Exclude}
+	for _, flag := range []struct {
+		enabled bool
+		name    string
+	}{{options.Methods, "method"}, {options.Vars, "var"}, {options.Types, "type"}, {options.Modules, "module"}, {options.Packages, "package"}} {
+		if flag.enabled {
+			structured.Kinds = append(structured.Kinds, flag.name)
+		}
+	}
+	for _, flag := range []struct {
+		enabled bool
+		name    string
+	}{{options.Callers, "callers"}, {options.Calls, "calls"}, {options.Implements, "implements"}, {options.Inherits, "inherits"}} {
+		if flag.enabled {
+			structured.Relations = append(structured.Relations, flag.name)
+		}
+	}
+	expression, err := query.ParseStructured(options.Expression, structured)
+	var result query.ModuleQueryResult
+	if err == nil {
+		result, err = pipeline.RunExpr(ctx, expression, query.ModuleScopeOptions{
+			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
+		})
+	}
 	if err != nil {
 		var invalid *query.InvalidQueryError
 		if errors.As(err, &invalid) {
@@ -333,6 +398,7 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 		}
 		return moduleQueryResult{}, err
 	}
+	warnMissingHeads(ctx, result.Warnings)
 	symbols := result.Symbols
 	if symbols == nil {
 		symbols = []query.ModuleSymbol{}
@@ -341,11 +407,55 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 	if result.Path != nil {
 		path = &moduleCallPath{Symbols: result.Path.Symbols, Calls: moduleQueryRows(result.Path.Calls)}
 	}
+	matches := moduleQueryRows(result.Matches)
+	if err := populateQueryUsage(ctx, pipeline, matches); err != nil {
+		return moduleQueryResult{}, err
+	}
 	return moduleQueryResult{
-		Operation: result.Operation, Total: result.Total, Matches: moduleQueryRows(result.Matches),
+		Operation: result.Operation, Total: result.Total, Matches: matches,
 		Declarations: moduleQueryRows(result.Declarations), Symbols: symbols, Coverage: result.Coverage,
-		Stages: result.Stages, Path: path, limit: options.Limit,
+		Warnings: result.Warnings, Stages: result.Stages, Path: path, limit: options.Limit, groupBy: groups,
 	}, nil
+}
+
+func populateQueryUsage(ctx context.Context, pipeline *query.Pipeline, rows []moduleQueryRow) error {
+	linesByFile := map[string][]string{}
+	for index := range rows {
+		row := &rows[index]
+		if row.Line == nil {
+			if row.Kind == "module" || row.Kind == "package" {
+				continue
+			}
+			return fmt.Errorf("query match %s in %s has no source line", row.Symbol, row.Path)
+		}
+		key := row.SnapshotID + "\x00" + row.Path
+		lines, found := linesByFile[key]
+		if !found {
+			source, err := pipeline.ReadModuleSource(ctx, row.SnapshotID, row.Path)
+			if err != nil {
+				return fmt.Errorf("read usage of %s at %s: %w", row.Symbol, row.Source, err)
+			}
+			lines = strings.Split(source.Content, "\n")
+			linesByFile[key] = lines
+		}
+		if *row.Line < 1 || *row.Line > len(lines) {
+			return fmt.Errorf("query match %s at %s has line %d outside source with %d lines", row.Symbol, row.Source, *row.Line, len(lines))
+		}
+		row.usage = strings.TrimSpace(lines[*row.Line-1])
+		if row.usage == "" {
+			return fmt.Errorf("query match %s at %s has an empty source line", row.Symbol, row.Source)
+		}
+	}
+	return nil
+}
+
+func warnMissingHeads(ctx context.Context, warnings []query.MissingHeadWarning) {
+	if entity.OperationSurfaceFromContext(ctx) != "cli" {
+		return
+	}
+	for _, warning := range warnings {
+		logger.Warnf("root %q at %q: %s", warning.RootKey, warning.Location, warning.Message)
+	}
 }
 
 func moduleQueryRows(matches []query.ModuleMatch) []moduleQueryRow {
@@ -359,12 +469,14 @@ func moduleQueryRows(matches []query.ModuleMatch) []moduleQueryRow {
 			}
 		}
 		rows = append(rows, moduleQueryRow{
-			Kind: match.Kind, Root: match.RootKey, Symbol: match.Identifier.SymbolKey(),
+			Kind: match.Kind, NodeKind: match.NodeKind, Root: match.RootKey, Symbol: match.Identifier.SymbolKey(),
 			Location: match.Location, Source: source, SnapshotID: match.SnapshotID,
 			Path: match.Path, Line: match.Line, Column: match.Column, EndLine: match.EndLine, EndColumn: match.EndColumn,
 			PackagePath: match.PackagePath, Depth: match.Depth,
-			Role: match.Role, SymbolID: match.SymbolID, EnclosingID: match.EnclosingID, EnclosingKey: match.EnclosingKey,
+			Role: match.Role, Relation: match.Relation, SourceID: match.SourceID, SourceName: match.SourceName, SymbolID: match.SymbolID, EnclosingID: match.EnclosingID, EnclosingKey: match.EnclosingKey,
 			Coverage: match.Coverage, Dispatch: match.Dispatch,
+			identifier:  match.Identifier,
+			declaration: match.Declaration, definitionLine: match.DefinitionLine,
 		})
 	}
 	return rows
@@ -387,6 +499,14 @@ func indexModules(ctx context.Context, database *gorm.DB, options indexer.Module
 		return nil, err
 	}
 	return indexer.RunModulesTask(ctx, engine, options)
+}
+
+func reindexAllModules(ctx context.Context, database *gorm.DB, includeTests bool) ([]indexer.ModuleResult, error) {
+	engine, err := indexer.New(database)
+	if err != nil {
+		return nil, err
+	}
+	return indexer.RunMissingModulesTask(ctx, engine, includeTests)
 }
 
 func listModuleRoots(ctx context.Context, database *gorm.DB) ([]moduleRootRow, error) {
@@ -422,9 +542,16 @@ func moduleRootDetails(ctx context.Context, database *gorm.DB, root storage.Modu
 	if err := database.WithContext(ctx).Where("id = ?", primary.LocationID).First(&location).Error; err != nil {
 		return moduleRootRow{}, fmt.Errorf("load primary location %s: %w", primary.LocationID, err)
 	}
+	row := moduleRootRow{RootKey: root.RootKey, Name: root.Name, Location: location.CanonicalPath}
 	var head storage.ModuleLocationHead
-	if err := database.WithContext(ctx).Where("location_id = ?", location.ID).First(&head).Error; err != nil {
+	err := database.WithContext(ctx).Where("location_id = ?", location.ID).First(&head).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// A registration the pre-handle cutover kept has no head until `uir reindex`: it has no snapshot.
+		return row, nil
+	}
+	if err != nil {
 		return moduleRootRow{}, fmt.Errorf("load primary head for root %q: %w", root.RootKey, err)
 	}
-	return moduleRootRow{RootKey: root.RootKey, Name: root.Name, Location: location.CanonicalPath, SnapshotID: head.SnapshotID.String(), HeadVersion: head.Version}, nil
+	row.SnapshotID, row.HeadVersion = head.SnapshotID.String(), head.Version
+	return row, nil
 }
