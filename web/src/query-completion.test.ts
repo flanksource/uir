@@ -5,6 +5,9 @@ describe("query completion", () => {
   it.each([
     ["", "symbol", ""],
     ["store.St", "symbol", "store.St"],
+    ["clicky.Exec*", "symbol", "clicky.Exec*"],
+    ["clicky.Exe?", "symbol", "clicky.Exe?"],
+    ["**/catalog.Item*", "symbol", "**/catalog.Item*"],
     ["store.Store.Save ", "relation", ""],
     ["store.Store.Save :i", "relation", ":i"],
     ["store.Store.Save < ", "filter", ""],
@@ -22,13 +25,15 @@ describe("query completion", () => {
     ["pkg:example.org/!team$#@/store", "selector", "pkg:example.org/!team$#@/store"],
     ["func:Save < pkg:example.org/shop:app", "selector", "pkg:example.org/shop:app"],
     ["func:Run +pkg:example.org/shop:app", "selector", "+pkg:example.org/shop:app"],
+    ["type:Base :inherits ", "filter", ""],
+    ["method:Save +path:example.org/shop/store/**", "selector", "+path:example.org/shop/store/**"],
   ] as const)("classifies %s at the caret", (draft, mode, prefix) => {
     expect(queryCompletionContext(draft, draft.length)).toMatchObject({ mode, prefix });
   });
 
   it("offers every valid next operator after a symbol", () => {
     expect(querySyntaxCompletions(queryCompletionContext("store.Store.Save ", 17)).map((option) => option.label))
-      .toEqual(expect.arrayContaining(["+pkg:", "-pkg:", "+func:", "-struct:", "<", ">", "=", "&", "|", ">>"]));
+      .toEqual(expect.arrayContaining(["+pkg:", "-pkg:", "+func:", "-struct:", "-path:", ":inherits", "<", ">", "=", "&", "|", ">>"]));
   });
 
   it("offers filters and composition after an incoming relation", () => {

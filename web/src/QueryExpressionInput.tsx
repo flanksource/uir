@@ -44,7 +44,7 @@ export function QueryExpressionInput({ draft, route, path, autoFocus = false, ru
     disposables.current.forEach((item) => item.dispose());
     disposables.current = [];
   }, []);
-  const hint = context.mode === "symbol" ? "Type a Go symbol; indexed candidates appear as you type."
+  const hint = context.mode === "symbol" ? "Type a Go symbol; use * or ? to expand matching symbols. Exact names show indexed suggestions as you type."
     : context.mode === "relation" ? "Choose a relation (<, >, =, :impl, :methods, ~w), set operator (&, |), or path (>>)."
     : context.mode === "filter" ? "Add -f, +pkg, or -pkg; chain another relation or combine expressions with &, |, or >>."
     : context.filter === "-f" ? "Enter a file suffix, such as _test.go."

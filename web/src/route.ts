@@ -21,6 +21,9 @@ export type Route = {
   logCommit: string;
   diffVisibility: string;
   includeTests: boolean;
+  historyGroup: "package" | "file" | "change";
+  historyLayout: "inline" | "sidebar";
+  historySearch: string;
   offset: number;
 };
 
@@ -44,15 +47,20 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     logCommit: params.get("logCommit") ?? "",
     diffVisibility: params.get("diffVisibility") ?? "",
     includeTests: params.get("includeTests") === "1",
+    historyGroup: params.get("historyGroup") === "file" || params.get("historyGroup") === "change" ? params.get("historyGroup") as "file" | "change" : "package",
+    historyLayout: params.get("historyLayout") === "sidebar" ? "sidebar" : "inline",
+    historySearch: params.get("historySearch") ?? "",
     offset: Number(params.get("offset") ?? 0),
   };
 }
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
+  if (route.historyGroup !== "package") params.set("historyGroup", route.historyGroup);
+  if (route.historyLayout !== "inline") params.set("historyLayout", route.historyLayout);
   for (const key of ["line", "column", "offset"] as const) {
     if (route[key] > 0) params.set(key, String(route[key]));
   }

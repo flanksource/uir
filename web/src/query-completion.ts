@@ -14,6 +14,7 @@ const relations: QueryCompletion[] = [
   { label: "=", insert: "= ", help: "Definition" },
   { label: "<<3", insert: "<<3 ", help: "Callers up to three hops away; depth 1–8" },
   { label: ":impl", insert: ":impl ", help: "Types implementing an interface" },
+  { label: ":inherits", insert: ":inherits ", help: "Types directly embedding a type" },
   { label: ":methods", insert: ":methods ", help: "Methods owned by a type" },
   { label: "~w", insert: "~w ", help: "Write references" },
   { label: "&", insert: "& ", help: "Intersect the result symbols with another expression" },
@@ -33,13 +34,20 @@ const selectors: QueryCompletion[] = [
   { label: "func:", insert: "func:", help: "Function or method" },
   { label: "field:", insert: "field:", help: "Struct field" },
   { label: "struct:", insert: "struct:", help: "Defined struct type" },
+  { label: "method:", insert: "method:", help: "Method" },
+  { label: "var:", insert: "var:", help: "Variable" },
+  { label: "type:", insert: "type:", help: "Named type" },
+  { label: "module:", insert: "module:", help: "Module node" },
+  { label: "package:", insert: "package:", help: "Package node" },
+  { label: "all:", insert: "all:", help: "All declared symbols" },
+  { label: "path:", insert: "path:", help: "Full module, package, or qualified symbol path" },
 ];
 const typedModifiers: QueryCompletion[] = selectors.flatMap((option) => [
   { ...option, label: `+${option.label}`, insert: `+${option.insert}`, help: `Include ${option.help.toLowerCase()}` },
   { ...option, label: `-${option.label}`, insert: `-${option.insert}`, help: `Exclude ${option.help.toLowerCase()}` },
 ]);
 
-const tokenPattern = /[+-]?(?:pkg|mod|func|field|struct):[A-Za-z0-9_./*?@#$!\-]*(?::[A-Za-z0-9_./*?@#$!\-]*)?|<<\d*|>>\d*|:[A-Za-z]*|~[A-Za-z]*|[+-][A-Za-z]*|[<>=&|()]|[A-Za-z_][A-Za-z0-9_./*-]*/g;
+const tokenPattern = /[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):[A-Za-z0-9_./*?@#$!\-]*(?::[A-Za-z0-9_./*?@#$!\-]*)?|<<\d*|>>\d*|:[A-Za-z]*|~[A-Za-z]*|[+-][A-Za-z]*|[<>=&|()]|[A-Za-z_*?][A-Za-z0-9_./*?-]*/g;
 type Token = { text: string; start: number; end: number };
 
 export function queryCompletionContext(draft: string, cursor: number): QueryCompletionContext {
@@ -59,9 +67,9 @@ export function queryCompletionContext(draft: string, cursor: number): QueryComp
       filter = token.text;
       continue;
     }
-	if (/^[+-]?(?:pkg|mod|func|field|struct):/.test(token.text)) { mode = "relation"; continue; }
+	if (/^[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):/.test(token.text)) { mode = "relation"; continue; }
     if (mode === "value") { mode = "filter"; filter = undefined; continue; }
-    if (/^(?:<<\d*|<|>|=|:impl|:methods|~w)$/.test(token.text)) { mode = "filter"; continue; }
+    if (/^(?:<<\d*|<|>|=|:impl|:inherits|:methods|~w)$/.test(token.text)) { mode = "filter"; continue; }
     if (mode === "symbol") mode = "relation";
   }
   if (current && cursor === current.end && (current.text === "(" || current.text === ")" ||
@@ -69,7 +77,7 @@ export function queryCompletionContext(draft: string, cursor: number): QueryComp
     return { mode: current.text === ")" ? "relation" : "symbol", prefix: "", start: cursor, end: cursor };
   }
   const prefix = current ? draft.slice(current.start, cursor) : "";
-  if (/^[+-]?(?:pkg|mod|func|field|struct):/.test(current?.text ?? "")) mode = "selector";
+  if (/^[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):/.test(current?.text ?? "")) mode = "selector";
   else if (mode === "filter" && /^[A-Za-z_]/.test(current?.text ?? "")) mode = "symbol";
   return {
     mode, prefix,

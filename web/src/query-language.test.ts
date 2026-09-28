@@ -58,6 +58,12 @@ describe("query Monaco completion", () => {
     expect((await result)?.suggestions.map((item) => item.label)).toEqual(expect.arrayContaining(["+pkg:", "-pkg:", "<", ">", "=", "&", "|", ">>"]));
     expect(suggestModuleSymbols).not.toHaveBeenCalled();
   });
+  it.each(["clicky.Exec*", "clicky.Exe?", "**/catalog.Item*"])("does not request literal suggestions for glob %s", async (expression) => {
+    const { result, reportError } = complete(expression);
+    expect(await result).toEqual({ suggestions: [] });
+    expect(suggestModuleSymbols).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith("");
+  });
 
   it("completes a relative package within the active module snapshot", async () => {
     vi.mocked(suggestTypedSelectors).mockResolvedValue(["pkg:example.org/shop:store"]);
