@@ -16,6 +16,7 @@ const (
 	OperationOutgoing          Operation = "outgoing"
 	OperationDefinition        Operation = "definition"
 	OperationImplementers      Operation = "implementers"
+	OperationInheritors        Operation = "inheritors"
 	OperationMethods           Operation = "methods"
 	OperationTransitiveCallers Operation = "transitive_callers"
 	OperationSet               Operation = "set"

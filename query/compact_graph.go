@@ -235,7 +235,7 @@ func (index *compactIndex) methodImplementations(ctx context.Context, target Mod
 		return nil, nil
 	}
 	var rows []storage.Symbol
-	if err := index.database.WithContext(ctx).Where("owner_id IN ? AND kind = ? AND name = ?", sortedKeys(ids), "method", target.Name).Find(&rows).Error; err != nil {
+	if err := index.database.WithContext(ctx).Where("owner_id IN ? AND kind = ? AND search_name = ? AND name = ?", sortedKeys(ids), "method", storage.SearchName(target.Name), target.Name).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load implementations of %s: %w", target.QueryName, err)
 	}
 	rows = slices.DeleteFunc(rows, func(row storage.Symbol) bool {

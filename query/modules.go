@@ -23,24 +23,30 @@ type ModuleScopeOptions struct {
 }
 
 type ModuleMatch struct {
-	Kind         string         `json:"kind"`
-	RootKey      string         `json:"root_key"`
-	Location     string         `json:"location"`
-	SnapshotID   string         `json:"snapshot_id"`
-	Path         string         `json:"path"`
-	PackagePath  string         `json:"package_path,omitempty"`
-	Line         *int           `json:"line,omitempty"`
-	Column       *int           `json:"column,omitempty"`
-	Identifier   uir.Identifier `json:"identifier"`
-	EndLine      *int           `json:"end_line,omitempty"`
-	EndColumn    *int           `json:"end_column,omitempty"`
-	Role         string         `json:"role,omitempty"`
-	SymbolID     string         `json:"symbol_id,omitempty"`
-	EnclosingID  string         `json:"enclosing_id,omitempty"`
-	EnclosingKey string         `json:"enclosing_key,omitempty"`
-	Coverage     string         `json:"coverage,omitempty"`
-	Dispatch     bool           `json:"dispatch,omitempty"`
-	Depth        int            `json:"depth,omitempty"`
+	Kind           string         `json:"kind"`
+	NodeKind       string         `json:"node_kind,omitempty"`
+	RootKey        string         `json:"root_key"`
+	Location       string         `json:"location"`
+	SnapshotID     string         `json:"snapshot_id"`
+	Path           string         `json:"path"`
+	PackagePath    string         `json:"package_path,omitempty"`
+	Line           *int           `json:"line,omitempty"`
+	Column         *int           `json:"column,omitempty"`
+	Identifier     uir.Identifier `json:"identifier"`
+	EndLine        *int           `json:"end_line,omitempty"`
+	EndColumn      *int           `json:"end_column,omitempty"`
+	Role           string         `json:"role,omitempty"`
+	Relation       string         `json:"relation,omitempty"`
+	SourceID       string         `json:"source_id,omitempty"`
+	SourceName     string         `json:"source_name,omitempty"`
+	SymbolID       string         `json:"symbol_id,omitempty"`
+	EnclosingID    string         `json:"enclosing_id,omitempty"`
+	EnclosingKey   string         `json:"enclosing_key,omitempty"`
+	Coverage       string         `json:"coverage,omitempty"`
+	Dispatch       bool           `json:"dispatch,omitempty"`
+	Depth          int            `json:"depth,omitempty"`
+	Declaration    string         `json:"-"`
+	DefinitionLine *int           `json:"-"`
 }
 
 type CallPath struct {
@@ -49,14 +55,15 @@ type CallPath struct {
 }
 
 type ModuleQueryResult struct {
-	Operation    Operation         `json:"operation"`
-	Matches      []ModuleMatch     `json:"matches"`
-	Stages       []ResolutionStage `json:"stages"`
-	Total        int               `json:"total"`
-	Symbols      []ModuleSymbol    `json:"symbols,omitempty"`
-	Declarations []ModuleMatch     `json:"declarations,omitempty"`
-	Coverage     []ModuleCoverage  `json:"coverage"`
-	Path         *CallPath         `json:"path,omitempty"`
+	Operation    Operation            `json:"operation"`
+	Matches      []ModuleMatch        `json:"matches"`
+	Stages       []ResolutionStage    `json:"stages"`
+	Total        int                  `json:"total"`
+	Symbols      []ModuleSymbol       `json:"symbols,omitempty"`
+	Declarations []ModuleMatch        `json:"declarations,omitempty"`
+	Coverage     []ModuleCoverage     `json:"coverage"`
+	Warnings     []MissingHeadWarning `json:"warnings"`
+	Path         *CallPath            `json:"path,omitempty"`
 }
 
 type moduleScope struct {
@@ -66,12 +73,19 @@ type moduleScope struct {
 }
 
 func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options ModuleScopeOptions) (ModuleQueryResult, error) {
-	if pipeline == nil || pipeline.database == nil {
-		return ModuleQueryResult{}, errors.New("UIR query database is required")
-	}
 	parsed, err := Parse(input)
 	if err != nil {
 		return ModuleQueryResult{}, err
+	}
+	return pipeline.RunExpr(ctx, parsed.Expr, options)
+}
+
+func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options ModuleScopeOptions) (ModuleQueryResult, error) {
+	if pipeline == nil || pipeline.database == nil {
+		return ModuleQueryResult{}, errors.New("UIR query database is required")
+	}
+	if expression == nil {
+		return ModuleQueryResult{}, errors.New("UIR query expression is required")
 	}
 	if options.Limit == 0 {
 		options.Limit = defaultLimit
@@ -82,18 +96,37 @@ func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options 
 	if options.Location != "" && options.SnapshotID != "" {
 		return ModuleQueryResult{}, errors.New("location and snapshot selectors are mutually exclusive")
 	}
-	scopes, err := pipeline.moduleScopes(ctx, options, false)
+	selection, err := pipeline.moduleScopes(ctx, options, false)
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	coverage, err := pipeline.scopeCoverage(ctx, scopes)
+	coverage, err := pipeline.scopeCoverage(ctx, selection.scopes)
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	result := ModuleQueryResult{Operation: expressionOperation(parsed.Expr), Matches: []ModuleMatch{}, Coverage: coverage, Stages: []ResolutionStage{
-		{Name: "parse", Value: string(expressionOperation(parsed.Expr))}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(scopes))}, coverageStage(coverage),
+	coverageStatus := coverageStage(coverage)
+	if len(selection.warnings) > 0 {
+		coverageStatus.Value = fmt.Sprintf("incomplete: %d registered checkout without an indexed head", len(selection.warnings))
+		if len(selection.warnings) > 1 {
+			coverageStatus.Value = fmt.Sprintf("incomplete: %d registered checkouts without indexed heads", len(selection.warnings))
+		}
+		if len(coverage) > 0 {
+			coverageStatus.Value += "; " + coverageSummary(coverage)
+		}
+	}
+	result := ModuleQueryResult{Operation: expressionOperation(expression), Matches: []ModuleMatch{}, Coverage: coverage, Warnings: selection.warnings, Stages: []ResolutionStage{
+		{Name: "parse", Value: string(expressionOperation(expression))}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, coverageStatus,
 	}}
-	if err := pipeline.runCompact(ctx, parsed.Expr, scopes, &result); err != nil {
+	if len(selection.scopes) == 0 {
+		result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: "0 rows"})
+		return result, nil
+	}
+	if err := pipeline.runCompact(ctx, expression, selection.scopes, &result); err != nil {
+		var unresolved *UnresolvedSymbolError
+		if len(selection.warnings) > 0 && errors.As(err, &unresolved) {
+			result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: "0 rows"})
+			return result, nil
+		}
 		return ModuleQueryResult{}, err
 	}
 	if len(result.Matches) > options.Limit {

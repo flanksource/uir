@@ -13,12 +13,13 @@ Step <- Relation (_ Filter)* (_ Primary (_ Modifier)*)?
 
 Selector <- <SelectorText> { p.addToken("selector", text) }
 Modifier <- <('+' / '-') SelectorText> { p.addToken("modifier", text) }
-SelectorText <- ('pkg' / 'mod' / 'func' / 'field' / 'struct') ':' SelectorValue (':' SelectorValue)?
+SelectorText <- ('package' / 'module' / 'method' / 'struct' / 'field' / 'func' / 'type' / 'path' / 'all' / 'var' / 'pkg' / 'mod') ':' SelectorValue (':' SelectorValue)?
 SelectorValue <- ([A-Za-z0-9_./*?@#$!] / '-' / '\\' .)+
-Symbol <- <[A-Za-z_]([A-Za-z0-9_./*] / '-')*> { p.addToken("symbol", text) }
-Relation <- Transitive / Implementers / Methods / Incoming / Outgoing / Definition / Writes
+Symbol <- <[A-Za-z_*?]([A-Za-z0-9_./*?] / '-')*> { p.addToken("symbol", text) }
+Relation <- Transitive / Implementers / Inheritors / Methods / Incoming / Outgoing / Definition / Writes
 Transitive <- '<<' <[0-9]*> { p.addToken("relation", "<<" + text) }
 Implementers <- ':impl' { p.addToken("relation", ":impl") }
+Inheritors <- ':inherits' { p.addToken("relation", ":inherits") }
 Methods <- ':methods' { p.addToken("relation", ":methods") }
 Incoming <- '<' { p.addToken("relation", "<") }
 Outgoing <- '>' { p.addToken("relation", ">") }

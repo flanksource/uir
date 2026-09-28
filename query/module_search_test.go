@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,6 +43,15 @@ var _ = Describe("compact wildcard resolution", func() {
 			all := runQuery(ctx, pipeline, "catalog.*", scope)
 			Expect(all.Total).To(Equal(catalogFuncs + 1))
 			Expect(all.Matches[0].Identifier.Type).To(Equal("ItemZ"))
+			qualified := runQuery(ctx, pipeline, "example.org/catalog/catalog.Item*", scope)
+			Expect(qualified.Total).To(Equal(catalogFuncs + 1))
+			Expect(qualified.Symbols).To(ContainElement(And(HaveField("QueryName", "example.org/catalog/catalog.ItemZ"), HaveField("Kind", "type"))))
+			Expect(runQuery(ctx, pipeline, "example.org/catalog/catalog.Item00?", scope).Total).To(Equal(10))
+			Expect(runQuery(ctx, pipeline, "**/catalog.Item00?", scope).Total).To(Equal(10))
+			_, err = pipeline.RunModules(ctx, "example.org/catalog/catalog.Absent*", scope)
+			var unresolved *query.UnresolvedSymbolError
+			Expect(errors.As(err, &unresolved)).To(BeTrue())
+			Expect(unresolved.Symbol).To(Equal("example.org/catalog/catalog.Absent*"))
 			limited := runQuery(ctx, pipeline, "catalog.*", query.ModuleScopeOptions{RootKey: catalogModule, Limit: queryLimit})
 			Expect(limited.Total).To(Equal(all.Total))
 			Expect(limited.Matches).To(Equal(all.Matches[:queryLimit]))

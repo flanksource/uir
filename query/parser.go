@@ -215,8 +215,11 @@ func relationDepth(value string, fallback int) (int, error) {
 }
 
 func validateSymbolPattern(value string) error {
-	if strings.Contains(value, "..") || strings.HasSuffix(value, ".") || strings.Count(value, "*") > 1 || (strings.Contains(value, "*") && !strings.HasSuffix(value, ".*")) {
+	if strings.Contains(value, "..") || strings.HasSuffix(value, ".") {
 		return fmt.Errorf("invalid Go symbol %q", value)
+	}
+	if _, err := compileSelectorGlob(value); err != nil {
+		return fmt.Errorf("invalid Go symbol %q: %w", value, err)
 	}
 	return nil
 }

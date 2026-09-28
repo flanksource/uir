@@ -64,7 +64,8 @@ func (pipeline *Pipeline) BrowseModules(ctx context.Context, options ModuleScope
 	if options.RootKey == "" && options.Location == "" && options.SnapshotID == "" {
 		return ModuleBrowseResult{}, errors.New("module browse requires root, location, or snapshot")
 	}
-	scopes, err := pipeline.moduleScopes(ctx, options, false)
+	selection, err := pipeline.moduleScopes(ctx, options, false)
+	scopes := selection.scopes
 	if err != nil {
 		return ModuleBrowseResult{}, err
 	}

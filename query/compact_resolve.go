@@ -11,8 +11,8 @@ import (
 
 type compactIndex struct {
 	*indexContext
-	names map[string]string
-	rows  map[string]storage.Symbol
+	names    map[string]string
+	rows     map[string]storage.Symbol
 	dispatch map[string][]ModuleSymbol
 }
 
@@ -21,10 +21,20 @@ func newCompactIndex(index *indexContext) *compactIndex {
 }
 
 func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]ModuleSymbol, error) {
-	wildcard := strings.HasSuffix(pattern, ".*")
+	wildcard := strings.ContainsAny(pattern, "*?")
 	query := index.database.WithContext(ctx).Model(&storage.Symbol{})
-	if !wildcard {
-		lastDot, lastSlash := strings.LastIndex(pattern, "."), strings.LastIndex(pattern, "/")
+	lastDot, lastSlash := strings.LastIndex(pattern, "."), strings.LastIndex(pattern, "/")
+	if wildcard {
+		if lastDot > lastSlash && lastSlash >= 0 && !strings.ContainsAny(pattern[:lastDot], "*?") {
+			query = query.Where("package_path = ?", pattern[:lastDot])
+		}
+		lastPart := pattern[max(lastDot, lastSlash)+1:]
+		if firstGlob := strings.IndexAny(lastPart, "*?"); firstGlob > 0 {
+			if prefix := storage.SearchName(lastPart[:firstGlob]); prefix != "" {
+				query = query.Where("search_name LIKE ?", prefix+"%")
+			}
+		}
+	} else {
 		switch {
 		case lastDot > lastSlash:
 			name := pattern[lastDot+1:]
@@ -35,9 +45,20 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 			query = query.Where("search_name = ? AND name = ?", storage.SearchName(pattern), pattern)
 		}
 	}
+	var glob selectorGlob
+	if wildcard {
+		var err error
+		glob, err = compileSelectorGlob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("compile symbol glob %q: %w", pattern, err)
+		}
+	}
 	var rows []storage.Symbol
 	if err := query.Order("id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("resolve %q: %w", pattern, err)
+	}
+	if err := index.prefetchOwners(ctx, rows); err != nil {
+		return nil, err
 	}
 	matched := make([]storage.Symbol, 0, len(rows))
 	for _, row := range rows {
@@ -45,24 +66,40 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 		if err != nil {
 			return nil, err
 		}
-		if symbolPatternMatches(pattern, name) {
+		if symbolPatternMatches(pattern, name, glob) {
 			matched = append(matched, row)
 		}
 	}
 	return index.activeSymbols(ctx, matched)
 }
 
-func symbolPatternMatches(pattern, qualified string) bool {
+func symbolPatternMatches(pattern, qualified string, glob selectorGlob) bool {
+	legacyChildren := strings.HasSuffix(pattern, ".*") && strings.Count(pattern, "*") == 1 && !strings.Contains(pattern, "?")
 	if strings.Contains(pattern, "/") {
-		if strings.HasSuffix(pattern, ".*") {
+		if legacyChildren {
 			return directChild(qualified, strings.TrimSuffix(pattern, ".*"))
+		}
+		if strings.ContainsAny(pattern, "*?") {
+			return glob.matches(qualified)
 		}
 		return qualified == pattern
 	}
 	short := qualified[strings.LastIndex(qualified, "/")+1:]
-	if strings.HasSuffix(pattern, ".*") {
+	if legacyChildren {
 		prefix := strings.TrimSuffix(pattern, ".*")
 		return directChild(short, prefix) || directChildSuffix(short, prefix)
+	}
+	if strings.ContainsAny(pattern, "*?") {
+		for {
+			if glob.matches(short) {
+				return true
+			}
+			dot := strings.IndexByte(short, '.')
+			if dot < 0 {
+				return false
+			}
+			short = short[dot+1:]
+		}
 	}
 	return short == pattern || strings.HasSuffix(short, "."+pattern)
 }
@@ -120,23 +157,85 @@ func (index *compactIndex) queryName(ctx context.Context, row storage.Symbol) (s
 	return name, nil
 }
 
+// prefetchOwners loads, in IN batches, every owner up the rows' owner chains that queryName has not
+// seen, so naming the rows reads no owner one at a time.
+func (index *compactIndex) prefetchOwners(ctx context.Context, rows []storage.Symbol) error {
+	for depth := 0; len(rows) > 0; depth++ {
+		if depth == 32 {
+			return fmt.Errorf("symbol %s has an owner chain deeper than 32", rows[0].ID)
+		}
+		missing := map[string]bool{}
+		for _, row := range rows {
+			if _, found := index.rows[row.ID]; !found {
+				index.rows[row.ID] = row
+			}
+			if row.OwnerID != nil {
+				if _, found := index.rows[*row.OwnerID]; !found {
+					missing[*row.OwnerID] = true
+				}
+			}
+		}
+		owners := sortedKeys(missing)
+		rows = rows[:0:0]
+		for start := 0; start < len(owners); start += lookupBatch {
+			var found []storage.Symbol
+			if err := index.database.WithContext(ctx).Where("id IN ?", owners[start:min(start+lookupBatch, len(owners))]).Find(&found).Error; err != nil {
+				return fmt.Errorf("load symbol owners: %w", err)
+			}
+			rows = append(rows, found...)
+		}
+		if len(rows) != len(owners) {
+			return fmt.Errorf("loaded %d of %d symbol owners", len(rows), len(owners))
+		}
+	}
+	return nil
+}
+
+// activeSymbols keeps the rows that a scope's active documents define, reference, or implement. The
+// rows a scope defines come from its snapshot's defined-symbol set (symbol deltas), which equals its
+// definition postings. A symbol no scope defines is still active through a reference or implements
+// posting, such as a dependency's function the scope only calls or an interface it only implements,
+// so those two roles are still read from postings, for the remaining rows only.
 func (index *compactIndex) activeSymbols(ctx context.Context, rows []storage.Symbol) ([]ModuleSymbol, error) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	postings, err := index.postings(ctx, symbolIDs(rows), "definition", "reference", "implements")
+	if err := index.remember(rows); err != nil {
+		return nil, err
+	}
+	handles := make([]int64, len(rows))
+	for i, row := range rows {
+		handles[i] = row.Handle
+	}
+	defined, err := index.definedAnywhere(ctx, handles)
 	if err != nil {
 		return nil, err
 	}
-	active := map[string]bool{}
-	for _, posting := range postings {
-		active[posting.symbol] = true
+	var undefined []string
+	for _, row := range rows {
+		if !defined[row.Handle] {
+			undefined = append(undefined, row.ID)
+		}
 	}
-	rows = slices.DeleteFunc(rows, func(row storage.Symbol) bool { return !active[row.ID] })
+	postings, err := index.postings(ctx, undefined, "reference", "implements")
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	for _, posting := range postings {
+		used[posting.symbol] = true
+	}
+	rows = slices.DeleteFunc(rows, func(row storage.Symbol) bool { return !defined[row.Handle] && !used[row.ID] })
 	return index.convertSymbols(ctx, rows)
 }
 
 func (index *compactIndex) convertSymbols(ctx context.Context, rows []storage.Symbol) ([]ModuleSymbol, error) {
+	if err := index.remember(rows); err != nil {
+		return nil, err
+	}
+	if err := index.prefetchOwners(ctx, rows); err != nil {
+		return nil, err
+	}
 	symbols, err := index.moduleSymbols(ctx, rows)
 	if err != nil {
 		return nil, err

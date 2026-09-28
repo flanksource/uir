@@ -32,6 +32,16 @@ var _ = Describe("compact PEG query grammar", func() {
 		Expect(path.Expr.Kind).To(Equal(query.ExprPath))
 		Expect(path.Expr.Depth).To(Equal(4))
 	})
+	DescribeTable("accepts bare symbol globs", func(expression string) {
+		parsed, err := query.Parse(expression)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(parsed.Expr).To(Equal(&query.Expr{Kind: query.ExprSymbol, Symbol: expression}))
+	},
+		Entry("qualified prefix", "github.com/flanksource/clicky.Exec*"),
+		Entry("embedded star", "store.S*ve"),
+		Entry("single character", "store.S?ve"),
+		Entry("recursive package", "**/store.Save"),
+	)
 
 	DescribeTable("rejects invalid expressions", func(expression string) {
 		_, err := query.Parse(expression)
@@ -42,7 +52,7 @@ var _ = Describe("compact PEG query grammar", func() {
 		Entry("unknown relation", "store.Save :uses"),
 		Entry("missing filter value", "store.Save < -f"),
 		Entry("unbounded depth", "store.Save <<9"),
-		Entry("invalid wildcard", "store.S*ve <"),
+		Entry("invalid wildcard", "store.S**ve <"),
 		Entry("trailing operator", "store.Save &"),
 		Entry("second path operator", "app.Run >> store.Save >> app.Done"),
 	)
