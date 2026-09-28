@@ -1,8 +1,13 @@
 ---
 cwd: ..
-exec: .bin/uir
-args: ["--dsn", ".tmp/uir-corpus.db", "--format", "json", "query", "--", "{{.expression}}"]
+# WORKAROUND(missing-dotenv): gavel ignores a missing setup.dotenv file, so each command checks UIR_DSN and exits 78 rather than falling back to ~/.config/uir/uir.db.
+# Correct fix: commons-db shell.loadDotEnv (shell/environment.go) fails on a declared dotenv that does not exist; then drop the guards and exec .bin/uir directly.
+# Ref: discussed with user 2026-09-27
+exec: bash
+args: ["-c", "test -n \"$UIR_DSN\" || { echo 'UIR_DSN is unset: run make fixture-corpus to write .tmp/uir-corpus.env' >&2; exit 78; }; exec .bin/uir \"$@\"", "uir", "--format", "json", "query", "--", "{{.expression}}"]
 timeout: 30s
+setup:
+  dotenv: [../.tmp/uir-corpus.env]
 ---
 
 # Invalid compact expressions fail at the grammar boundary

@@ -35,6 +35,7 @@ function ModulesAndPublication() {
         { name: 'root_key', type: 'text · unique' },
         { name: 'name', type: 'text' },
         { name: 'created_at', type: 'timestamptz' },
+        { name: 'ordinal', type: 'integer · unique' },
       ]} />
       <Entity id={id('location')} title="locations" detail="One registered checkout or nested module" fields={[
         { name: 'id', type: 'uuid', pk: true },
@@ -61,6 +62,7 @@ function ModulesAndPublication() {
         { name: 'diagnostics', type: 'jsonb' },
         { name: 'started_at', type: 'timestamptz' },
         { name: 'completed_at', type: 'timestamptz' },
+        { name: 'ordinal', type: 'bigint · unique' },
       ]} />
     </div>
     <div className="flex items-start justify-center gap-24">
@@ -121,6 +123,7 @@ function FilesAndDocuments() {
         { name: 'symbol_count', type: 'integer' },
         { name: 'occurrence_count', type: 'integer' },
         { name: 'content', type: 'jsonb' },
+        { name: 'ordinal', type: 'bigint · unique' },
       ]} />
     </div>
     <Arrow variant="er" from={id('delta')} to={id('revision')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>(root, path, id)</Label> }} />
@@ -144,12 +147,13 @@ function SymbolIndex() {
         { name: 'search_name', type: 'text' },
         { name: 'visibility', type: 'exported | internal' },
         { name: 'parameter_types', type: 'jsonb' },
+        { name: 'handle', type: 'bigint · unique · H64a' },
       ]} />
-      <Entity id={id('posting')} title="symbol_postings" detail="Inverted index: which documents mention a symbol" accent={COLORS.fk} fields={[
-        { name: 'document_id', type: 'uuid', pk: true, fk: true },
-        { name: 'symbol_id', type: 'text', pk: true, fk: true },
-        { name: 'role', type: 'definition | reference | implements', pk: true },
-        { name: 'root_id', type: 'uuid', fk: true },
+      <Entity id={id('posting')} title="symbol_postings" detail="Inverted index: which documents mention a symbol, by compact keys" accent={COLORS.fk} fields={[
+        { name: 'document_ordinal', type: 'bigint', pk: true, fk: true },
+        { name: 'symbol_handle', type: 'bigint', pk: true, fk: true },
+        { name: 'role', type: '0 definition | 1 reference | 2 implements', pk: true },
+        { name: 'root_ordinal', type: 'integer', fk: true },
         { name: 'occurrence_count', type: 'integer' },
       ]} />
       <Entity id={id('document-ref')} title="documents" detail="Document reference" fields={[
@@ -157,6 +161,7 @@ function SymbolIndex() {
         { name: 'root_id', type: 'uuid', fk: true },
         { name: 'path_key', type: 'text' },
         { name: 'input_hash', type: 'text · 64 hex' },
+        { name: 'ordinal', type: 'bigint · unique' },
       ]} />
     </div>
     <div className="flex items-center justify-center gap-20">
@@ -176,9 +181,52 @@ function SymbolIndex() {
         { name: 'context_hash', type: 'text · 64 hex' },
       ]} />
     </div>
-    <Arrow variant="er" from={id('posting')} to={id('symbol')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>N:1 symbol</Label> }} />
-    <Arrow variant="er" from={id('posting')} to={id('document-ref')} path="straight" startAnchor="right" endAnchor="left" labels={{ middle: <Label>N:1 document</Label> }} />
+    <Arrow variant="er" from={id('posting')} to={id('symbol')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>N:1 handle</Label> }} />
+    <Arrow variant="er" from={id('posting')} to={id('document-ref')} path="straight" startAnchor="right" endAnchor="left" labels={{ middle: <Label>N:1 ordinal</Label> }} />
     <Arrow variant="er" from={id('coverage')} to={id('snapshot-ref2')} path="straight" startAnchor="right" endAnchor="left" labels={{ middle: <Label>N:1 snapshot</Label> }} />
+  </>}</Diagram>;
+}
+
+function HandlesAndDeltas() {
+  return <Diagram className="relative py-8">{(id) => <>
+    <div className="flex items-start justify-center gap-20 mb-16">
+      <Entity id={id('symbol-module')} title="symbol_modules" detail="Numbers the 11-bit module field; '' is 0, std is 1" accent={COLORS.accent} fields={[
+        { name: 'number', type: 'integer · 0–2047', pk: true },
+        { name: 'module_key', type: 'text · unique' },
+      ]} />
+      <Entity id={id('symbol-package')} title="symbol_packages" detail="Numbers each module's packages for the 16-bit package field" accent={COLORS.accent} fields={[
+        { name: 'module_number', type: 'integer', pk: true, fk: true },
+        { name: 'number', type: 'integer · 0–65535', pk: true },
+        { name: 'package_path', type: 'text · unique per module' },
+      ]} />
+      <Entity id={id('symbol-ref')} title="symbols" detail="Symbol reference; handle = 0 | module 11 | package 16 | visibility 1 | kind 3 | local 32" fields={[
+        { name: 'id', type: 'text · 64 hex', pk: true },
+        { name: 'handle', type: 'bigint · unique' },
+      ]} />
+    </div>
+    <div className="flex items-start justify-center gap-20">
+      <Entity id={id('module-ref')} title="modules" detail="Module reference" fields={[
+        { name: 'id', type: 'uuid', pk: true },
+        { name: 'ordinal', type: 'integer · unique' },
+      ]} />
+      <Entity id={id('symbol-delta')} title="symbol_deltas" detail="How a snapshot's defined-symbol set differs from its base's" accent={COLORS.fk} fields={[
+        { name: 'snapshot_ordinal', type: 'bigint', pk: true, fk: true },
+        { name: 'symbol_handle', type: 'bigint', pk: true, fk: true },
+        { name: 'root_ordinal', type: 'integer', fk: true },
+        { name: 'operation', type: 'set | delete' },
+        { name: 'shape_fp', type: 'bigint? · set only' },
+        { name: 'body_fp', type: 'bigint? · set only' },
+      ]} />
+      <Entity id={id('snapshot-ref3')} title="snapshots" detail="Snapshot reference" fields={[
+        { name: 'id', type: 'uuid', pk: true },
+        { name: 'base_snapshot_id', type: 'uuid?', fk: true },
+        { name: 'ordinal', type: 'bigint · unique' },
+      ]} />
+    </div>
+    <Arrow variant="er" from={id('symbol-package')} to={id('symbol-module')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>N:1 module number</Label> }} />
+    <Arrow variant="er" from={id('symbol-delta')} to={id('symbol-ref')} path="straight" startAnchor="top" endAnchor="bottom" labels={{ middle: <Label>N:1 handle</Label> }} />
+    <Arrow variant="er" from={id('symbol-delta')} to={id('module-ref')} path="straight" startAnchor="left" endAnchor="right" labels={{ middle: <Label>N:1 root ordinal</Label> }} />
+    <Arrow variant="er" from={id('symbol-delta')} to={id('snapshot-ref3')} path="straight" startAnchor="right" endAnchor="left" labels={{ middle: <Label>N:1 snapshot ordinal</Label> }} />
   </>}</Diagram>;
 }
 
@@ -193,8 +241,12 @@ export default function UIRGormStorageDesign() {
       <FilesAndDocuments />
     </Section>
     <Section title="Symbol index">
-      <p>Symbols are canonical identities shared across modules. Postings are the inverted index from a symbol to the documents that define, reference, or implement it. Package coverage records, per snapshot, each package's input hash and export shape so membership can be derived and dependents invalidated.</p>
+      <p>Symbols are canonical identities shared across modules. Postings are the inverted index from a symbol to the documents that define, reference, or implement it, keyed by the symbol's handle, the document's ordinal, and a role code, with the root's ordinal as the lookup discriminator. Package coverage records, per snapshot, each package's input hash and export shape so membership can be derived and dependents invalidated.</p>
       <SymbolIndex />
+    </Section>
+    <Section title="Compact handles and symbol deltas">
+      <p>A handle is a database-local 64-bit surrogate for a symbol's SHA-256 id: the registry numbers its module and package fields, so a package's symbols, or its exported symbols of one kind, form one handle range. Modules, snapshots, and documents carry dense local ordinals. Symbol deltas record, per snapshot, the symbols it newly defines or redefines (with shape and body fingerprints) and those it stops defining; the base chain folds them into the snapshot's defined-symbol set. Handles and ordinals never leave the database.</p>
+      <HandlesAndDeltas />
       <p>PostgreSQL uses UUID, JSONB and TIMESTAMPTZ. SQLite projects the same HCL to TEXT UUIDs, validated JSON TEXT and DATETIME. See the HCL files and the schema review for full keys, checks and delete actions.</p>
     </Section>
   </Page>;
