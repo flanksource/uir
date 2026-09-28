@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"go/types"
 	"sort"
-	"strings"
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
@@ -107,8 +106,8 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 		if projected {
 			symbol.Identifier, symbol.ParentKey, symbol.ChildSlot = projection.Identifier, projection.ParentIdentity, projection.ChildSlot
 			symbol.Ordinal, symbol.Payload, symbol.SemanticHash, symbol.Field = projection.Ordinal, projection.Payload, projection.SemanticHash, projection.Field
-		} else {
-			symbol.Identifier = builder.typedIdentifier(*symbol.ID, source.packagePath)
+		} else if symbol.Identifier, err = builder.typedIdentifier(*symbol.ID, source.packagePath); err != nil {
+			return nil, err
 		}
 		symbol.Key = symbol.Identifier.IdentityKey()
 		symbols = append(symbols, symbol)
@@ -144,6 +143,10 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
 	}
+	embeds, err := builder.embeds(declared.object)
+	if err != nil {
+		return storage.DocumentSymbol{}, false, err
+	}
 	row, id := builder.resolver.rows[resolved.ID], resolved.ID
 	typeForm := ""
 	if typeName, ok := declared.object.(*types.TypeName); ok {
@@ -162,32 +165,64 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 		}
 	}
 	return storage.DocumentSymbol{
-		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shape, TypeForm: typeForm, ShapeHash: shapeHash(shape), Implements: implements,
+		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shape, TypeForm: typeForm, ShapeHash: shapeHash(shape), Implements: implements, Embeds: embeds,
 	}, true, nil
 }
 
+func (builder *documentBuilder) embeds(object types.Object) ([]string, error) {
+	name, ok := object.(*types.TypeName)
+	if !ok || name.IsAlias() {
+		return nil, nil
+	}
+	named, ok := name.Type().(*types.Named)
+	if !ok {
+		return nil, nil
+	}
+	var embedded []types.Type
+	switch underlying := named.Underlying().(type) {
+	case *types.Struct:
+		for i := 0; i < underlying.NumFields(); i++ {
+			if underlying.Field(i).Embedded() {
+				embedded = append(embedded, underlying.Field(i).Type())
+			}
+		}
+	case *types.Interface:
+		for i := 0; i < underlying.NumEmbeddeds(); i++ {
+			embedded = append(embedded, underlying.EmbeddedType(i))
+		}
+	}
+	ids := map[string]bool{}
+	for _, target := range embedded {
+		target = types.Unalias(target)
+		if pointer, ok := target.(*types.Pointer); ok {
+			target = types.Unalias(pointer.Elem())
+		}
+		base, ok := target.(*types.Named)
+		if !ok || base.Obj().Pkg() == nil {
+			continue
+		}
+		resolved, err := builder.resolver.resolve(base.Origin().Obj())
+		if err != nil {
+			return nil, err
+		}
+		if resolved.ID == "" {
+			return nil, fmt.Errorf("embedded type %s has no canonical symbol: %s", base.Obj().Name(), resolved.Note)
+		}
+		ids[resolved.ID] = true
+	}
+	return sortedKeys(ids), nil
+}
+
 // typedIdentifier is the structured identifier of a declaration the AST extractor does not project:
-// variables, constants, interface methods, and fields of literal struct types.
-func (builder *documentBuilder) typedIdentifier(id, packagePath string) uir.Identifier {
+// variables, constants, interface methods, and fields of literal struct types. The rule is
+// storage.DeclarationIdentifier, which diff readers apply to the stored rows.
+func (builder *documentBuilder) typedIdentifier(id, packagePath string) (uir.Identifier, error) {
 	row := builder.resolver.rows[id]
 	var owners []string
 	for owner := row.OwnerID; owner != nil; owner = builder.resolver.rows[*owner].OwnerID {
 		owners = append([]string{builder.resolver.rows[*owner].Name}, owners...)
 	}
-	identifier := uir.Identifier{Package: packagePath}
-	switch row.Kind {
-	case "method":
-		identifier.Type, identifier.Method, identifier.NodeType = strings.Join(owners, "."), row.Name, uir.NodeTypeMethod
-	case "field":
-		identifier.Type, identifier.Field, identifier.NodeType = owners[0], strings.Join(append(owners[1:], row.Name), "."), uir.NodeTypeField
-	case "type":
-		identifier.Type, identifier.NodeType = row.Name, uir.NodeTypeType
-	case "func":
-		identifier.Method, identifier.NodeType = row.Name, uir.NodeTypeMethod
-	default:
-		identifier.Field, identifier.NodeType = row.Name, uir.NodeTypePackageVariable
-	}
-	return identifier
+	return storage.DeclarationIdentifier(packagePath, row, owners)
 }
 
 // implements lists the interfaces, among the variant and its transitive imports, that a declared

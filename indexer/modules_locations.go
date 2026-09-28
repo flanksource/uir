@@ -29,7 +29,8 @@ func requireRegisteredLocation(ctx context.Context, database *gorm.DB, discovere
 }
 
 // moduleBase is the location's locked head, when it has one, and the snapshot a new snapshot bases on:
-// the location's own head, else the primary location's head, else none.
+// the location's own head, else the primary location's head, else none. A primary without a head (its
+// index was discarded by the pre-handle cutover) leaves no base, so the location is indexed in full.
 type moduleBase struct {
 	head     storage.ModuleLocationHead
 	hasHead  bool
@@ -51,7 +52,8 @@ func loadModuleBase(ctx context.Context, database *gorm.DB, root storage.ModuleR
 		}
 		if primary.LocationID != location.ID {
 			var primaryHead storage.ModuleLocationHead
-			if err := database.WithContext(ctx).Where("location_id = ?", primary.LocationID).First(&primaryHead).Error; err != nil {
+			err := database.WithContext(ctx).Where("location_id = ?", primary.LocationID).First(&primaryHead).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return moduleBase{}, fmt.Errorf("load primary head: %w", err)
 			}
 			baseID = primaryHead.SnapshotID
@@ -93,12 +95,16 @@ func advanceHead(ctx context.Context, database *gorm.DB, base moduleBase, snapsh
 
 func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered discoveredRoot, locations map[string]storage.ModuleLocation) (storage.ModuleRoot, storage.ModuleLocation, error) {
 	now := time.Now().UTC()
-	root := storage.ModuleRoot{ID: uuid.New(), RootKey: discovered.RootKey, Name: filepath.Base(discovered.RootKey), CreatedAt: now}
-	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&root).Error; err != nil {
-		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("create module root: %w", err)
+	var root storage.ModuleRoot
+	err := database.WithContext(ctx).Where("root_key = ?", discovered.RootKey).Take(&root).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		created := storage.ModuleRoot{ID: uuid.New(), RootKey: discovered.RootKey, Name: filepath.Base(discovered.RootKey), CreatedAt: now}
+		if err := storage.CreateModuleRoot(ctx, database, &created); err != nil {
+			return storage.ModuleRoot{}, storage.ModuleLocation{}, err
+		}
+		err = database.WithContext(ctx).Where("root_key = ?", discovered.RootKey).Take(&root).Error
 	}
-	root = storage.ModuleRoot{}
-	if err := database.WithContext(ctx).Where("root_key = ?", discovered.RootKey).First(&root).Error; err != nil {
+	if err != nil {
 		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("load module root: %w", err)
 	}
 	location := storage.ModuleLocation{

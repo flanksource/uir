@@ -36,3 +36,21 @@ func RunModulesTask(ctx context.Context, indexer *Indexer, options ModuleOptions
 	}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain())
 	return running.GetResult()
 }
+
+func RunMissingModulesTask(ctx context.Context, indexer *Indexer, includeTests bool) ([]ModuleResult, error) {
+	if indexer == nil {
+		return nil, errors.New("UIR indexer is required")
+	}
+	group := clicky.StartGroup[[]ModuleResult]("Reindex registered checkouts without heads", clickytask.WithKind("module-index"))
+	running := group.Add("Reindex missing heads", func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
+		results, err := indexer.ReindexMissing(taskContext, includeTests)
+		if err != nil {
+			return nil, err
+		}
+		for _, result := range results {
+			progress.Infof("root=%s location=%s snapshot=%s", result.RootKey, result.Location, result.SnapshotID)
+		}
+		return results, nil
+	}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain())
+	return running.GetResult()
+}

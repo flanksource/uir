@@ -80,7 +80,7 @@ var _ = Describe("typed extraction", func() {
 			Expect(database.Where("kind = ? AND name = ?", "builtin", "len").First(&builtinLen).Error).To(Succeed())
 			Expect(builtinLen.ModuleKey).To(BeEmpty())
 			Expect(occurrencesOf(snapshot.contents["book/book.go"], builtinLen.ID)).To(HaveLen(1))
-			Expect(countRows(database, &storage.SymbolPosting{}, "symbol_id IN (?)", database.Model(&storage.Symbol{}).Select("id").Where("kind = ?", "builtin"))).To(BeZero())
+			Expect(countRows(database, &storage.SymbolPosting{}, "symbol_handle IN (?)", database.Model(&storage.Symbol{}).Select("handle").Where("kind = ?", "builtin"))).To(BeZero())
 		},
 		Entry("SQLite", indexerSQLiteOptions),
 		Entry("PostgreSQL", indexerPostgresOptions),
@@ -233,7 +233,7 @@ var _ = Describe("typed extraction", func() {
 				Expect(snapshot.documents[path].Coverage).To(Equal(storage.CoverageSyntax))
 				Expect(snapshot.contents[path].Symbols).To(HaveLen(1))
 				Expect(snapshot.contents[path].Symbols[0].ID).To(BeNil())
-				Expect(countRows(database, &storage.SymbolPosting{}, "document_id = ?", snapshot.documents[path].ID)).To(BeZero())
+				Expect(countRows(database, &storage.SymbolPosting{}, "document_ordinal = ?", snapshot.documents[path].Ordinal)).To(BeZero())
 			}
 			Expect(snapshot.packageRow(database, "example.org/broken/fine").Coverage).To(Equal(storage.CoverageIndexed))
 		},

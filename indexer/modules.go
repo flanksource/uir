@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/flanksource/uir/storage"
@@ -12,10 +13,11 @@ import (
 )
 
 type ModuleOptions struct {
-	Path         string
-	IncludeTests bool
-	Force        bool
-	ExistingOnly bool
+	Path          string
+	ExactLocation string
+	IncludeTests  bool
+	Force         bool
+	ExistingOnly  bool
 }
 
 type ModuleResult struct {
@@ -36,6 +38,18 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 	roots, err := discoverModules(ctx, options.Path, options.IncludeTests)
 	if err != nil {
 		return nil, err
+	}
+	if options.ExactLocation != "" {
+		selected := roots[:0]
+		for _, root := range roots {
+			if root.LocalPath == options.ExactLocation {
+				selected = append(selected, root)
+			}
+		}
+		if len(selected) != 1 {
+			return nil, fmt.Errorf("registered checkout %q resolved to %d Go modules", options.ExactLocation, len(selected))
+		}
+		roots = selected
 	}
 	if options.ExistingOnly {
 		for _, root := range roots {
@@ -60,8 +74,9 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 		}
 		extractions = append(extractions, extraction)
 	}
-	results := make([]ModuleResult, 0, len(roots))
-	err = indexer.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+	var results []ModuleResult
+	err = storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
+		results = make([]ModuleResult, 0, len(roots))
 		locations := make(map[string]storage.ModuleLocation, len(roots))
 		for _, extraction := range extractions {
 			result, location, indexErr := indexModule(ctx, transaction, extraction, locations, options)
@@ -75,6 +90,33 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 	})
 	if err != nil {
 		return nil, err
+	}
+	return results, nil
+}
+
+func (indexer *Indexer) ReindexMissing(ctx context.Context, includeTests bool) ([]ModuleResult, error) {
+	if indexer == nil || indexer.database == nil {
+		return nil, errors.New("UIR index database is required")
+	}
+	var locations []storage.ModuleLocation
+	if err := indexer.database.WithContext(ctx).Table("locations AS location").Select("location.*").
+		Joins("LEFT JOIN location_heads AS head ON head.location_id = location.id").
+		Where("head.location_id IS NULL").Find(&locations).Error; err != nil {
+		return nil, fmt.Errorf("list registered checkouts without indexed heads: %w", err)
+	}
+	sort.Slice(locations, func(i, j int) bool {
+		if len(locations[i].CanonicalPath) != len(locations[j].CanonicalPath) {
+			return len(locations[i].CanonicalPath) < len(locations[j].CanonicalPath)
+		}
+		return locations[i].CanonicalPath < locations[j].CanonicalPath
+	})
+	results := make([]ModuleResult, 0, len(locations))
+	for _, location := range locations {
+		indexed, err := indexer.IndexModules(ctx, ModuleOptions{Path: location.CanonicalPath, ExactLocation: location.CanonicalPath, IncludeTests: includeTests, ExistingOnly: true})
+		if err != nil {
+			return nil, fmt.Errorf("reindex registered checkout %q: %w", location.CanonicalPath, err)
+		}
+		results = append(results, indexed...)
 	}
 	return results, nil
 }
@@ -128,8 +170,8 @@ type snapshotPublication struct {
 }
 
 // publishSnapshot writes source revisions, symbols, documents, and postings, then the snapshot row
-// with its package coverage and source deltas, and finally advances the location head with a
-// compare-and-swap; the caller's transaction makes the whole publication atomic. Extraction is
+// with its source deltas, package coverage, and symbol deltas, and finally advances the location head
+// with a compare-and-swap; the caller's transaction makes the whole publication atomic. Extraction is
 // already complete, so the transaction only writes rows.
 func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapshotPublication, result *ModuleResult) (storage.ModuleSnapshot, error) {
 	previous := map[string]storage.SourceRevision{}
@@ -143,17 +185,21 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if err := publishDocuments(ctx, database, publication.extraction, current, publication.force, result); err != nil {
+	handles, err := publishDocuments(ctx, database, publication, current, result)
+	if err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	snapshot := publication.snapshot()
-	if err := database.WithContext(ctx).Create(&snapshot).Error; err != nil {
-		return storage.ModuleSnapshot{}, fmt.Errorf("create module snapshot: %w", err)
+	if err := storage.CreateSnapshot(ctx, database, &snapshot); err != nil {
+		return storage.ModuleSnapshot{}, err
 	}
 	if err := createSourceDeltas(ctx, database, snapshot, previous, current); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	if err := createPackageCoverage(ctx, database, snapshot, publication.extraction.packages); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	if err := createSymbolDeltas(ctx, database, snapshot, publication, previous, handles); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	if publication.preserveHead {

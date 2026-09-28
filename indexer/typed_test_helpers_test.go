@@ -90,7 +90,7 @@ type typedSnapshot struct {
 
 func loadTypedSnapshot(ctx context.Context, database *gorm.DB, snapshotID string) typedSnapshot {
 	GinkgoHelper()
-	active, err := storage.ActiveDocuments(ctx, database, uuid.MustParse(snapshotID))
+	active, err := storage.ActiveDocuments(ctx, database, uuid.MustParse(snapshotID), storage.ActiveDocumentOptions{Content: true})
 	Expect(err).ToNot(HaveOccurred())
 	loaded := typedSnapshot{id: snapshotID, documents: map[string]storage.Document{}, contents: map[string]storage.DocumentContent{}}
 	for path, document := range active {
@@ -137,19 +137,26 @@ func (snapshot typedSnapshot) packageRow(database *gorm.DB, packagePath string) 
 	return row
 }
 
-// postings returns this symbol's postings among the snapshot's active documents as "path role count".
+// postings returns this symbol's postings among the snapshot's active documents as "path role count";
+// every one of them carries the ordinal of the snapshot's root.
 func (snapshot typedSnapshot) postings(database *gorm.DB, symbolID string) []string {
 	GinkgoHelper()
+	handles, err := storage.SymbolHandles(context.Background(), database, []string{symbolID})
+	Expect(err).ToNot(HaveOccurred())
 	var rows []storage.SymbolPosting
-	Expect(database.Where("symbol_id = ?", symbolID).Find(&rows).Error).To(Succeed())
-	paths := map[uuid.UUID]string{}
+	Expect(database.Where("symbol_handle = ?", handles[symbolID]).Find(&rows).Error).To(Succeed())
+	paths := map[int64]string{}
+	var rootID uuid.UUID
 	for path, document := range snapshot.documents {
-		paths[document.ID] = path
+		paths[document.Ordinal], rootID = path, document.RootID
 	}
+	rootOrdinal, err := storage.RootOrdinal(context.Background(), database, rootID)
+	Expect(err).ToNot(HaveOccurred())
 	result := []string{}
 	for _, row := range rows {
-		if path, active := paths[row.DocumentID]; active {
-			result = append(result, path+" "+row.Role+" "+strconv.Itoa(row.OccurrenceCount))
+		if path, active := paths[row.DocumentOrdinal]; active {
+			Expect(row.RootOrdinal).To(Equal(rootOrdinal), path)
+			result = append(result, path+" "+row.Role.String()+" "+strconv.Itoa(row.OccurrenceCount))
 		}
 	}
 	return result
@@ -161,6 +168,8 @@ func tableCounts(database *gorm.DB) map[string]int64 {
 		"symbols":          countRows(database, &storage.Symbol{}, "1 = 1"),
 		"documents":        countRows(database, &storage.Document{}, "1 = 1"),
 		"symbol_postings":  countRows(database, &storage.SymbolPosting{}, "1 = 1"),
+		"symbol_deltas":    countRows(database, &storage.SymbolDelta{}, "1 = 1"),
+		"symbol_packages":  countRows(database, &storage.SymbolPackage{}, "1 = 1"),
 		"package_coverage": countRows(database, &storage.PackageCoverage{}, "1 = 1"),
 		"snapshots":        countRows(database, &storage.ModuleSnapshot{}, "1 = 1"),
 		"source_revisions": countRows(database, &storage.SourceRevision{}, "1 = 1"),
