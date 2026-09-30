@@ -90,6 +90,10 @@ func HashStatement(stmt Statement) string {
 		return hashMethodCallStmt(*s)
 	case MethodCallStmt:
 		return hashMethodCallStmt(s)
+	case *DispatchCallStmt:
+		return hashDispatchCallStmt(*s)
+	case DispatchCallStmt:
+		return hashDispatchCallStmt(s)
 	case *EndpointCallStmt:
 		return hashEndpointCallStmt(*s)
 	case EndpointCallStmt:
@@ -191,6 +195,9 @@ func hashExprStmt(s ExprStmt) string {
 	}
 	if s.MethodCall != nil {
 		h.AddString("method_call", HashStatement(*s.MethodCall))
+	}
+	if s.DispatchCall != nil {
+		h.AddString("dispatch_call", HashStatement(*s.DispatchCall))
 	}
 	if s.EndpointCall != nil {
 		h.AddString("endpoint_call", HashStatement(*s.EndpointCall))
@@ -325,6 +332,26 @@ func hashMethodCallStmt(s MethodCallStmt) string {
 	}
 	h.AddString("arguments", hashArguments(s.Arguments))
 	h.AddBool("is_constructor", s.IsConstructor)
+	return h.String()
+}
+
+func hashDispatchCallStmt(s DispatchCallStmt) string {
+	h := NewHasher("stmt.dispatch_call")
+	if s.Method != nil {
+		h.AddString("method", s.Method.GetIdentifier().SymbolKey())
+	}
+	if s.Receiver != nil {
+		h.AddString("receiver", HashStatement(*s.Receiver))
+	}
+	h.AddString("arguments", hashArguments(s.Arguments))
+	h.AddInt("candidates.len", len(s.Candidates))
+	for i, candidate := range s.Candidates {
+		key := "<nil>"
+		if candidate != nil {
+			key = candidate.GetIdentifier().SymbolKey()
+		}
+		h.AddString(fmt.Sprintf("candidates.%d", i), key)
+	}
 	return h.String()
 }
 

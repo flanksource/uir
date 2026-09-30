@@ -157,6 +157,32 @@ export type ModuleQueryResult = {
   stages: { name: string; value: string }[];
   path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
 };
+export type ModuleGraphDirection = "callees" | "callers" | "both";
+export type ModuleGraphSite = { path?: string; line?: number; column?: number; text?: string; guards?: string[] };
+export type ModuleGraphNode = {
+  id: string;
+  identifier: ModuleNode["identifier"];
+  kind: string;
+  label: string;
+  group?: string;
+  depth: number;
+  in: number;
+  out: number;
+  unresolved?: boolean;
+  location?: { root_key?: string; checkout_path?: string; snapshot_id?: string; source_id?: string; path?: string; identity_key?: string; line?: number; column?: number };
+  tone?: string;
+  icon?: string;
+  properties?: Record<string, string>;
+};
+export type ModuleGraphEdge = { id: string; from: string; to: string; type: "call" | "dispatch"; kind?: string; sites: ModuleGraphSite[] };
+export type ModuleGraphGroup = { id: string; label: string; parent?: string };
+export type ModuleGraphOmitted = { node_limit?: boolean; beyond_depth?: number; unresolved?: number; unreadable_source?: string[] };
+export type ModuleGraph = { roots: string[]; nodes: ModuleGraphNode[]; edges: ModuleGraphEdge[]; groups?: ModuleGraphGroup[]; omitted: ModuleGraphOmitted };
+export type ModuleGraphResult = ModuleGraph & { stages: { name: string; value: string }[]; warnings: MissingHeadWarning[]; candidates: ModuleQuerySymbol[] };
+export type ModuleGraphOptions = {
+  selector?: string; symbol?: string; direction?: ModuleGraphDirection; depth?: number; limit?: number;
+  root?: string; location?: string; snapshot?: string;
+};
 export type ModuleIndexResult = {
   root_key: string;
   location: string;
@@ -300,6 +326,26 @@ function isQueryResult(value: unknown): value is ModuleQueryResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
   return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "warnings", "stages"].every((key) => Array.isArray(result[key]));
+}
+
+const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "root", "location", "snapshot"] as const;
+
+export async function getModuleGraph(options: ModuleGraphOptions, signal?: AbortSignal): Promise<ModuleGraphResult> {
+  const params: Record<string, string> = {};
+  for (const name of graphParameters) {
+    const value = options[name];
+    if (value !== undefined && value !== "") params[name] = String(value);
+  }
+  const result = await request<unknown>(moduleURL("graph", params), { signal });
+  if (!isGraphResult(result)) throw new Error(`Graph response is not a graph envelope: ${JSON.stringify(result).slice(0, 200)}`);
+  return result;
+}
+
+function isGraphResult(value: unknown): value is ModuleGraphResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return typeof result.omitted === "object" && result.omitted !== null
+    && ["roots", "nodes", "edges", "stages", "warnings", "candidates"].every((key) => Array.isArray(result[key]));
 }
 
 export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexResult[]> {

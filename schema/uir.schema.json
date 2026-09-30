@@ -983,6 +983,97 @@
       },
       "additionalProperties": false
     },
+    "DispatchCallStmt": {
+      "description": "DispatchCallStmt is a call whose target is chosen at run time among Candidates: an interface method with several implementers, a rule name several scopes define. Method is the declared target.",
+      "type": "object",
+      "properties": {
+        "Method": {
+          "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Node"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "candidates": {
+          "description": "Candidates are the implementations that may run, encoded as nodes by the statement's codec.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Node"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "receiver": {
+          "description": "nil if function call",
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
+          "type": "string"
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "dispatch_call"
+        }
+      },
+      "additionalProperties": false
+    },
     "DocStmt": {
       "type": "object",
       "properties": {
@@ -1211,6 +1302,9 @@
         },
         "content": {
           "type": "string"
+        },
+        "dispatch_call": {
+          "$ref": "#/$defs/DispatchCallStmt"
         },
         "end_line": {
           "type": "integer"
@@ -1894,7 +1988,7 @@
       "type": "object",
       "properties": {
         "Method": {
-          "description": "Method is encoded under the \"Method\" key by MethodCallStmt's codec.",
+          "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
           "anyOf": [
             {
               "$ref": "#/$defs/Node"
@@ -3480,6 +3574,9 @@
           "$ref": "#/$defs/MethodCallStmt"
         },
         {
+          "$ref": "#/$defs/DispatchCallStmt"
+        },
+        {
           "$ref": "#/$defs/RecordReadStmt"
         },
         {
@@ -3600,7 +3697,8 @@
         "assignment:destructure",
         "raw",
         "assignment:template",
-        "foreign_key"
+        "foreign_key",
+        "dispatch_call"
       ]
     },
     "SwitchStmt": {

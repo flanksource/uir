@@ -86,9 +86,9 @@ func (n *hierarchyNodeTree) Pretty() api.Text {
 	if name == "" {
 		name = n.node.ID
 	}
-	label = label.Append(name, "text-green-600 font-bold")
+	label = label.Append(name, uir.StyleDeclarationName)
 	if n.node.Kind != "" {
-		label = label.Append(" ", "").Append("("+n.node.Kind+")", "text-gray-500")
+		label = label.Append(" ", "").Append("("+n.node.Kind+")", uir.StyleDim)
 	}
 	return label
 }
@@ -116,15 +116,15 @@ func (n *hierarchyNodeTree) GetChildren() []api.TreeNode {
 			continue
 		}
 		children = append(children, hierarchyLeafText(
-			clicky.Text("attach ", "text-gray-500").Append(hierarchySymbolSummary(attachment.SymbolRef), "text-blue-500"),
+			clicky.Text("attach ", uir.StyleDim).Append(hierarchySymbolSummary(attachment.SymbolRef), "text-blue-500"),
 		))
 	}
 
 	for _, edge := range sortedHierarchyEdges(n.node.Children, false) {
 		children = append(children, hierarchyLeafText(
-			clicky.Text("ref ", "text-gray-500").
+			clicky.Text("ref ", uir.StyleDim).
 				Append(hierarchyEdgeLabel(edge), "text-purple-600").
-				Append(" -> ", "text-gray-500").
+				Append(" -> ", uir.StyleDim).
 				Append(hierarchyTargetLabel(edge.TargetID, n.nodeByID), "text-blue-500"),
 		))
 	}
@@ -148,7 +148,7 @@ type attachedSymbolTreeNode struct {
 }
 
 func (n *attachedSymbolTreeNode) Pretty() api.Text {
-	return clicky.Text("attach ", "text-gray-500").
+	return clicky.Text("attach ", uir.StyleDim).
 		Append(n.role, "text-purple-600").
 		Append(" ", "").
 		Add(n.symbol.Pretty())
@@ -171,7 +171,7 @@ func (n *hierarchyLeafNode) GetChildren() []api.TreeNode {
 }
 
 func hierarchyLeaf(text string) api.TreeNode {
-	return &hierarchyLeafNode{label: clicky.Text(text, "text-gray-600")}
+	return &hierarchyLeafNode{label: clicky.Text(text, uir.StyleSecondary)}
 }
 
 func hierarchyLeafText(text api.Text) api.TreeNode {
@@ -184,7 +184,7 @@ func hierarchyCollapsedLeaf(name string, value any) api.TreeNode {
 		return hierarchyLeaf(name)
 	}
 	return &hierarchyLeafNode{
-		label: clicky.Text("").Add(clicky.Collapsed(name, clicky.Text(string(raw), "text-gray-600"))),
+		label: clicky.Text("").Add(clicky.Collapsed(name, clicky.Text(string(raw), uir.StyleSecondary))),
 	}
 }
 
@@ -197,10 +197,10 @@ func hierarchySummaryLabel(graph *uir.HierarchyGraph) api.Text {
 		}
 		attachments += len(node.Attachments)
 	}
-	return clicky.Text("hierarchy", "font-bold").
-		Append(fmt.Sprintf(" nodes=%d", len(graph.Nodes)), "text-gray-600").
-		Append(fmt.Sprintf(" attachments=%d", attachments), "text-gray-600").
-		Append(fmt.Sprintf(" files=%d", len(fileSet)), "text-gray-600")
+	return clicky.Text("hierarchy", uir.StyleBold).
+		Append(fmt.Sprintf(" nodes=%d", len(graph.Nodes)), uir.StyleSecondary).
+		Append(fmt.Sprintf(" attachments=%d", attachments), uir.StyleSecondary).
+		Append(fmt.Sprintf(" files=%d", len(fileSet)), uir.StyleSecondary)
 }
 
 func sortedHierarchyEdges(edges []uir.HierarchyEdge, containment bool) []uir.HierarchyEdge {

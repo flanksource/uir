@@ -192,6 +192,7 @@ func (row moduleQueryRow) Row() map[string]any {
 
 func registerModuleCommands(root *cobra.Command) {
 	registerModuleBrowseCommands(root)
+	registerModuleGraphCommand(root)
 	var add *cobra.Command
 	add = clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) ([]indexer.ModuleResult, error) {
 		path := options.Path
@@ -381,22 +382,7 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 		})
 	}
 	if err != nil {
-		var invalid *query.InvalidQueryError
-		if errors.As(err, &invalid) {
-			failure := entity.NewStatusError(http.StatusBadRequest, "invalid_query", invalid.Message)
-			failure.Hint = invalid.Hint
-			if invalid.Line > 0 {
-				failure.Context = map[string]any{"line": invalid.Line, "column": invalid.Column}
-			}
-			return moduleQueryResult{}, failure
-		}
-		var unresolved *query.UnresolvedSymbolError
-		if errors.As(err, &unresolved) {
-			failure := entity.NewStatusError(http.StatusNotFound, "symbol_not_found", unresolved.Error())
-			failure.Hint = "Check the symbol spelling or select a snapshot where it is indexed."
-			return moduleQueryResult{}, failure
-		}
-		return moduleQueryResult{}, err
+		return moduleQueryResult{}, queryStatusError(err)
 	}
 	warnMissingHeads(ctx, result.Warnings)
 	symbols := result.Symbols

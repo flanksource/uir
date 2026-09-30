@@ -55,13 +55,43 @@ func (method MethodCallStmt) GetSignature() string {
 
 type methodBase struct {
 	statementBase `json:",inline"`
-	// Method is encoded under the "Method" key by MethodCallStmt's codec.
+	// Method is encoded under the "Method" key by the codec of the call statement
+	// that embeds it.
 	Method   Node      `json:",inline"`
 	Receiver *ExprStmt `json:"receiver,omitempty"` // nil if function call
 }
 
 func (s MethodCallStmt) GetStatementType() StatementType {
 	return ASTStatementTypeCall
+}
+
+// DispatchCallStmt is a call whose target is chosen at run time among Candidates:
+// an interface method with several implementers, a rule name several scopes define.
+// Method is the declared target.
+type DispatchCallStmt struct {
+	methodBase `json:",inline"`
+	Arguments  Arguments `json:"arguments,omitempty"`
+	// Candidates are the implementations that may run, encoded as nodes by the
+	// statement's codec.
+	Candidates []Node `json:"candidates,omitempty"`
+}
+
+func (s DispatchCallStmt) GetStatementType() StatementType {
+	return ASTStatementTypeDispatchCall
+}
+
+func (s DispatchCallStmt) GetSignature() string {
+	return s.GetLocation().GetSignature()
+}
+
+// GetRelationships relates the call to its declared target by call and to each
+// candidate by dispatch.
+func (s DispatchCallStmt) GetRelationships() []Relationship {
+	relationships := []Relationship{NewRelationship(RelationshipTypeCall, nil, s.Method).Build()}
+	for _, candidate := range s.Candidates {
+		relationships = append(relationships, NewRelationship(RelationshipTypeDispatch, nil, candidate).Build())
+	}
+	return relationships
 }
 
 type EndpointCallStmt struct {

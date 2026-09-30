@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, addModules, applyModuleRefactor, browseModule, getSystemInfo, listModuleDependencies, listModuleHeads, listModuleLocations, listModuleSnapshots, previewModuleRefactor, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors } from "../../../web/src/api";
+import { ApiError, addModules, applyModuleRefactor, browseModule, getModuleGraph, getSystemInfo, listModuleDependencies, listModuleHeads, listModuleLocations, listModuleSnapshots, previewModuleRefactor, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors, type ModuleGraphResult } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -179,6 +179,69 @@ it("posts a bare symbol glob unchanged and returns its expanded symbols", async 
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/query", expect.objectContaining({
     method: "POST", body: JSON.stringify({ args: [expression], root: "github.com/flanksource/clicky", snapshot: "" }),
   }));
+});
+
+const submitID = "33ae5c20b31b1eac8eaa49ac87520ce6a61b9f8c308a413c4e0bba473f7df224";
+const chargeID = "0c2f9d0a6d7b1c1e6a7a2f0f6f2b9d3c51c3b8a4f6f1e0d9c8b7a6f5e4d3c2b1";
+const hookID = `unresolved:${submitID}:v1:["variable","","example.org/orders","","","hook",""]`;
+const ordersLocation = { root_key: "example.org/orders", checkout_path: "/checkout/orders", snapshot_id: snapshot, source_id: "bb0bc7de-b868-48a7-982c-57dc38c82c99", path: "orders.go" };
+const submitGraph: ModuleGraphResult = {
+  roots: [submitID],
+  nodes: [
+    { id: submitID, identifier: { package: "example.org/orders", method: "Submit", signature: "(order Order)", node_type: "method" }, kind: "func", label: "Submit", group: "example.org/orders", depth: 0, in: 1, out: 2,
+      location: { ...ordersLocation, identity_key: 'v1:["method","","example.org/orders","","Submit","","(order Order)"]', line: 16, column: 6 } },
+    { id: chargeID, identifier: { package: "example.org/orders", method: "charge", signature: "(order Order)", node_type: "method" }, kind: "func", label: "charge", group: "example.org/orders", depth: 1, in: 1, out: 1,
+      location: { ...ordersLocation, line: 29, column: 6 }, properties: { declarations: "2" } },
+    { id: hookID, identifier: { package: "example.org/orders", field: "hook", node_type: "variable" }, kind: "unresolved", label: "hook", group: "example.org/orders", depth: 1, in: 1, out: 0, unresolved: true },
+  ],
+  edges: [
+    { id: `${submitID}|${chargeID}|call`, from: submitID, to: chargeID, type: "call", sites: [
+      { path: "orders.go", line: 18, column: 3, text: "charge", guards: ["order.Total > 0"] },
+      { path: "orders.go", line: 21, column: 3, text: "charge", guards: ["order.Rush"] },
+    ] },
+    { id: `${submitID}|${hookID}|call`, from: submitID, to: hookID, type: "call", sites: [{ path: "orders.go", line: 24, column: 3, text: "hook", guards: ["hook != nil"] }] },
+    { id: `${submitID}|${chargeID}|dispatch`, from: submitID, to: chargeID, type: "dispatch", sites: [{ path: "orders.go", line: 26, column: 11, text: "notifier.Notify" }] },
+  ],
+  omitted: { node_limit: true, beyond_depth: 1, unresolved: 1, unreadable_source: ["orders.go"] },
+  stages: [{ name: "scope", value: "1 snapshots" }, { name: "resolve", value: "example.org/orders.Submit" }],
+  warnings: [],
+  candidates: [],
+};
+
+it("gets the call graph of a selector with only the options that were set", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(submitGraph), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(getModuleGraph({ selector: "orders.Submit", direction: "both", depth: 2, limit: 150, root: "example.org/orders", snapshot })).resolves.toEqual(submitGraph);
+  expect(fetcher).toHaveBeenCalledWith(
+    `/api/v1/modules/graph?selector=orders.Submit&direction=both&depth=2&limit=150&root=example.org%2Forders&snapshot=${snapshot}`,
+    expect.objectContaining({ headers: { Accept: "application/json" } }),
+  );
+});
+
+it("gets the call graph of a node by its symbol id and returns the candidates of an ambiguous selector", async () => {
+  const candidates: ModuleGraphResult = { roots: [], nodes: [], edges: [], omitted: {}, warnings: [], stages: [{ name: "resolve", value: "2 candidates" }], candidates: [
+    { id: saveID, module_key: scope.root, package_path: "example.org/refs/store", kind: "method", owner: "Store", name: "Save", query_name: "example.org/refs/store.Store.Save", visibility: "exported", parameter_types: [] },
+    { id: chargeID, module_key: scope.root, package_path: "example.org/refs/cache", kind: "method", owner: "Cache", name: "Save", query_name: "example.org/refs/cache.Cache.Save", visibility: "exported", parameter_types: [] },
+  ] };
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(candidates), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(getModuleGraph({ selector: "Save" })).resolves.toEqual(candidates);
+  await getModuleGraph({ symbol: saveID, direction: "callers", location: scope.location });
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+    "/api/v1/modules/graph?selector=Save",
+    `/api/v1/modules/graph?symbol=${saveID}&direction=callers&location=%2Fcheckout%2Frefs`,
+  ]);
+});
+
+it("rejects a graph response that is not the graph envelope and surfaces a refused request", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ roots: [submitID], nodes: [], edges: [] }), { status: 200 })));
+  await expect(getModuleGraph({ selector: "orders.Submit" })).rejects.toThrow("Graph response is not a graph envelope");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: "invalid_query", message: "depth 9 is outside 1..8", hint: "Give depth 1 through 8", trace: "trace-3",
+  }), { status: 400, headers: { "Content-Type": "application/json" } })));
+  await expect(getModuleGraph({ selector: "orders.Submit", depth: 9 })).rejects.toMatchObject({
+    name: "ApiError", status: 400, code: "invalid_query", message: "depth 9 is outside 1..8", hint: "Give depth 1 through 8",
+  } satisfies Partial<ApiError>);
 });
 
 it("scopes checkout history, source projections, and content to a module snapshot", async () => {

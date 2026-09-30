@@ -241,7 +241,7 @@ func (index *indexContext) declarationMatch(posting scopedPosting, document deco
 func (index *indexContext) occurrenceMatch(posting scopedPosting, document decodedDocument, kind string, occurrence storage.DocumentOccurrence) ModuleMatch {
 	match := index.match(posting, document, kind)
 	match.Line, match.Column, match.EndLine, match.EndColumn = rangePosition(occurrence.Range)
-	match.Role = occurrence.Role
+	match.Role, match.span, match.text = occurrence.Role, occurrence.Bytes, occurrence.Text
 	match.Identifier = uir.Identifier{Package: document.content.PackagePath, NodeType: uir.NodeTypePackage}
 	if occurrence.Symbol != nil {
 		match.SymbolID = *occurrence.Symbol

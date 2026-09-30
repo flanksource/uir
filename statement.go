@@ -30,6 +30,7 @@ type Relatable interface {
 var AllRelatables = []Relatable{
 	AssignmentStmt{},
 	MethodCallStmt{},
+	DispatchCallStmt{},
 	EndpointCallStmt{},
 	RecordReadStmt{},
 	RecordWriteStmt{},
@@ -137,6 +138,7 @@ type Stmt struct {
 	Cast             *CastStmt            `json:"cast,omitempty"`
 	Condition        *ConditionStmt       `json:"condition,omitempty"`
 	Continue         *ContinueStmt        `json:"continue,omitempty"`
+	DispatchCall     *DispatchCallStmt    `json:"dispatch_call,omitempty"`
 	EndpointCall     *EndpointCallStmt    `json:"endpoint_call,omitempty"`
 	Expr             *ExprStmt            `json:"expr,omitempty"`
 	For              *ForStmt             `json:"for,omitempty"`
@@ -173,6 +175,7 @@ func (n Stmt) Value() Statement {
 		n.Cast,
 		n.Condition,
 		n.Continue,
+		n.DispatchCall,
 		n.EndpointCall,
 		n.Expr,
 		n.For,
@@ -216,7 +219,7 @@ func (s Stmt) Pretty() api.Text {
 	if val != nil {
 		return val.Pretty()
 	}
-	return api.Text{Content: "null", Style: "text-gray-500"}
+	return api.Text{Content: "null", Style: StyleDim}
 }
 
 func (s Stmt) GetStatement() Statement {
@@ -254,6 +257,7 @@ var Statements = []Statement{
 	IfStmt{statementBase: statementBase{Type: ASTStatementTypeIf}},
 	LiteralStmt{statementBase: statementBase{Type: ASTStatementTypeLiteral}},
 	MethodCallStmt{methodBase: methodBase{statementBase: statementBase{Type: ASTStatementTypeCall}}},
+	DispatchCallStmt{methodBase: methodBase{statementBase: statementBase{Type: ASTStatementTypeDispatchCall}}},
 	RecordReadStmt{recordBase: recordBase{statementBase: statementBase{Type: ASTStatementTypeRecordRead}}},
 	RecordWriteStmt{recordBase: recordBase{statementBase: statementBase{Type: ASTStatementTypeRecordWrite}}},
 	ReturnStmt{statementBase: statementBase{Type: ASTStatementTypeReturn}},
