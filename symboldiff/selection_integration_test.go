@@ -59,6 +59,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 	It("indexes missing clean commits without changing the registered checkout head", func(ctx SpecContext) {
 		database := openDatabase(ctx, sqliteOptions())
 		repo := newRepository()
+		repo.git("config", "core.excludesFile", os.DevNull)
 		repo.write(map[string]*string{"go.mod": text("module " + shopRoot + "\n\ngo 1.26\n"), "cart.go": text(cartBefore)})
 		from := repo.commit("shop before")
 		repo.write(map[string]*string{"cart.go": text(cartAfter)})
@@ -79,6 +80,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		var locations int64
 		Expect(database.Model(&storage.ModuleLocation{}).Count(&locations).Error).To(Succeed())
 		Expect(locations).To(Equal(int64(1)))
+		Expect(repo.git("worktree", "list", "--porcelain")).To(Equal(fmt.Sprintf("worktree %s\nHEAD %s\nbranch refs/heads/main", repo.path, to)))
 	})
 
 	DescribeTable("rejects dirty-only, unindexed, mismatched, and empty selections and fails one file's lines on a hash mismatch",
