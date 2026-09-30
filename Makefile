@@ -95,7 +95,7 @@ $(LOCALBIN)/golangci-lint: | $(LOCALBIN)
 	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: lint
-lint: $(LOCALBIN)/golangci-lint ## Run Go and browser lint
+lint: web-build $(LOCALBIN)/golangci-lint ## Run Go and browser lint
 	$(LOCALBIN)/golangci-lint run
 	pnpm --dir web run lint
 
