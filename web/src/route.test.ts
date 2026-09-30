@@ -67,3 +67,18 @@ it("keeps a legacy explorer path search as a file search", () => {
   const route = readRoute({ pathname: "/explorer", search: "?snapshot=s1&search=internal" });
   expect(route).toMatchObject({ fileSearch: "internal", symbolSearch: "" });
 });
+
+it("defaults to file navigation and round trips symbol navigation through the Explorer URL", () => {
+  const files = readRoute({ pathname: "/explorer", search: "" });
+  expect(files.explorerMode).toBe("files");
+  expect(routeURL(files)).toBe("/explorer");
+  const symbols = applyRoutePatch(files, { explorerMode: "symbols" });
+  expect(readRoute(new URL(routeURL(symbols), "http://localhost"))).toEqual(symbols);
+  expect(routeURL(symbols)).toBe("/explorer?explorerMode=symbols");
+});
+
+it("round trips included and excluded symbol facets with the tree text filter", () => {
+  const route = readRoute({ pathname: "/explorer", search: "?explorerMode=symbols&symbolSearch=Save&symbolVisibility=%2Bexported%2C-internal&symbolKinds=%2Bmethod%2C-field" });
+  expect(route).toMatchObject({ symbolSearch: "Save", symbolVisibility: "+exported,-internal", symbolKinds: "+method,-field" });
+  expect(readRoute(new URL(routeURL(route), "http://localhost"))).toEqual(route);
+});

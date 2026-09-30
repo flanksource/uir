@@ -12,6 +12,7 @@ function key(nodeType: string, type = "", method = "", field = "", signature = "
 function node(nodeType: string, identity: string, sourceId = "source-1"): ModuleNode {
   const parsed = parseIdentityKey(identity);
   return { id: `${sourceId}:${identity}`, source_id: sourceId, path: "store/store.go", symbol: parsed.method || parsed.type, node_type: nodeType,
+    kind: parsed.field ? "field" : parsed.type && !parsed.method ? "type" : parsed.type ? "method" : "func", visibility: "exported",
     identifier: { package: parsed.package, type: parsed.type, method: parsed.method, field: parsed.field, signature: parsed.signature },
     child_slot: "", ordinal: 0, payload: {}, semantic_hash: "hash", calls: [] };
 }

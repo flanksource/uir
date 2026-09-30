@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import type { ModuleHead, ModuleSource } from "./api";
+import type { ModuleHead, ModuleNode, ModuleSource } from "./api";
 import { moduleHeadTree } from "./explorer-model";
-import { fileSelectionPatch } from "./explorer-navigation";
+import { fileSelectionPatch, symbolSelectionPatch } from "./explorer-navigation";
 
 it("only opens a file when an Explorer tree row is selected", () => {
   const source: ModuleSource = { id: "source-1", root_key: "example.org/service", location: "/work/service", snapshot_id: "head-1",
@@ -18,4 +18,15 @@ it("only opens a file when an Explorer tree row is selected", () => {
   expect(fileSelectionPatch(file)).toEqual({ location: head.location, snapshot: head.snapshot_id,
     source: source.id, node: "", fileSearch: "", symbolSearch: "", offset: 0 });
   expect(fileSelectionPatch(file)).not.toHaveProperty("module");
+});
+
+it("opens a symbol in its selected snapshot at the indexed position", () => {
+  const node: ModuleNode = { id: "symbol-1", source_id: "source-1", path: "internal/main.go", symbol: "Run", node_type: "method", kind: "func", visibility: "exported",
+    identifier: { method: "Run" }, child_slot: "methods", ordinal: 0, payload: {}, semantic_hash: "hash", line: 12, column: 4, calls: [] };
+  expect(symbolSelectionPatch({ location: "/work/service", snapshot: "head-1" }, node)).toEqual({
+    location: "/work/service", snapshot: "head-1", source: "source-1", node: "symbol-1", line: 12, column: 4,
+    fileSearch: "", symbolSearch: "", offset: 0,
+  });
+  expect(symbolSelectionPatch({ location: "/work/service", snapshot: "head-1" }, node)).not.toHaveProperty("module");
+  expect(() => symbolSelectionPatch({ location: "/work/service", snapshot: "head-1" }, { ...node, line: undefined })).toThrow(/line/);
 });

@@ -36,6 +36,8 @@ type ModuleNodeView struct {
 	Path           string           `json:"path"`
 	Symbol         string           `json:"symbol"`
 	NodeType       string           `json:"node_type"`
+	Kind           string           `json:"kind"`
+	Visibility     string           `json:"visibility"`
 	Identifier     uir.Identifier   `json:"identifier"`
 	ParentIdentity string           `json:"parent_identity,omitempty"`
 	ChildSlot      string           `json:"child_slot"`
@@ -114,6 +116,7 @@ func moduleNodeViews(document scopeDocument) []ModuleNodeView {
 		nodes = append(nodes, ModuleNodeView{
 			ID: sourceID + ":" + symbol.Key, SourceID: sourceID, Path: document.path,
 			Symbol: symbol.Identifier.SymbolKey(), NodeType: string(symbol.Identifier.GetNodeType()),
+			Kind: symbol.Kind, Visibility: symbol.Visibility,
 			Identifier: symbol.Identifier, ParentIdentity: symbol.ParentKey, ChildSlot: symbol.ChildSlot,
 			Ordinal: symbol.Ordinal, Payload: json.RawMessage(symbol.Payload), SemanticHash: symbol.SemanticHash,
 			Field: symbol.Field, Line: line, EndLine: endLine, Column: column, Calls: outgoing,
