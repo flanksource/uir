@@ -196,11 +196,11 @@ func (f RecordForeignKey) Reference() RecordReference {
 }
 
 func (t RecordTable) Pretty() api.Text {
-	p := api.Text{Content: string(t.RecordType) + " ", Style: "text-blue-500"}.
-		Append(t.QualifiedName(), "text-green-600").
-		Append(" {", "text-gray-600").NewLine()
+	p := api.Text{Content: string(t.RecordType) + " ", Style: StyleKeyword}.
+		Append(t.QualifiedName(), StyleName).
+		Append(" {", StylePunctuation).NewLine()
 	for _, column := range t.Columns {
-		p = p.Append("  ").Add(column.Pretty()).Append(";", "text-gray-600").NewLine()
+		p = p.Append("  ").Add(column.Pretty()).Append(";", StylePunctuation).NewLine()
 	}
 	for _, index := range t.Indexes {
 		p = p.Append("  ").Add(index.Pretty()).NewLine()
@@ -208,34 +208,34 @@ func (t RecordTable) Pretty() api.Text {
 	for _, fk := range t.ForeignKeys {
 		p = p.Append("  ").Add(fk.Pretty()).NewLine()
 	}
-	return p.Append("}", "text-gray-600")
+	return p.Append("}", StylePunctuation)
 }
 
 func (c RecordColumn) Pretty() api.Text {
-	p := api.Text{Content: c.Field, Style: "text-green-600"}.Append(": ", "text-gray-600")
+	p := api.Text{Content: c.Field, Style: StyleName}.Append(": ", StylePunctuation)
 	if c.SQLType != "" {
-		p = p.Append(c.SQLType, "text-blue-400")
+		p = p.Append(c.SQLType, StyleSQLType)
 	} else {
 		p = p.Add(c.FieldType.Pretty())
 	}
 	if c.MaxLength != nil && *c.MaxLength != 0 {
 		if *c.MaxLength < 0 {
-			p = p.Append("(max)", "text-gray-400")
+			p = p.Append("(max)", StyleFaint)
 		} else {
-			p = p.Append("("+strconv.Itoa(*c.MaxLength)+")", "text-gray-400")
+			p = p.Append("("+strconv.Itoa(*c.MaxLength)+")", StyleFaint)
 		}
 	}
 	if !c.Nullable {
-		p = p.Append(" NOT NULL", "text-gray-500")
+		p = p.Append(" NOT NULL", StyleDim)
 	}
 	if c.PrimaryKey {
-		p = p.Append(" PK", "text-amber-500")
+		p = p.Append(" PK", StylePrimaryKey)
 	}
 	if c.AutoIncrement {
-		p = p.Append(" IDENTITY", "text-amber-400")
+		p = p.Append(" IDENTITY", StyleIdentity)
 	}
 	if c.DefaultValue != nil {
-		p = p.Append(" = ", "text-gray-400").Add(c.DefaultValue.Pretty())
+		p = p.Append(" = ", StyleFaint).Add(c.DefaultValue.Pretty())
 	}
 	return p
 }
@@ -248,14 +248,14 @@ func (i RecordIndex) Pretty() api.Text {
 	case i.Unique:
 		kind = "UNIQUE INDEX"
 	}
-	p := api.Text{Content: kind + " ", Style: "text-purple-500"}.
-		Append(i.Field, "text-green-600").
-		Append(" ("+strings.Join(i.Columns, ", ")+")", "text-gray-600")
+	p := api.Text{Content: kind + " ", Style: StyleIndexKind}.
+		Append(i.Field, StyleName).
+		Append(" ("+strings.Join(i.Columns, ", ")+")", StylePunctuation)
 	if len(i.Included) > 0 {
-		p = p.Append(" INCLUDE ("+strings.Join(i.Included, ", ")+")", "text-gray-400")
+		p = p.Append(" INCLUDE ("+strings.Join(i.Included, ", ")+")", StyleFaint)
 	}
 	if i.Condition != "" {
-		p = p.Append(" WHERE "+i.Condition, "text-gray-400")
+		p = p.Append(" WHERE "+i.Condition, StyleFaint)
 	}
 	return p
 }
@@ -265,11 +265,11 @@ func (f RecordForeignKey) Pretty() api.Text {
 	if f.ReferencedSchema != "" {
 		target = f.ReferencedSchema + "." + f.ReferencedTable
 	}
-	return api.Text{Content: "FOREIGN KEY ", Style: "text-teal-500"}.
-		Append("("+strings.Join(f.Columns, ", ")+")", "text-gray-600").
-		Append(" REFERENCES ", "text-teal-500").
-		Append(target, "text-green-600").
-		Append(" ("+strings.Join(f.ReferencedColumns, ", ")+")", "text-gray-600")
+	return api.Text{Content: "FOREIGN KEY ", Style: StyleForeignKey}.
+		Append("("+strings.Join(f.Columns, ", ")+")", StylePunctuation).
+		Append(" REFERENCES ", StyleForeignKey).
+		Append(target, StyleName).
+		Append(" ("+strings.Join(f.ReferencedColumns, ", ")+")", StylePunctuation)
 }
 
 func (t RecordTable) Hash() string {

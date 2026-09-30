@@ -47,6 +47,10 @@ type ModuleMatch struct {
 	Depth          int            `json:"depth,omitempty"`
 	Declaration    string         `json:"-"`
 	DefinitionLine *int           `json:"-"`
+	// span and text locate an occurrence row in its source and keep the call as the index recorded
+	// it; the call graph derives a site's guards and label from them.
+	span storage.ByteSpan
+	text string
 }
 
 type CallPath struct {
