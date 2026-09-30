@@ -36,6 +36,9 @@ type UIRRelationship struct {
 	RelationshipType RelationshipType `json:"relationship_type,omitempty"`
 	From             *Node            `json:"from,omitempty" gorm:"serializer:json"`
 	To               Node             `json:"to,omitempty" gorm:"serializer:json"`
+	// Guards are the conditions that must hold to reach the relationship's
+	// statement, outermost first.
+	Guards []ConditionStmt `json:"guards,omitempty" gorm:"serializer:json"`
 }
 
 func (r UIRRelationship) GetFrom() Node {

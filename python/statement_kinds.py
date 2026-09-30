@@ -35,6 +35,7 @@ REGISTERED_KINDS = frozenset([
     "decl:func",
     "decl:type",
     "decl:var",
+    "dispatch_call",
     "doc",
     "raw",
     "ref:var",

@@ -89,6 +89,57 @@ func (s *MethodCallStmt) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// DispatchCallStmt encodes its target under "Method" as MethodCallStmt does, and
+// each candidate as a node. A nil candidate is refused in both directions: it
+// names nothing a call could dispatch to.
+func (s DispatchCallStmt) MarshalJSON() ([]byte, error) {
+	type alias DispatchCallStmt
+	method, err := encodeNodeField(s.Method)
+	if err != nil {
+		return nil, fmt.Errorf("DispatchCallStmt.Method: %w", err)
+	}
+	var candidates json.RawMessage
+	if len(s.Candidates) > 0 {
+		if candidates, err = MarshalNodes(s.Candidates); err != nil {
+			return nil, fmt.Errorf("DispatchCallStmt.Candidates: %w", err)
+		}
+	}
+	return json.Marshal(struct {
+		alias
+		Method     json.RawMessage `json:"Method,omitempty"`
+		Candidates json.RawMessage `json:"candidates,omitempty"`
+	}{alias(s), method, candidates})
+}
+
+func (s *DispatchCallStmt) UnmarshalJSON(data []byte) error {
+	type alias DispatchCallStmt
+	aux := struct {
+		*alias
+		Method     json.RawMessage   `json:"Method,omitempty"`
+		Candidates []json.RawMessage `json:"candidates,omitempty"`
+	}{alias: (*alias)(s)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	method, err := UnmarshalNode(aux.Method)
+	if err != nil {
+		return fmt.Errorf("DispatchCallStmt.Method: %w", err)
+	}
+	s.Method = method
+	s.Candidates = nil
+	for i, raw := range aux.Candidates {
+		if isJSONNull(raw) {
+			return fmt.Errorf("DispatchCallStmt.candidates[%d] is null", i)
+		}
+		candidate, err := UnmarshalNode(raw)
+		if err != nil {
+			return fmt.Errorf("DispatchCallStmt.candidates[%d]: %w", i, err)
+		}
+		s.Candidates = append(s.Candidates, candidate)
+	}
+	return nil
+}
+
 func (s EndpointCallStmt) MarshalJSON() ([]byte, error) {
 	type alias EndpointCallStmt
 	endpoint, err := encodeNodeField(s.Endpoint)
