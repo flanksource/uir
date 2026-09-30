@@ -1,8 +1,74 @@
-import type { ModuleHead, ModuleNode, ModuleSource } from "./api";
+import type { ModuleBrowse, ModuleHead, ModuleNode, ModuleRoot, ModuleSource } from "./api";
+import type { Route } from "./route";
 
 export type FileItem = { id: string; label: string; path: string; children: FileItem[]; source?: ModuleSource };
 export type SymbolItem = { id: string; label: string; children: SymbolItem[]; node: ModuleNode };
 export type HeadFileItem = { id: string; label: string; path: string; kind: "module" | "checkout" | "folder" | "file"; children: HeadFileItem[]; head?: ModuleHead; source?: ModuleSource };
+export type PackageSymbolItem =
+  | { id: string; label: string; kind: "package"; packagePath: string; children: PackageSymbolItem[] }
+  | { id: string; label: string; kind: "symbol"; node: ModuleNode; children: PackageSymbolItem[] };
+export type SymbolModuleHead = { rootKey: string; name: string; location: string; snapshot: string };
+
+export function symbolModuleHeads(roots: ModuleRoot[], route: Pick<Route, "module" | "location" | "snapshot">): SymbolModuleHead[] {
+  return roots.filter((root) => !route.module || root.root_key === route.module).map((root) => {
+    const selected = route.module === root.root_key && Boolean(route.snapshot);
+    return { rootKey: root.root_key, name: root.name || root.root_key,
+      location: selected ? route.location : root.location, snapshot: selected ? route.snapshot : root.snapshot_id };
+  });
+}
+
+export function packageSymbolTree(rootKey: string, browse: ModuleBrowse): PackageSymbolItem[] {
+  const sources = new Map(browse.sources.map((source) => [source.id, source]));
+  if (sources.size !== browse.sources.length) throw new Error(`Snapshot for ${rootKey} has duplicate source IDs`);
+  for (const node of browse.nodes) {
+    if (!sources.has(node.source_id)) throw new Error(`Symbol ${node.id} has missing source ${node.source_id}`);
+    if (!node.kind || (node.visibility !== "exported" && node.visibility !== "internal")) {
+      throw new Error(`Symbol ${node.id} has invalid kind or visibility`);
+    }
+  }
+  for (const source of browse.sources) {
+    if (source.root_key !== rootKey || !source.package_path ||
+      (source.package_path !== rootKey && !source.package_path.startsWith(`${rootKey}/`))) {
+      throw new Error(`Source ${source.path} has invalid package ${source.package_path} for module ${rootKey}`);
+    }
+  }
+  const rootPackage: PackageSymbolItem & { kind: "package" } = {
+    id: `package:${rootKey}`, label: rootKey.split("/").at(-1) ?? rootKey,
+    kind: "package", packagePath: rootKey, children: [],
+  };
+  const packages = new Map<string, PackageSymbolItem & { kind: "package" }>([[rootKey, rootPackage]]);
+  function packageFor(path: string): PackageSymbolItem & { kind: "package" } {
+    const existing = packages.get(path);
+    if (existing) return existing;
+    const parentPath = path.slice(0, path.lastIndexOf("/"));
+    const parent = packageFor(parentPath);
+    const pkg: PackageSymbolItem & { kind: "package" } = {
+      id: `package:${path}`, label: path.slice(parentPath.length + 1), kind: "package", packagePath: path, children: [],
+    };
+    packages.set(path, pkg);
+    parent.children.push(pkg);
+    return pkg;
+  }
+  const toItem = (symbol: SymbolItem): PackageSymbolItem => ({
+    id: symbol.id, kind: "symbol", label: symbol.label, node: symbol.node, children: symbol.children.map(toItem),
+  });
+  for (const symbol of symbolTree(browse.nodes)) {
+    const source = sources.get(symbol.node.source_id)!;
+    packageFor(source.package_path).children.push(toItem(symbol));
+  }
+  const names = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+  function sort(items: PackageSymbolItem[]) {
+    items.sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === "symbol" ? -1 : 1;
+      return names.compare(left.label, right.label) || left.label.localeCompare(right.label)
+        || (left.kind === "symbol" && right.kind === "symbol" ? left.node.path.localeCompare(right.node.path)
+          || (left.node.line ?? 0) - (right.node.line ?? 0) : 0) || left.id.localeCompare(right.id);
+    });
+    items.forEach((item) => sort(item.children));
+  }
+  sort(rootPackage.children);
+  return rootPackage.children.length ? [rootPackage] : [];
+}
 
 // scopedHeads applies the module scope as a filter: an empty scope keeps every head.
 export function scopedHeads(heads: ModuleHead[], scope: string): ModuleHead[] {

@@ -65,6 +65,15 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 			return nil, fmt.Errorf("read dependencies of module %q: %w", roots[i].RootKey, err)
 		}
 	}
+	if ctx.Value(activeModulePaths{}) == nil {
+		graph, err := discoverLocalDependencyGraph(ctx, roots, options.IncludeTests)
+		if err != nil {
+			return nil, err
+		}
+		if graph.cyclic() {
+			return indexer.indexLocalCycleGraph(ctx, graph, len(roots), options)
+		}
+	}
 	ctx = withActivePaths(ctx, roots)
 	if err := indexer.indexLocalDependencies(ctx, roots, options.IncludeTests); err != nil {
 		return nil, err
@@ -185,6 +194,8 @@ type snapshotPublication struct {
 	force        bool
 	startedAt    time.Time
 	preserveHead bool
+	snapshotID   uuid.UUID
+	pendingEdges *[]storage.SnapshotDependency
 }
 
 // publishSnapshot writes source revisions, symbols, documents, and postings, then the snapshot row
@@ -222,6 +233,10 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	for _, dependency := range publication.extraction.root.Dependencies {
 		edge := dependency.Edge
 		edge.SnapshotID = snapshot.ID
+		if publication.pendingEdges != nil {
+			*publication.pendingEdges = append(*publication.pendingEdges, edge)
+			continue
+		}
 		if err := database.WithContext(ctx).Create(&edge).Error; err != nil {
 			return storage.ModuleSnapshot{}, fmt.Errorf("publish dependency %q of snapshot %s: %w", edge.ModulePath, snapshot.ID, err)
 		}
@@ -248,12 +263,15 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 	discovered := publication.extraction.root
 	snapshot := storage.ModuleSnapshot{
-		ID: uuid.New(), RootID: publication.root.ID, LocationID: publication.location.ID,
+		ID: publication.snapshotID, RootID: publication.root.ID, LocationID: publication.location.ID,
 		Revision: discovered.Revision, GitCommit: discovered.GitCommit, ModuleVersion: discovered.ModuleVersion, WorktreeState: discovered.WorktreeState,
 		ContentSetHash: discovered.ContentSetHash, ConfigurationHash: discovered.ConfigurationHash,
 		ContextHash: publication.extraction.contextHash, Coverage: publication.extraction.coverage,
 		PackageCount: len(publication.extraction.packages), Diagnostics: publication.extraction.diagnostics,
 		StartedAt: publication.startedAt, CompletedAt: time.Now().UTC(),
+	}
+	if snapshot.ID == uuid.Nil {
+		snapshot.ID = uuid.New()
 	}
 	if discovered.WorktreeState != storage.WorktreeClean {
 		modified := discovered.LastModifiedAt

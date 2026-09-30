@@ -44,7 +44,7 @@ func assertBrowseContract(result query.ModuleBrowseResult) {
 	Expect(err).ToNot(HaveOccurred())
 	Expect(actual).To(MatchJSON(`{
 		"id": "` + sourceID.(string) + `:` + identity + `", "source_id": "` + sourceID.(string) + `", "path": "browse.go",
-		"symbol": "method:example.org/browse:Caller#()", "node_type": "method",
+		"symbol": "method:example.org/browse:Caller#()", "node_type": "method", "kind": "func", "visibility": "exported",
 		"identifier": {"package": "example.org/browse", "method": "Caller", "signature": "()", "node_type": "method"},
 		"parent_identity": "v1:[\"package\",\"\",\"example.org/browse\",\"\",\"\",\"\",\"\"]",
 		"child_slot": "methods", "ordinal": 1, "line": 4, "end_line": 4, "column": 6,
@@ -59,7 +59,7 @@ var _ = Describe("module browsing", func() {
 		workspace := GinkgoT().TempDir()
 		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.org/browse\n\ngo 1.26\n"), 0o644)).To(Succeed())
 		path := filepath.Join(workspace, "browse.go")
-		Expect(os.WriteFile(path, []byte("package browse\n\nfunc Target() {}\nfunc Caller() { Target() }\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(path, []byte("package browse\n\nfunc Target() {}\nfunc Caller() { Target() }\nfunc hidden() {}\n"), 0o644)).To(Succeed())
 		engine, err := indexer.New(database)
 		Expect(err).To(Succeed())
 		published, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace})
@@ -72,6 +72,7 @@ var _ = Describe("module browsing", func() {
 		Expect(result.Sources[0].Path).To(Equal("browse.go"))
 		Expect(result.Sources[0].ContentHash).ToNot(BeEmpty())
 		Expect(result.Nodes).To(ContainElement(And(HaveField("Symbol", ContainSubstring("Target")), HaveField("Path", "browse.go"))))
+		Expect(result.Nodes).To(ContainElement(And(HaveField("Kind", "func"), HaveField("Visibility", "internal"))))
 		Expect(result.Nodes).To(ContainElement(HaveField("Calls", HaveLen(1))))
 		assertBrowseContract(result)
 		content, err := pipeline.ReadModuleSource(ctx, published[0].SnapshotID, "browse.go")

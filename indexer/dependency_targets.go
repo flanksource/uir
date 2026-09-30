@@ -48,8 +48,7 @@ func (indexer *Indexer) indexLocalDependencies(ctx context.Context, roots []disc
 			}
 			dependency.LocalDir = path
 			if active[path] {
-				dependency.Edge.UnresolvedReason = "local dependency is in the active indexing cycle"
-				continue
+				return fmt.Errorf("local dependency cycle at %q escaped graph publication", path)
 			}
 			results, err := indexer.IndexModules(ctx, ModuleOptions{Path: path, ExactLocation: path, IncludeTests: includeTests})
 			if err != nil {
@@ -99,22 +98,38 @@ func (indexer *Indexer) indexVersionedDependencies(ctx context.Context, roots []
 	return nil
 }
 
-func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, version string, includeTests bool) (storage.ModuleSnapshot, error) {
-	var snapshot storage.ModuleSnapshot
-	err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
-		Joins("JOIN modules AS root ON root.id = snapshot.root_id").
-		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ?", modulePath, version, storage.WorktreeClean).
-		Order("snapshot.completed_at DESC").Take(&snapshot).Error
-	if err == nil {
-		return snapshot, nil
+func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, version string, includeTests bool) (snapshot storage.ModuleSnapshot, err error) {
+	snapshot, found, err := indexer.storedVersionSnapshot(ctx, modulePath, version)
+	if err != nil {
+		return storage.ModuleSnapshot{}, err
 	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return storage.ModuleSnapshot{}, fmt.Errorf("find indexed version %s@%s: %w", modulePath, version, err)
+	if found {
+		complete, err := indexer.versionedClosureComplete(ctx, snapshot.ID)
+		if err != nil {
+			return storage.ModuleSnapshot{}, err
+		}
+		if complete {
+			return snapshot, nil
+		}
+	}
+	graph, err := indexer.discoverVersionedGraph(ctx, modulePath, version, includeTests)
+	if err != nil {
+		if found && errors.Is(err, errVersionUnavailable) {
+			return snapshot, nil
+		}
+		return storage.ModuleSnapshot{}, err
+	}
+	defer func() { err = errors.Join(err, graph.close()) }()
+	if graph.cyclic() {
+		return indexer.publishVersionedComponents(ctx, graph, includeTests)
+	}
+	if found {
+		return snapshot, nil
 	}
 	key := modulePath + "@" + version
 	active, _ := ctx.Value(activeModuleVersions{}).(map[string]bool)
 	if active[key] {
-		return storage.ModuleSnapshot{}, fmt.Errorf("%w: cycle at %s", errVersionUnavailable, key)
+		return storage.ModuleSnapshot{}, fmt.Errorf("versioned dependency cycle at %s escaped graph publication", key)
 	}
 	next := make(map[string]bool, len(active)+1)
 	for existing := range active {
@@ -122,29 +137,92 @@ func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, versi
 	}
 	next[key] = true
 	ctx = context.WithValue(ctx, activeModuleVersions{}, next)
+	prepared := graph.nodes[0].prepared
+	result, err := indexer.IndexRevision(ctx, RevisionOptions{
+		RootKey: modulePath, Checkout: prepared.location.CanonicalPath, Commit: prepared.root.GitCommit, Version: version, IncludeTests: includeTests,
+	})
+	if err != nil {
+		return storage.ModuleSnapshot{}, fmt.Errorf("index version %s from %q: %w", key, prepared.location.CanonicalPath, err)
+	}
+	if err := indexer.database.WithContext(ctx).Where("id = ?", result.SnapshotID).Take(&snapshot).Error; err != nil {
+		return storage.ModuleSnapshot{}, fmt.Errorf("load version snapshot %s: %w", result.SnapshotID, err)
+	}
+	return snapshot, nil
+}
+
+func (indexer *Indexer) versionTagMatches(ctx context.Context, modulePath, version, storedCommit string) (bool, error) {
 	var locations []storage.ModuleLocation
 	if err := indexer.database.WithContext(ctx).Table("locations AS location").Select("location.*").
 		Joins("JOIN modules AS root ON root.id = location.root_id").Where("root.root_key = ?", modulePath).
 		Order("location.canonical_path").Find(&locations).Error; err != nil {
-		return storage.ModuleSnapshot{}, fmt.Errorf("find checkouts for %s@%s: %w", modulePath, version, err)
+		return false, fmt.Errorf("find checkouts for %s@%s: %w", modulePath, version, err)
 	}
 	for _, location := range locations {
 		commit, err := versionCommit(ctx, location.CanonicalPath, version)
-		if err != nil {
+		if err == nil {
+			return commit == storedCommit, nil
+		}
+	}
+	return true, nil
+}
+
+func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, version string) (storage.ModuleSnapshot, bool, error) {
+	var snapshot storage.ModuleSnapshot
+	err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
+		Joins("JOIN modules AS root ON root.id = snapshot.root_id").
+		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ?", modulePath, version, storage.WorktreeClean).
+		Order("snapshot.completed_at DESC").Take(&snapshot).Error
+	if err == nil {
+		return snapshot, true, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return storage.ModuleSnapshot{}, false, fmt.Errorf("find indexed version %s@%s: %w", modulePath, version, err)
+	}
+	return storage.ModuleSnapshot{}, false, nil
+}
+
+func (indexer *Indexer) versionedClosureComplete(ctx context.Context, snapshotID uuid.UUID) (bool, error) {
+	visited := map[uuid.UUID]bool{}
+	queue := []uuid.UUID{snapshotID}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if visited[id] {
 			continue
 		}
-		result, err := indexer.IndexRevision(ctx, RevisionOptions{
-			RootKey: modulePath, Checkout: location.CanonicalPath, Commit: commit, Version: version, IncludeTests: includeTests,
-		})
-		if err != nil {
-			return storage.ModuleSnapshot{}, fmt.Errorf("index version %s@%s from %q: %w", modulePath, version, location.CanonicalPath, err)
+		visited[id] = true
+		var snapshot storage.ModuleSnapshot
+		if err := indexer.database.WithContext(ctx).Where("id = ?", id).Take(&snapshot).Error; err != nil {
+			return false, fmt.Errorf("load version snapshot %s: %w", id, err)
 		}
-		if err := indexer.database.WithContext(ctx).Where("id = ?", result.SnapshotID).Take(&snapshot).Error; err != nil {
-			return storage.ModuleSnapshot{}, fmt.Errorf("load version snapshot %s: %w", result.SnapshotID, err)
+		if snapshot.DependencySetHash == nil {
+			return false, nil
 		}
-		return snapshot, nil
+		if snapshot.ModuleVersion != "" {
+			var root storage.ModuleRoot
+			if err := indexer.database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
+				return false, fmt.Errorf("load root of version snapshot %s: %w", id, err)
+			}
+			matching, err := indexer.versionTagMatches(ctx, root.RootKey, snapshot.ModuleVersion, snapshot.GitCommit)
+			if err != nil {
+				return false, err
+			}
+			if !matching {
+				return false, nil
+			}
+		}
+		var edges []storage.SnapshotDependency
+		if err := indexer.database.WithContext(ctx).Where("snapshot_id = ?", id).Find(&edges).Error; err != nil {
+			return false, fmt.Errorf("load dependencies of version snapshot %s: %w", id, err)
+		}
+		for _, edge := range edges {
+			if edge.TargetSnapshotID == nil {
+				return false, nil
+			}
+			queue = append(queue, *edge.TargetSnapshotID)
+		}
 	}
-	return storage.ModuleSnapshot{}, fmt.Errorf("%w: no registered checkout contains %s@%s", errVersionUnavailable, modulePath, version)
+	return true, nil
 }
 
 func versionCommit(ctx context.Context, checkout, version string) (string, error) {

@@ -6,6 +6,7 @@ export type ScopeRoot = Pick<ModuleRoot, "root_key" | "location" | "snapshot_id"
 
 export type Route = {
   view: "overview" | "explorer" | "query" | "history" | "tasks";
+  explorerMode: "files" | "symbols";
   module: string;
   location: string;
   snapshot: string;
@@ -15,6 +16,8 @@ export type Route = {
   column: number;
   fileSearch: string;
   symbolSearch: string;
+  symbolVisibility: string;
+  symbolKinds: string;
   expression: string;
   compareFrom: string;
   compareTo: string;
@@ -32,6 +35,7 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
   const path = location.pathname.slice(1);
   return {
     view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : path === "history" ? "history" : path === "tasks" ? "tasks" : "overview",
+    explorerMode: params.get("explorerMode") === "symbols" ? "symbols" : "files",
     module: params.get("module") ?? "",
     location: params.get("location") ?? "",
     snapshot: params.get("snapshot") ?? "",
@@ -41,6 +45,8 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     column: Number(params.get("column") ?? 0),
     fileSearch: params.get("fileSearch") ?? (path === "explorer" ? params.get("search") ?? "" : ""),
     symbolSearch: params.get("symbolSearch") ?? (path === "nodes" ? params.get("search") ?? "" : ""),
+    symbolVisibility: params.get("symbolVisibility") ?? "",
+    symbolKinds: params.get("symbolKinds") ?? "",
     expression: params.get("expression") ?? "",
     compareFrom: params.get("compareFrom") ?? "",
     compareTo: params.get("compareTo") ?? "",
@@ -56,10 +62,11 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
   if (route.historyGroup !== "package") params.set("historyGroup", route.historyGroup);
+  if (route.explorerMode === "symbols") params.set("explorerMode", "symbols");
   if (route.historyLayout !== "inline") params.set("historyLayout", route.historyLayout);
   for (const key of ["line", "column", "offset"] as const) {
     if (route[key] > 0) params.set(key, String(route[key]));

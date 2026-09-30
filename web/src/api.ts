@@ -83,6 +83,8 @@ export type ModuleNode = {
   path: string;
   symbol: string;
   node_type: string;
+  kind: string;
+  visibility: "exported" | "internal";
   identifier: { module?: string; package?: string; type?: string; method?: string; field?: string; signature?: string; node_type?: string };
   parent_identity?: string;
   child_slot: string;

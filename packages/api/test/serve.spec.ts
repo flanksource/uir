@@ -199,8 +199,8 @@ it("scopes checkout history, source projections, and content to a module snapsho
   ]);
 });
 
-it("reads server timing from the explorer browse response", async () => {
-  const browse = { sources: [], nodes: [] };
+it("reads symbol kind, visibility, and server timing from the explorer browse response", async () => {
+  const browse = { sources: [], nodes: [{ id: "symbol-1", kind: "func", visibility: "exported" }] };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(browse), {
     status: 200, headers: { "Server-Timing": "total;dur=4.1, command;dur=3.5" },
   })));

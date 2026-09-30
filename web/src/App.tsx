@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { AppShell, Button, Combobox, CommandPaletteTrigger, type CommandGroup } from "@flanksource/clicky-ui/components";
+import { AppShell, Button, Combobox, CommandPaletteTrigger, SegmentedControl, type CommandGroup } from "@flanksource/clicky-ui/components";
 import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
 import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
 import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
@@ -157,14 +157,16 @@ export function App() {
   return <><AppShell brand={<strong>UIR</strong>} contentWidth="full" contentClassName={route.view === "explorer" ? "overflow-hidden" : undefined}
     navSections={[{ label: "Module browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
     search={<CommandPaletteTrigger onClick={() => setSearchOpen(true)} open={searchOpen} label="Search modules, files, symbols…" />}
-    actions={<Combobox ariaLabel="Scope" size="sm" required allowCustomValue={false} className="w-64" value={scopeValue(route)} loading={roots.loading} onChange={selectScope} options={[
+    actions={<div className="flex items-center gap-2">{route.view === "explorer" && <SegmentedControl value={route.explorerMode} size="sm" aria-label="Explorer navigation" onChange={(explorerMode) => setRoute({ explorerMode })}
+      options={[{ id: "files", label: "Files" }, { id: "symbols", label: "Symbols" }]} />}
+      <Combobox ariaLabel="Scope" size="sm" required allowCustomValue={false} className="w-64" value={scopeValue(route)} loading={roots.loading} onChange={selectScope} options={[
       { value: ALL_MODULES, label: "All modules", description: "Every indexed root at its checkout heads" },
       ...(roots.data ?? []).map((item) => ({ value: item.root_key, label: item.name || item.root_key, description: item.root_key, group: "Module roots", icon: commandModuleIcon() })),
-    ]} />}
+    ]} /></div>}
     sidebarFooter={<SystemDetails />}
     bodyHeader={<span>{selectedRoot?.name || route.module || "All modules"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
     bodyActions={<Row><TaskManagerButton basePath="/api/v1" kind="module-index" tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
-    {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} heads={heads} browse={browse} locations={locations} onRoute={setRoute} onRefresh={() => setRefresh((current) => current + 1)} /></Suspense> : <PageLayout>
+    {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} roots={roots} heads={heads} browse={browse} locations={locations} onRoute={setRoute} onRefresh={() => setRefresh((current) => current + 1)} /></Suspense> : <PageLayout>
       {roots.loading && <Muted>Loading module roots…</Muted>}
       <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
