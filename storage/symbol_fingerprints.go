@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 )
@@ -23,7 +24,10 @@ func SymbolFingerprint(hash string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("hash %q is not hex: %w", hash, err)
 	}
-	return int64(value), nil
+	if value <= math.MaxInt64 {
+		return int64(value), nil
+	}
+	return math.MinInt64 + int64(value&math.MaxInt64), nil
 }
 
 // FoldDeclarations combines the fingerprints of every declaration of one canonical id in one snapshot.

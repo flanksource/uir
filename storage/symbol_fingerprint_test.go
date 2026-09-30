@@ -3,6 +3,7 @@ package storage_test
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"math"
 	"strings"
 
 	"github.com/flanksource/uir/storage"
@@ -28,6 +29,8 @@ var _ = Describe("symbol fingerprints", func() {
 			Expect(value).To(Equal(expected))
 		},
 		Entry("a small prefix", "0123456789abcdef"+strings.Repeat("0", 48), int64(0x0123456789abcdef)),
+		Entry("the largest signed prefix", "7fffffffffffffff"+strings.Repeat("0", 48), int64(math.MaxInt64)),
+		Entry("only the sign bit set", "8000000000000000"+strings.Repeat("0", 48), int64(math.MinInt64)),
 		Entry("the sign bit set", strings.Repeat("f", 64), int64(-1)),
 	)
 
