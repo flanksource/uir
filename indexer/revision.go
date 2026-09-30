@@ -221,7 +221,8 @@ func revisionWorktree(ctx context.Context, top, commit string) (string, func() e
 	return path, func() error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, err := revisionGit(cleanupCtx, top, "worktree", "remove", path)
+		// This private worktree contains generated historical manifests and sums.
+		_, err := revisionGit(cleanupCtx, top, "worktree", "remove", "--force", path)
 		return err
 	}, nil
 }
