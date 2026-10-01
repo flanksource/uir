@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { Button, DropdownMenu, Select, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
+import { Button, DropdownMenu, Select, Tabs, Workspace, type WorkspacePaneSpec } from "@flanksource/clicky-ui/components";
 import { ServerTimingBadge, Tree } from "@flanksource/clicky-ui/data";
 import { UiDotsVertical, UiFolder, UiListTree } from "@flanksource/clicky-ui/icons";
 import { MonacoProvider } from "@flanksource/clicky-ui/monaco";
 import { browseModule, readModuleSource, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleRoot, type ModuleSource, type ModuleSourceContent } from "./api";
+import { CallGraphPane } from "./CallGraphPane";
 import { MissingHeadWarnings } from "./CoverageWarning";
 import { ExplorerDependencies } from "./ExplorerDependencies";
 import { ExplorerRefactorDialog } from "./ExplorerRefactorDialog";
@@ -70,6 +71,18 @@ function SourcePane({ snapshot, source, line, column }: { snapshot: string; sour
           onMount={(instance) => { editor.current = instance; revealPosition(instance, line, column); }} />
       </MonacoProvider>
     </div>}
+  </div>;
+}
+
+const CENTER_TABS = [{ id: "source", label: "Source" }, { id: "call-graph", label: "Call graph" }];
+
+// CenterTabs holds the Workspace's one center pane: Source and Call graph share it, and the source
+// editor stays mounted behind the graph so returning to it keeps its state.
+function CenterTabs({ route, source, onRoute, children }: { route: Route; source: React.ReactNode; onRoute: (patch: Partial<Route>, replace?: boolean) => void; children: React.ReactNode }) {
+  return <div className="flex h-full min-h-0 flex-col">
+    <Tabs className="shrink-0 px-2" tabs={CENTER_TABS} value={route.explorerTab} onChange={(tab) => onRoute({ explorerTab: tab === "call-graph" ? "call-graph" : "source" })} />
+    <div className={route.explorerTab === "source" ? "min-h-0 flex-1" : "hidden"}>{source}</div>
+    {route.explorerTab === "call-graph" && <div className="min-h-0 flex-1">{children}</div>}
   </div>;
 }
 
@@ -252,7 +265,9 @@ export function ExplorerView({ route, roots, heads, browse, locations, onRoute, 
   const panes: WorkspacePaneSpec[] = [
     ...navigationPanes,
     { id: "source", label: selectedSource?.path ?? "Source", icon: <FileTypeIcon filename={selectedSource?.path ?? ""} />, location: "center", collapsible: false,
-      content: <SourcePane snapshot={route.snapshot} source={selectedSource} line={revealed.line} column={revealed.column} />, contentClassName: "overflow-hidden" },
+      content: <CenterTabs route={route} onRoute={onRoute} source={<SourcePane snapshot={route.snapshot} source={selectedSource} line={revealed.line} column={revealed.column} />}>
+        <CallGraphPane route={route} selectedNode={selectedNode} onRoute={onRoute} />
+      </CenterTabs>, contentClassName: "overflow-hidden" },
     { id: "details", label: "Details", icon: <UiListTree />, location: "right", width: 320,
       content: <SymbolDetails node={selectedNode} route={route} sources={sources} onRoute={onRoute} /> },
     { id: "dependencies", label: "Dependencies", icon: <UiListTree />, location: "right", width: 320,

@@ -202,40 +202,69 @@ const submitGraph: ModuleGraphResult = {
     { id: `${submitID}|${hookID}|call`, from: submitID, to: hookID, type: "call", sites: [{ path: "orders.go", line: 24, column: 3, text: "hook", guards: ["hook != nil"] }] },
     { id: `${submitID}|${chargeID}|dispatch`, from: submitID, to: chargeID, type: "dispatch", sites: [{ path: "orders.go", line: 26, column: 11, text: "notifier.Notify" }] },
   ],
-  omitted: { node_limit: true, beyond_depth: 1, unresolved: 1, unreadable_source: ["orders.go"] },
+  omitted: { node_limit: true, beyond_depth: 1, unresolved: 1, unreadable_source: ["orders.go"], excluded: { fmt: 2, builtin: 1 } },
+  exclude: ["std", "builtin", "gorm.io/..."],
+  packages: [
+    { path: "example.org/orders", external: false, nodes: 3, excluded: false },
+    { path: "fmt", external: true, nodes: 2, excluded: true },
+    { path: "builtin", external: true, nodes: 1, excluded: true },
+  ],
   stages: [{ name: "scope", value: "1 snapshots" }, { name: "resolve", value: "example.org/orders.Submit" }],
   warnings: [],
   candidates: [],
 };
+const graphTiming = { "Server-Timing": "total;dur=6.5, command;dur=5" };
 
-it("gets the call graph of a selector with only the options that were set", async () => {
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(submitGraph), { status: 200 }));
+it("gets the call graph of a selector with only the options that were set, and its server timing", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(submitGraph), { status: 200, headers: graphTiming }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(getModuleGraph({ selector: "orders.Submit", direction: "both", depth: 2, limit: 150, root: "example.org/orders", snapshot })).resolves.toEqual(submitGraph);
+  await expect(getModuleGraph({ selector: "orders.Submit", direction: "both", depth: 2, limit: 150, root: "example.org/orders", snapshot })).resolves.toEqual({
+    data: submitGraph, timing: [{ name: "total", duration: 6.5, counters: {} }, { name: "command", duration: 5, counters: {} }],
+  });
   expect(fetcher).toHaveBeenCalledWith(
     `/api/v1/modules/graph?selector=orders.Submit&direction=both&depth=2&limit=150&root=example.org%2Forders&snapshot=${snapshot}`,
     expect.objectContaining({ headers: { Accept: "application/json" } }),
   );
 });
 
+it("sends the exclusion patterns as one comma list and returns the effective patterns the server echoes", async () => {
+  const echoed: ModuleGraphResult = { ...submitGraph, exclude: ["external", "example.org/orders/..."], omitted: { excluded: { "example.org/orders": 2 } },
+    packages: [{ path: "example.org/orders", external: false, nodes: 3, excluded: true }] };
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(echoed), { status: 200, headers: graphTiming }));
+  vi.stubGlobal("fetch", fetcher);
+  const result = await getModuleGraph({ selector: "orders.Submit", exclude: ["external", "example.org/orders/..."] });
+  expect(result.data.exclude).toEqual(["external", "example.org/orders/..."]);
+  expect(result.data.packages).toEqual(echoed.packages);
+  await getModuleGraph({ selector: "orders.Submit", exclude: [] });
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+    "/api/v1/modules/graph?selector=orders.Submit&exclude=external%2Cexample.org%2Forders%2F...",
+    "/api/v1/modules/graph?selector=orders.Submit",
+  ]);
+});
+
 it("gets the call graph of a node by its symbol id and returns the candidates of an ambiguous selector", async () => {
-  const candidates: ModuleGraphResult = { roots: [], nodes: [], edges: [], omitted: {}, warnings: [], stages: [{ name: "resolve", value: "2 candidates" }], candidates: [
+  const candidates: ModuleGraphResult = { roots: [], nodes: [], edges: [], omitted: {}, exclude: ["none"], packages: [], warnings: [], stages: [{ name: "resolve", value: "2 candidates" }], candidates: [
     { id: saveID, module_key: scope.root, package_path: "example.org/refs/store", kind: "method", owner: "Store", name: "Save", query_name: "example.org/refs/store.Store.Save", visibility: "exported", parameter_types: [] },
     { id: chargeID, module_key: scope.root, package_path: "example.org/refs/cache", kind: "method", owner: "Cache", name: "Save", query_name: "example.org/refs/cache.Cache.Save", visibility: "exported", parameter_types: [] },
   ] };
-  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(candidates), { status: 200 }));
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(candidates), { status: 200, headers: graphTiming }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(getModuleGraph({ selector: "Save" })).resolves.toEqual(candidates);
+  await expect(getModuleGraph({ selector: "Save", exclude: ["none"] })).resolves.toMatchObject({ data: candidates });
   await getModuleGraph({ symbol: saveID, direction: "callers", location: scope.location });
   expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
-    "/api/v1/modules/graph?selector=Save",
+    "/api/v1/modules/graph?selector=Save&exclude=none",
     `/api/v1/modules/graph?symbol=${saveID}&direction=callers&location=%2Fcheckout%2Frefs`,
   ]);
 });
 
 it("rejects a graph response that is not the graph envelope and surfaces a refused request", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ roots: [submitID], nodes: [], edges: [] }), { status: 200 })));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ roots: [submitID], nodes: [], edges: [] }), { status: 200, headers: graphTiming })));
   await expect(getModuleGraph({ selector: "orders.Submit" })).rejects.toThrow("Graph response is not a graph envelope");
+  const unechoed = Object.fromEntries(Object.entries(submitGraph).filter(([key]) => key !== "exclude"));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(unechoed), { status: 200, headers: graphTiming })));
+  await expect(getModuleGraph({ selector: "orders.Submit" })).rejects.toThrow("Graph response is not a graph envelope");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(submitGraph), { status: 200 })));
+  await expect(getModuleGraph({ selector: "orders.Submit" })).rejects.toThrow("Server-Timing header missing");
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
     code: "invalid_query", message: "depth 9 is outside 1..8", hint: "Give depth 1 through 8", trace: "trace-3",
   }), { status: 400, headers: { "Content-Type": "application/json" } })));

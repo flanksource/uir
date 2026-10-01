@@ -27,7 +27,7 @@ var _ = Describe("the call graph of indexed modules", func() {
 	DescribeTable("agrees with the compact operators on who calls whom", func(ctx SpecContext, backend string) {
 		pipeline, scope, _ := flowPipeline(ctx, openQueryDatabase(ctx, backend))
 
-		callees := callGraph(ctx, pipeline, query.GraphOptions{Selector: process, Direction: graph.DirectionCallees, Depth: 1, Scope: scope})
+		callees := callGraph(ctx, pipeline, query.GraphOptions{Selector: process, Direction: graph.DirectionCallees, Depth: 1, Exclude: []string{query.ExcludeNone}, Scope: scope})
 		root := graphNode(callees, "Process")
 		Expect(callees.Roots).To(Equal([]string{root.ID}))
 		var drawn []calledAt
@@ -98,13 +98,17 @@ var _ = Describe("the call graph of indexed modules", func() {
 				"retry":        {"retries > 0"},
 				"valid":        nil,
 				"record":       {"valid(order)"},
-				"New":          {"order.Total < 0"},
 				"Channel.Send": nil,
 			}))
 			Expect(edgeBetween(result, "Process", "ship", uir.RelationshipTypeCall).Sites).To(Equal([]graph.Site{{
-				Path: flowPath, Line: flowLine("ship(order)"), Column: 3, Text: "ship", Guards: []string{`!(order.Kind == "gift")`, "order.Ready"},
+				Path: flowPath, Line: flowLine("ship(order)"), Column: 3, Text: "ship(order)", Guards: []string{`!(order.Kind == "gift")`, "order.Ready"},
 			}}))
-			Expect(result.Omitted).To(Equal(graph.Omitted{}))
+			Expect(result.Omitted).To(Equal(graph.Omitted{Excluded: map[string]int{"errors": 1}}), "errors.New is in the standard library")
+
+			unexcluded := callGraph(ctx, pipeline, query.GraphOptions{Selector: process, Direction: graph.DirectionCallees, Depth: 1, Exclude: []string{query.ExcludeNone}, Scope: scope})
+			Expect(edgeBetween(unexcluded, "Process", "New", uir.RelationshipTypeCall).Sites).To(Equal([]graph.Site{{
+				Path: flowPath, Line: flowLine(`errors.New("negative total")`), Column: 17, Text: `errors.New("negative total")`, Guards: []string{"order.Total < 0"},
+			}}))
 		})
 
 		It("draws a call through an interface as a call to its method and a dispatch to each implementation", func(ctx SpecContext) {
@@ -113,12 +117,12 @@ var _ = Describe("the call graph of indexed modules", func() {
 			for target, kind := range map[string]uir.RelationshipType{
 				"Channel.Send": uir.RelationshipTypeCall, "Email.Send": uir.RelationshipTypeDispatch, "SMS.Send": uir.RelationshipTypeDispatch,
 			} {
-				Expect(edgeBetween(result, "Process", target, kind).Sites).To(Equal([]graph.Site{{Path: flowPath, Line: line, Column: 17, Text: "channel.Send"}}), target)
+				Expect(edgeBetween(result, "Process", target, kind).Sites).To(Equal([]graph.Site{{Path: flowPath, Line: line, Column: 17, Text: "channel.Send(order.Kind)"}}), target)
 			}
 
 			reverse := callGraph(ctx, pipeline, query.GraphOptions{Selector: flowModule + "/notify.Email.Send", Direction: graph.DirectionCallers, Depth: 1, Scope: scope})
 			Expect(graphEdges(reverse)).To(Equal([]graphEdge{{From: "Process", To: "Email.Send", Type: uir.RelationshipTypeDispatch}}))
-			Expect(reverse.Edges[0].Sites).To(Equal([]graph.Site{{Path: flowPath, Line: line, Column: 17, Text: "channel.Send"}}))
+			Expect(reverse.Edges[0].Sites).To(Equal([]graph.Site{{Path: flowPath, Line: line, Column: 17, Text: "channel.Send(order.Kind)"}}))
 		})
 
 		It("ends direct and mutual recursion at a back edge", func(ctx SpecContext) {
@@ -142,13 +146,13 @@ var _ = Describe("the call graph of indexed modules", func() {
 			Expect(hook.Location).To(BeNil())
 			Expect(hook.ID).To(HavePrefix("unresolved:"))
 			Expect(edgeBetween(result, "Apply", "hook", uir.RelationshipTypeCall).Sites).To(Equal([]graph.Site{{
-				Path: flowPath, Line: flowLine("hook()"), Column: 3, Text: "hook", Guards: []string{"hook != nil"},
+				Path: flowPath, Line: flowLine("hook()"), Column: 3, Text: "hook()", Guards: []string{"hook != nil"},
 			}}))
 			Expect(result.Omitted.Unresolved).To(Equal(1))
 		})
 
 		It("locates a declared node for the Explorer and leaves one declared outside the scope without a location", func(ctx SpecContext) {
-			result := callGraph(ctx, pipeline, query.GraphOptions{Selector: process, Direction: graph.DirectionCallees, Depth: 1, Scope: scope})
+			result := callGraph(ctx, pipeline, query.GraphOptions{Selector: process, Direction: graph.DirectionCallees, Depth: 1, Exclude: []string{query.ExcludeNone}, Scope: scope})
 			root := graphNode(result, "Process")
 			Expect(root.Kind).To(Equal("func"))
 			Expect(root.Group).To(Equal(flowModule))
@@ -193,7 +197,7 @@ var _ = Describe("the call graph of indexed modules", func() {
 			limited := callGraph(ctx, pipeline, query.GraphOptions{Selector: process, Direction: graph.DirectionCallees, Depth: 1, Limit: 3, Scope: scope})
 			Expect(limited.Nodes).To(HaveLen(3))
 			Expect(limited.Omitted.NodeLimit).To(BeTrue())
-			Expect(graphNode(limited, "Process").Out).To(Equal(15), "the root still reports every edge it has")
+			Expect(graphNode(limited, "Process").Out).To(Equal(14), "the root still reports every edge it has but the excluded one to errors.New")
 
 			shallow := callGraph(ctx, pipeline, query.GraphOptions{Selector: charge, Direction: graph.DirectionCallers, Depth: 1, Scope: scope})
 			Expect(graphLabels(shallow)).To(Equal([]string{"Process", "Refill", "charge"}))
@@ -244,7 +248,7 @@ var _ = Describe("the call graph of indexed modules", func() {
 			Expect(edgeBetween(result, "Process", "charge", uir.RelationshipTypeCall).Sites).To(Equal([]graph.Site{{
 				Path: flowPath, Line: flowLine("charge(order)\n\t} else"), Column: 3, Text: "charge",
 			}}))
-			Expect(result.Edges).To(HaveLen(15))
+			Expect(result.Edges).To(HaveLen(14), "every call but the excluded one to errors.New")
 			Expect(result.Stages).To(ContainElement(And(HaveField("Name", "guards"), HaveField("Value", ContainSubstring(flowPath)))))
 		})
 	})

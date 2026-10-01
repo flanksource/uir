@@ -114,7 +114,7 @@ var _ = Describe("module call graph", func() {
 		var envelope map[string]any
 		Expect(json.Unmarshal(response.Body.Bytes(), &envelope)).To(Succeed())
 		Expect(envelope).To(And(HaveKey("roots"), HaveKey("nodes"), HaveKey("edges"), HaveKey("omitted"), HaveKey("stages"),
-			HaveKeyWithValue("warnings", BeEmpty()), HaveKeyWithValue("candidates", BeEmpty())))
+			HaveKey("packages"), HaveKeyWithValue("warnings", BeEmpty()), HaveKeyWithValue("candidates", BeEmpty())))
 
 		var result query.GraphResult
 		Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
@@ -126,15 +126,28 @@ var _ = Describe("module call graph", func() {
 		Expect(depths).To(Equal(map[string]int{"Submit": 0, "Checkout": -1, "charge": 1, "hook": 1, "Notifier.Notify": 1, "Mail.Notify": 1}))
 		Expect(result.Roots).To(Equal([]string{ids["Submit"]}))
 		Expect(result.Omitted).To(Equal(graph.Omitted{Unresolved: 1}))
+		Expect(result.Exclude).To(Equal(query.DefaultGraphExclusions))
+		Expect(result.Packages).To(Equal([]query.GraphPackage{{Path: ordersRoot, Nodes: 6}}))
 		Expect(result.Edges).To(ContainElements(
 			graph.Edge{ID: ids["Submit"] + "|" + ids["charge"] + "|call", From: ids["Submit"], To: ids["charge"], Type: "call", Sites: []graph.Site{
-				{Path: ordersPath, Line: ordersLine("charge(order)\n\t}\n\tif order.Rush"), Column: 3, Text: "charge", Guards: []string{"order.Total > 0"}},
-				{Path: ordersPath, Line: ordersLine("charge(order)\n\t}\n\tif hook"), Column: 3, Text: "charge", Guards: []string{"order.Rush"}},
+				{Path: ordersPath, Line: ordersLine("charge(order)\n\t}\n\tif order.Rush"), Column: 3, Text: "charge(order)", Guards: []string{"order.Total > 0"}},
+				{Path: ordersPath, Line: ordersLine("charge(order)\n\t}\n\tif hook"), Column: 3, Text: "charge(order)", Guards: []string{"order.Rush"}},
 			}},
 			graph.Edge{ID: ids["Submit"] + "|" + ids["Mail.Notify"] + "|dispatch", From: ids["Submit"], To: ids["Mail.Notify"], Type: "dispatch", Sites: []graph.Site{
-				{Path: ordersPath, Line: ordersLine("notifier.Notify("), Column: 11, Text: "notifier.Notify"},
+				{Path: ordersPath, Line: ordersLine("notifier.Notify("), Column: 11, Text: `notifier.Notify("submitted")`},
 			}},
 		))
+	})
+
+	It("takes the exclusion patterns as a comma list and echoes them", func() {
+		response := get(url.Values{"selector": {"orders.Submit"}, "exclude": {"external,example.org/orders/..."}})
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var result query.GraphResult
+		Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
+		Expect(result.Exclude).To(Equal([]string{"external", "example.org/orders/..."}))
+		Expect(result.Nodes).To(HaveLen(1), "only the root is left of its excluded package")
+		Expect(result.Omitted.Excluded).To(Equal(map[string]int{ordersRoot: 5}))
+		Expect(result.Packages).To(Equal([]query.GraphPackage{{Path: ordersRoot, Nodes: 6, Excluded: true}}))
 	})
 
 	It("accepts the canonical symbol id of a node in place of a selector", func() {
@@ -178,6 +191,8 @@ var _ = Describe("module call graph", func() {
 		Entry("a depth beyond the maximum", url.Values{"selector": {"orders.Submit"}, "depth": {"9"}}, http.StatusBadRequest, "invalid_query", "depth 9 is outside 1..8"),
 		Entry("a limit beyond the maximum", url.Values{"selector": {"orders.Submit"}, "limit": {"1001"}}, http.StatusBadRequest, "invalid_query", "limit 1001 is outside 1..1000"),
 		Entry("an unknown direction", url.Values{"selector": {"orders.Submit"}, "direction": {"sideways"}}, http.StatusBadRequest, "invalid_query", `direction "sideways"`),
+		Entry("an exclusion pattern that is a glob", url.Values{"selector": {"orders.Submit"}, "exclude": {"std,gorm.io/*"}}, http.StatusBadRequest, "invalid_query", `"gorm.io/*"`),
+		Entry("none beside another exclusion pattern", url.Values{"selector": {"orders.Submit"}, "exclude": {"none,std"}}, http.StatusBadRequest, "invalid_query", "none excludes nothing"),
 		Entry("neither a selector nor a symbol", url.Values{"depth": {"2"}}, http.StatusBadRequest, "invalid_query", "requires a selector or a symbol"),
 		Entry("both a selector and a symbol", url.Values{"selector": {"orders.Submit"}, "symbol": {"0123"}}, http.StatusBadRequest, "invalid_query", "not both"),
 		Entry("a selector that names a type", url.Values{"selector": {"orders.Order"}}, http.StatusBadRequest, "invalid_query", "matched no function or method"),
@@ -207,7 +222,7 @@ var _ = Describe("module call graph", func() {
 			Expect(parameter.In).To(Equal("query"), parameter.Name)
 			names = append(names, parameter.Name)
 		}
-		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "root", "location", "snapshot"))
+		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot"))
 	})
 
 	It("takes the selector as the first argument in place of the flag", func(ctx SpecContext) {

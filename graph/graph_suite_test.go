@@ -3,6 +3,7 @@ package graph_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,8 +57,13 @@ func (s stubSource) reversed() stubSource {
 	return s
 }
 
+// stubNode names a node; the part of its id before a dot, as in fmt.Println, is its group.
 func stubNode(id string) graph.Node {
-	return graph.Node{ID: id, Label: id, Kind: string(uir.NodeTypeMethod), Unresolved: strings.HasPrefix(id, "?")}
+	group, _, qualified := strings.Cut(id, ".")
+	if !qualified {
+		group = ""
+	}
+	return graph.Node{ID: id, Label: id, Kind: string(uir.NodeTypeMethod), Group: group, Unresolved: strings.HasPrefix(id, "?")}
 }
 
 func (s stubSource) Describe(_ context.Context, id string) (graph.Node, error) {
@@ -120,7 +126,17 @@ func shapeOf(g *graph.Graph) shape {
 
 func build(src graph.Source, direction graph.Direction, depth int, roots ...string) *graph.Graph {
 	GinkgoHelper()
-	g, err := graph.Build(context.Background(), src, roots, graph.Options{Direction: direction, Depth: depth, Limit: graph.DefaultLimit})
+	return buildWith(src, graph.Options{Direction: direction, Depth: depth, Limit: graph.DefaultLimit}, roots...)
+}
+
+func buildWith(src graph.Source, opts graph.Options, roots ...string) *graph.Graph {
+	GinkgoHelper()
+	g, err := graph.Build(context.Background(), src, roots, opts)
 	Expect(err).NotTo(HaveOccurred())
 	return g
+}
+
+// excludeGroups leaves out every node of the named groups.
+func excludeGroups(groups ...string) func(graph.Node) bool {
+	return func(node graph.Node) bool { return slices.Contains(groups, node.Group) }
 }

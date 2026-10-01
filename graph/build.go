@@ -24,7 +24,7 @@ func Build(ctx context.Context, src Source, roots []string, opts Options) (*Grap
 	if len(roots) == 0 {
 		return nil, errors.New("graph: at least one root is required")
 	}
-	b := &builder{src: src, opts: opts, nodes: map[string]*Node{}, edges: map[string]Edge{}}
+	b := &builder{src: src, opts: opts, nodes: map[string]*Node{}, edges: map[string]Edge{}, excluded: map[string]map[string]bool{}}
 	for _, root := range roots {
 		if err := b.addRoot(ctx, root); err != nil {
 			return nil, err
@@ -63,6 +63,8 @@ type builder struct {
 	roots   []string
 	queue   []string
 	omitted Omitted
+	// excluded holds the ids of the excluded nodes by group.
+	excluded map[string]map[string]bool
 }
 
 func (b *builder) addRoot(ctx context.Context, id string) error {
@@ -128,6 +130,7 @@ func (b *builder) follow(node *Node, steps []Step, direction int) (int, error) {
 		return 0, err
 	}
 	atDepth := node.Depth == direction*b.opts.Depth
+	merged = b.withoutExcluded(merged, atDepth)
 	beyond := false
 	for _, step := range merged {
 		if _, present := b.nodes[step.Node.ID]; !present {
@@ -147,6 +150,29 @@ func (b *builder) follow(node *Node, steps []Step, direction int) (int, error) {
 		b.omitted.BeyondDepth++
 	}
 	return len(merged), nil
+}
+
+// withoutExcluded drops the steps to neighbours Options.Exclude leaves out, tallying each one unless
+// only a node at the depth bound reaches it. A neighbour already in the graph is kept.
+func (b *builder) withoutExcluded(steps []Step, atDepth bool) []Step {
+	if b.opts.Exclude == nil {
+		return steps
+	}
+	kept := steps[:0]
+	for _, step := range steps {
+		if _, present := b.nodes[step.Node.ID]; present || !b.opts.Exclude(step.Node) {
+			kept = append(kept, step)
+			continue
+		}
+		if atDepth {
+			continue
+		}
+		if b.excluded[step.Node.Group] == nil {
+			b.excluded[step.Node.Group] = map[string]bool{}
+		}
+		b.excluded[step.Node.Group][step.Node.ID] = true
+	}
+	return kept
 }
 
 // record keeps an edge the first time it is reported. The callees of its source
@@ -227,6 +253,12 @@ func (b *builder) graph() (*Graph, error) {
 	}
 	for _, group := range slices.Sorted(maps.Keys(groups)) {
 		g.Groups = append(g.Groups, Group{ID: group, Label: group})
+	}
+	for group, ids := range b.excluded {
+		if g.Omitted.Excluded == nil {
+			g.Omitted.Excluded = map[string]int{}
+		}
+		g.Omitted.Excluded[group] = len(ids)
 	}
 	slices.SortStableFunc(g.Nodes, func(a, b Node) int { return cmp.Compare(a.Depth, b.Depth) })
 	slices.SortFunc(g.Edges, func(a, b Edge) int {

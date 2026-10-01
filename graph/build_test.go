@@ -219,6 +219,43 @@ var _ = Describe("Build", func() {
 		}))
 	})
 
+	Describe("exclusions", func() {
+		callees := func(depth int, exclude func(graph.Node) bool) graph.Options {
+			return graph.Options{Direction: graph.DirectionCallees, Depth: depth, Limit: graph.DefaultLimit, Exclude: exclude}
+		}
+
+		It("neither draws, counts nor walks an excluded neighbour, and tallies distinct ones per group", func() {
+			src := calls("a>b", "a>fmt.Println", "a>fmt.Errorf", "b>fmt.Println", "fmt.Errorf>c", "a>os.Exit")
+			Expect(shapeOf(buildWith(src, callees(3, excludeGroups("fmt", "os")), "a"))).To(Equal(shape{
+				Nodes:   []string{"a@0 in=0 out=1", "b@1 in=1 out=0"},
+				Edges:   []string{"a|b|call"},
+				Omitted: graph.Omitted{Excluded: map[string]int{"fmt": 2, "os": 1}},
+			}))
+		})
+
+		It("never excludes a root, and draws the edges back into it", func() {
+			src := calls("fmt.Errorf>fmt.wrap", "fmt.Errorf>c", "c>fmt.Errorf")
+			Expect(shapeOf(buildWith(src, callees(2, excludeGroups("fmt")), "fmt.Errorf"))).To(Equal(shape{
+				Nodes:   []string{"fmt.Errorf@0 in=1 out=1", "c@1 in=1 out=1"},
+				Edges:   []string{"c|fmt.Errorf|call", "fmt.Errorf|c|call"},
+				Omitted: graph.Omitted{Excluded: map[string]int{"fmt": 1}},
+			}))
+		})
+
+		It("does not tally or count as beyond the depth an excluded node only the frontier reaches", func() {
+			src := calls("a>b", "b>fmt.Println", "a>fmt.Errorf")
+			Expect(shapeOf(buildWith(src, callees(1, excludeGroups("fmt")), "a"))).To(Equal(shape{
+				Nodes:   []string{"a@0 in=0 out=1", "b@1 in=1 out=0"},
+				Edges:   []string{"a|b|call"},
+				Omitted: graph.Omitted{Excluded: map[string]int{"fmt": 1}},
+			}))
+		})
+
+		It("reports no exclusions when nothing reached is excluded", func() {
+			Expect(buildWith(calls("a>b"), callees(1, excludeGroups("fmt")), "a").Omitted.Excluded).To(BeNil())
+		})
+	})
+
 	It("refuses a theme that renames a node's id, which its edges refer to", func() {
 		_, err := graph.Build(context.Background(), calls("a>b"), []string{"a"},
 			graph.Options{Direction: graph.DirectionCallees, Depth: 1, Limit: graph.DefaultLimit, Theme: renamingTheme{}})
@@ -297,7 +334,7 @@ var _ = Describe("Graph JSON", func() {
 				Sites: []graph.Site{{Path: "orders.go", Line: 9, Column: 2, Text: "a()", Guards: []string{"ok"}}},
 			}},
 			Groups:  []graph.Group{{ID: "orders", Label: "Orders", Parent: "shop"}},
-			Omitted: graph.Omitted{NodeLimit: true, BeyondDepth: 1, Unresolved: 2, UnreadableSource: []string{"gone.go"}},
+			Omitted: graph.Omitted{NodeLimit: true, BeyondDepth: 1, Unresolved: 2, UnreadableSource: []string{"gone.go"}, Excluded: map[string]int{"fmt": 2}},
 		}
 
 		Expect(json.Marshal(g)).To(MatchJSON(`{
@@ -316,7 +353,7 @@ var _ = Describe("Graph JSON", func() {
 				"sites": [{"path": "orders.go", "line": 9, "column": 2, "text": "a()", "guards": ["ok"]}]
 			}],
 			"groups": [{"id": "orders", "label": "Orders", "parent": "shop"}],
-			"omitted": {"node_limit": true, "beyond_depth": 1, "unresolved": 2, "unreadable_source": ["gone.go"]}
+			"omitted": {"node_limit": true, "beyond_depth": 1, "unresolved": 2, "unreadable_source": ["gone.go"], "excluded": {"fmt": 2}}
 		}`))
 	})
 })

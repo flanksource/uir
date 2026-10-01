@@ -80,15 +80,17 @@ var _ = Describe("module call graph rendering", func() {
 		}
 		result := moduleGraphResult{GraphResult: query.GraphResult{Graph: graph.Graph{
 			Roots: []string{root.ID}, Nodes: []graph.Node{root, builtin, external},
-			Edges:   []graph.Edge{call(builtin, 6, "len"), call(external, 5, "errors.New")},
-			Omitted: graph.Omitted{NodeLimit: true, BeyondDepth: 1, Unresolved: 2, UnreadableSource: []string{"a.go", "b.go"}},
+			Edges: []graph.Edge{call(builtin, 6, "len"), call(external, 5, "errors.New")},
+			Omitted: graph.Omitted{NodeLimit: true, BeyondDepth: 1, Unresolved: 2, UnreadableSource: []string{"a.go", "b.go"},
+				Excluded: map[string]int{"strings": 1, "fmt": 3, "builtin": 1}},
 		}}}
 		Expect(graphLines(result)).To(Equal([]string{
 			"ƒ Run example.org/app app.go:3",
 			"├── callees",
 			"│   ├── ƒ New errors app.go:5",
 			"│   ╰── len app.go:6",
-			"╰── omitted: node limit reached; 1 beyond depth; 2 unresolved; guards unreadable in a.go, b.go",
+			"├── omitted: node limit reached; 1 beyond depth; 2 unresolved; guards unreadable in a.go, b.go",
+			"╰── excluded: fmt 3, builtin 1, strings 1",
 		}))
 	})
 })
