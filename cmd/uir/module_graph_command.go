@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
@@ -15,14 +16,15 @@ import (
 )
 
 type moduleGraphOptions struct {
-	Selector   string `flag:"selector" args:"true" help:"Symbol expression naming the function or method at the root of the graph; also the first argument"`
-	Symbol     string `flag:"symbol" help:"Canonical symbol id of the root, as a graph node or candidate carries it"`
-	Direction  string `flag:"direction" help:"Calls to follow from the root: callees, callers, or both (the default)"`
-	Depth      int    `flag:"depth"`
-	Limit      int    `flag:"limit"`
-	RootKey    string `flag:"root" help:"Module path to query"`
-	Location   string `flag:"location" help:"Registered checkout path"`
-	SnapshotID string `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
+	Selector   string   `flag:"selector" args:"true" help:"Symbol expression naming the function or method at the root of the graph; also the first argument"`
+	Symbol     string   `flag:"symbol" help:"Canonical symbol id of the root, as a graph node or candidate carries it"`
+	Direction  string   `flag:"direction" help:"Calls to follow from the root: callees, callers, or both (the default)"`
+	Depth      int      `flag:"depth"`
+	Limit      int      `flag:"limit"`
+	Exclude    []string `flag:"exclude"`
+	RootKey    string   `flag:"root" help:"Module path to query"`
+	Location   string   `flag:"location" help:"Registered checkout path"`
+	SnapshotID string   `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
 }
 
 // moduleGraphResult is the graph envelope: the graph's own fields at the top level beside the
@@ -42,10 +44,13 @@ func registerModuleGraphCommand(root *cobra.Command) {
 	})
 	// Use names no argument: the API generator would publish a second selector parameter beside the flag.
 	command.Short = "Draw the callers and callees of one function or method"
-	command.Example = "  uir graph example.org/service/orders.Submit --direction callers --depth 3\n  uir graph --symbol <id> --format json"
+	command.Example = "  uir graph example.org/service/orders.Submit --direction callers --depth 3\n  uir graph example.org/service/orders.Submit --exclude external\n  uir graph --symbol <id> --exclude none --format json"
 	command.Args = cobra.MaximumNArgs(1)
 	command.Flags().Lookup("depth").Usage = fmt.Sprintf("Calls away from the root, from 1 through %d (default %d)", graph.MaxDepth, graph.DefaultDepth)
 	command.Flags().Lookup("limit").Usage = fmt.Sprintf("Maximum nodes from 1 through %d (default %d)", graph.MaxLimit, graph.DefaultLimit)
+	command.Flags().Lookup("exclude").Usage = fmt.Sprintf(
+		"Comma-separated package patterns whose nodes are left out: an import path, a path ending in /..., or %s, %s, %s; %s alone excludes nothing (default %s)",
+		query.ExcludeStd, query.ExcludeBuiltin, query.ExcludeExternal, query.ExcludeNone, strings.Join(query.DefaultGraphExclusions, ","))
 	setModuleRoute(command, "modules/graph")
 	command.Annotations["clicky/operation-method"] = http.MethodGet
 }
@@ -57,7 +62,7 @@ func graphModules(ctx context.Context, database *gorm.DB, options moduleGraphOpt
 	}
 	result, err := pipeline.Graph(ctx, query.GraphOptions{
 		Selector: options.Selector, Symbol: options.Symbol,
-		Direction: graph.Direction(options.Direction), Depth: options.Depth, Limit: options.Limit,
+		Direction: graph.Direction(options.Direction), Depth: options.Depth, Limit: options.Limit, Exclude: options.Exclude,
 		Scope: query.ModuleScopeOptions{RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID},
 	})
 	if err != nil {

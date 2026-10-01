@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue } from "./route";
 
 const root = { root_key: "example.org/service", location: "/checkout/service", snapshot_id: "head-1" };
-const selectionReset = { source: "", node: "", fileSearch: "", symbolSearch: "", compareFrom: "", compareTo: "", logCommit: "", includeTests: false, offset: 0 };
+const selectionReset = { source: "", node: "", fileSearch: "", symbolSearch: "", compareFrom: "", compareTo: "", logCommit: "", includeTests: false, offset: 0, graphRoot: "" };
 
 describe("scope", () => {
   it.each([
@@ -75,6 +75,27 @@ it("defaults to file navigation and round trips symbol navigation through the Ex
   const symbols = applyRoutePatch(files, { explorerMode: "symbols" });
   expect(readRoute(new URL(routeURL(symbols), "http://localhost"))).toEqual(symbols);
   expect(routeURL(symbols)).toBe("/explorer?explorerMode=symbols");
+});
+
+describe("call graph tab", () => {
+  it("opens the Explorer on the Source tab with a depth-2 graph of both directions and the server's exclusions, none of it in the URL", () => {
+    const route = readRoute({ pathname: "/explorer", search: "?snapshot=s1" });
+    expect({ explorerTab: route.explorerTab, graphDir: route.graphDir, graphDepth: route.graphDepth, graphRoot: route.graphRoot, graphExclude: route.graphExclude, url: routeURL(route) })
+      .toEqual({ explorerTab: "source", graphDir: "both", graphDepth: 2, graphRoot: "", graphExclude: "", url: "/explorer?snapshot=s1" });
+  });
+
+  it("round trips the tab, direction, depth, pinned root and exclusions through the URL", () => {
+    const route = readRoute({ pathname: "/explorer", search: "?snapshot=s1&explorerTab=call-graph&graphDir=callers&graphDepth=4&graphRoot=abc123&graphExclude=std%2Cgorm.io%2F...%2Cexternal" });
+    expect(route).toMatchObject({ explorerTab: "call-graph", graphDir: "callers", graphDepth: 4, graphRoot: "abc123", graphExclude: "std,gorm.io/...,external" });
+    expect(readRoute(new URL(routeURL(route), "http://localhost"))).toEqual(route);
+  });
+
+  it.each([
+    ["an unknown tab", "explorerTab=graph", { explorerTab: "source" }],
+    ["an unknown direction", "graphDir=up", { graphDir: "both" }],
+  ])("falls back to the default for %s", (_, search, expected) => {
+    expect(readRoute({ pathname: "/explorer", search: `?${search}` })).toMatchObject(expected);
+  });
 });
 
 it("round trips included and excluded symbol facets with the tree text filter", () => {
