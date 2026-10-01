@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -34,6 +35,9 @@ func (result moduleGraphResult) tree() *moduleQueryTreeNode {
 		if omitted := omittedSummary(result.Omitted); omitted != "" {
 			root.children = append(root.children, &moduleQueryTreeNode{label: clicky.Text("omitted: "+omitted, uir.StyleWarning)})
 		}
+		if len(result.Omitted.Excluded) > 0 {
+			root.children = append(root.children, &moduleQueryTreeNode{label: clicky.Text("excluded: "+excludedSummary(result.Omitted.Excluded), uir.StyleMuted)})
+		}
 	}
 	for _, warning := range result.Warnings {
 		root.children = append(root.children, missingHeadNode(warning))
@@ -60,6 +64,18 @@ func omittedSummary(omitted graph.Omitted) string {
 		parts = append(parts, "guards unreadable in "+strings.Join(omitted.UnreadableSource, ", "))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// excludedSummary tallies the excluded nodes per package, most first.
+func excludedSummary(excluded map[string]int) string {
+	groups := slices.SortedFunc(maps.Keys(excluded), func(left, right string) int {
+		return cmp.Or(cmp.Compare(excluded[right], excluded[left]), cmp.Compare(left, right))
+	})
+	tallies := make([]string, 0, len(groups))
+	for _, group := range groups {
+		tallies = append(tallies, fmt.Sprintf("%s %d", group, excluded[group]))
+	}
+	return strings.Join(tallies, ", ")
 }
 
 // graphTree draws a graph as the two trees that hang off its root: the nodes that call it, and the

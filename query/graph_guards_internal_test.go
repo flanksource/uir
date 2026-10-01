@@ -2,6 +2,7 @@ package query
 
 import (
 	"go/ast"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -113,6 +114,11 @@ func conditions(s *service, a, b bool, n int, kind string, v any, ch chan int, i
 	if s.ok() {
 		s.inner.save("x", 1)
 	}
+	wrapper(inArgument(n))
+	spread(
+		a,
+		b,
+	)
 }
 `
 
@@ -153,60 +159,70 @@ var _ = Describe("call site guards", func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	DescribeTable("lists the conditions that must hold to reach a call, outermost first",
-		func(callee string, guards ...string) {
+	DescribeTable("reads the whole call and the conditions that must hold to reach it, outermost first",
+		func(callee, call string, guards ...string) {
 			ident, expression := calleeSpans(file, callee)
 			for _, span := range []storage.ByteSpan{ident, expression} {
-				conditions, err := file.guardsAt(span)
+				site, err := file.siteAt(span)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(append([]string{}, guardTexts(conditions)...)).To(Equal(append([]string{}, guards...)), "guards of %s at bytes %v", callee, span)
+				Expect(site.Call).To(Equal(call), "call of %s at bytes %v", callee, span)
+				Expect(append([]string{}, guardTexts(site.Guards)...)).To(Equal(append([]string{}, guards...)), "guards of %s at bytes %v", callee, span)
 			}
 		},
-		Entry("in an if body", "inThen", "a"),
-		Entry("in an else block", "inElse", "!a"),
-		Entry("in an else if body", "inElseIf", "!a", "b"),
-		Entry("in the else of an else if", "inFinalElse", "!a", "!b"),
-		Entry("in an if condition, which does not guard itself", "inCondition"),
-		Entry("in an if init, which its condition does not guard", "inInit"),
-		Entry("in the body of an if with an init", "afterInit", "x > 0"),
-		Entry("in a tagged switch case", "inCase", `kind == "a"`),
-		Entry("in a tagged switch case with several values", "inCaseList", `kind == "b" || kind == "c"`),
-		Entry("in a tagged switch default", "inDefault", `!(kind == "a" || kind == "b" || kind == "c")`),
-		Entry("in a tagless switch case", "inTagless", "n > 1"),
-		Entry("in a tagless switch case with several conditions", "inTaglessList", "a || b"),
-		Entry("in a tagless switch default", "inTaglessDefault", "!(n > 1 || a || b)"),
-		Entry("in a switch tag", "inTag"),
-		Entry("in a case's own value list", "inCaseValue"),
-		Entry("in the default of a switch with no other case", "inOnlyDefault"),
-		Entry("in a case that falls through", "beforeFallthrough", "n == 1"),
-		Entry("in a case another falls through into", "afterFallthrough", "n == 1 || n == 2"),
-		Entry("in the default after a fallthrough", "inFallDefault", "!(n == 1 || n == 2)"),
-		Entry("in a type switch case", "inTypeCase", "v.(type) == *int"),
-		Entry("in a type switch case with several types", "inTypeList", "v.(type) == string || v.(type) == nil"),
-		Entry("in a type switch default", "inTypeDefault", "!(v.(type) == *int || v.(type) == string || v.(type) == nil)"),
-		Entry("in a select receive case", "inReceive", "x := <-ch"),
-		Entry("in a select case's own send", "inSendValue"),
-		Entry("in a select send case", "inSend", "ch <- inSendValue()"),
-		Entry("in a select default", "inSelectDefault", "default"),
-		Entry("in a for init", "inForInit"),
-		Entry("in a for post statement, which runs only after an iteration", "inForPost", "i < n"),
-		Entry("in a for body", "inFor", "i < n"),
-		Entry("in a for condition", "inForCondition"),
-		Entry("in a for with no condition", "inBareFor"),
-		Entry("in a range loop", "inRange"),
-		Entry("under an if, a loop and another if", "nested", "a", "n > 0", "b"),
-		Entry("in a function literal, which keeps the guards around it", "inClosure", "a", "b"),
-		Entry("at the top of the function", "unguarded"),
-		Entry("under a compound condition", "inCompound", "a || b && n > 0"),
-		Entry("under a negated condition", "inNegated", "!a"),
-		Entry("in the else of a negated condition", "inDoubleNegated", "!!a"),
-		Entry("a method call in an if condition", "ok"),
-		Entry("a method call through a selector chain", "save", "s.ok()"),
+		Entry("in an if body", "inThen", "inThen()", "a"),
+		Entry("in an else block", "inElse", "inElse()", "!a"),
+		Entry("in an else if body", "inElseIf", "inElseIf()", "!a", "b"),
+		Entry("in the else of an else if", "inFinalElse", "inFinalElse()", "!a", "!b"),
+		Entry("in an if condition, which does not guard itself", "inCondition", "inCondition()"),
+		Entry("in an if init, which its condition does not guard", "inInit", "inInit()"),
+		Entry("in the body of an if with an init", "afterInit", "afterInit()", "x > 0"),
+		Entry("in a tagged switch case", "inCase", "inCase()", `kind == "a"`),
+		Entry("in a tagged switch case with several values", "inCaseList", "inCaseList()", `kind == "b" || kind == "c"`),
+		Entry("in a tagged switch default", "inDefault", "inDefault()", `!(kind == "a" || kind == "b" || kind == "c")`),
+		Entry("in a tagless switch case", "inTagless", "inTagless()", "n > 1"),
+		Entry("in a tagless switch case with several conditions", "inTaglessList", "inTaglessList()", "a || b"),
+		Entry("in a tagless switch default", "inTaglessDefault", "inTaglessDefault()", "!(n > 1 || a || b)"),
+		Entry("in a switch tag", "inTag", "inTag()"),
+		Entry("in a case's own value list", "inCaseValue", "inCaseValue()"),
+		Entry("in the default of a switch with no other case", "inOnlyDefault", "inOnlyDefault()"),
+		Entry("in a case that falls through", "beforeFallthrough", "beforeFallthrough()", "n == 1"),
+		Entry("in a case another falls through into", "afterFallthrough", "afterFallthrough()", "n == 1 || n == 2"),
+		Entry("in the default after a fallthrough", "inFallDefault", "inFallDefault()", "!(n == 1 || n == 2)"),
+		Entry("in a type switch case", "inTypeCase", "inTypeCase()", "v.(type) == *int"),
+		Entry("in a type switch case with several types", "inTypeList", "inTypeList()", "v.(type) == string || v.(type) == nil"),
+		Entry("in a type switch default", "inTypeDefault", "inTypeDefault(t)", "!(v.(type) == *int || v.(type) == string || v.(type) == nil)"),
+		Entry("in a select receive case", "inReceive", "inReceive(x)", "x := <-ch"),
+		Entry("in a select case's own send", "inSendValue", "inSendValue()"),
+		Entry("in a select send case", "inSend", "inSend()", "ch <- inSendValue()"),
+		Entry("in a select default", "inSelectDefault", "inSelectDefault()", "default"),
+		Entry("in a for init", "inForInit", "inForInit()"),
+		Entry("in a for post statement, which runs only after an iteration", "inForPost", "inForPost(i)", "i < n"),
+		Entry("in a for body", "inFor", "inFor()", "i < n"),
+		Entry("in a for condition", "inForCondition", "inForCondition()"),
+		Entry("in a for with no condition", "inBareFor", "inBareFor()"),
+		Entry("in a range loop", "inRange", "inRange()"),
+		Entry("under an if, a loop and another if", "nested", "nested()", "a", "n > 0", "b"),
+		Entry("in a function literal, which keeps the guards around it", "inClosure", "inClosure()", "a", "b"),
+		Entry("at the top of the function", "unguarded", "unguarded()"),
+		Entry("under a compound condition", "inCompound", "inCompound()", "a || b && n > 0"),
+		Entry("under a negated condition", "inNegated", "inNegated()", "!a"),
+		Entry("in the else of a negated condition", "inDoubleNegated", "inDoubleNegated()", "!!a"),
+		Entry("a method call in an if condition", "ok", "s.ok()"),
+		Entry("a method call through a selector chain", "save", `s.inner.save("x", 1)`, "s.ok()"),
+		Entry("a call whose argument is another call", "wrapper", "wrapper(inArgument(n))"),
+		Entry("a call in another call's argument, which is its own call", "inArgument", "inArgument(n)"),
+		Entry("a call written over several lines, kept as written", "spread", "spread(\n\t\ta,\n\t\tb,\n\t)"),
 	)
 
 	It("rejects a span that lies outside the source", func() {
-		_, err := file.guardsAt(storage.ByteSpan{len(guardSource), len(guardSource) + 4})
+		_, err := file.siteAt(storage.ByteSpan{len(guardSource), len(guardSource) + 4})
 		Expect(err).To(MatchError(ContainSubstring("outside")))
+	})
+
+	It("rejects a span that is not the callee of a call", func() {
+		condition := strings.Index(guardSource, "if a {\n\t\tinThen") + len("if ")
+		_, err := file.siteAt(storage.ByteSpan{condition, condition + 1})
+		Expect(err).To(MatchError(ContainSubstring("no call")))
 	})
 
 	It("does not parse a source with syntax errors", func() {

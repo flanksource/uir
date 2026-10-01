@@ -44,7 +44,7 @@ type Node struct {
 	// a node at depth <= 0 when callers are walked. In the direction Build did not
 	// ask about, and for an unresolved node, which is never asked, the count is
 	// the edges drawn, so it may be short of the Source's total. Edges a Theme
-	// drops are not counted.
+	// drops and edges to nodes Options.Exclude leaves out are not counted.
 	In  int `json:"in"`
 	Out int `json:"out"`
 	// Unresolved marks a target the Source could not place; it is drawn as a leaf.
@@ -109,6 +109,9 @@ type Omitted struct {
 	Unresolved int `json:"unresolved,omitempty"`
 	// UnreadableSource lists the files whose guards a Source could not derive.
 	UnreadableSource []string `json:"unreadable_source,omitempty"`
+	// Excluded counts, per Node.Group, the distinct nodes Options.Exclude left
+	// out. A node only a node at Options.Depth reaches is not counted.
+	Excluded map[string]int `json:"excluded,omitempty"`
 }
 
 // Step is a neighbour and the edge to it. A Source sets the edge's Type, Kind
@@ -153,4 +156,9 @@ type Options struct {
 	// Limit is the most nodes the graph holds.
 	Limit int
 	Theme Theme
+	// Exclude reports a neighbour to leave out: it is not added, drawn, counted
+	// in In or Out, or walked, and Omitted.Excluded tallies it. A root and a
+	// node already in the graph are never excluded. A nil Exclude keeps every
+	// node.
+	Exclude func(Node) bool
 }

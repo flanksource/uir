@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flanksource/uir/graph"
 	"github.com/flanksource/uir/storage"
@@ -22,13 +23,21 @@ type GraphOptions struct {
 	Depth int
 	// Limit is the most nodes the graph holds, 1 through graph.MaxLimit.
 	Limit int
-	Scope ModuleScopeOptions
+	// Exclude are the package patterns whose nodes the graph leaves out, besides the root: an import
+	// path, a path ending in /..., or the keywords ExcludeStd, ExcludeBuiltin and ExcludeExternal.
+	// None takes DefaultGraphExclusions, and ExcludeNone alone excludes nothing.
+	Exclude []string
+	Scope   ModuleScopeOptions
 }
 
 // GraphResult is a call graph with how it was resolved. A selector that matches several functions
 // or methods returns them as Candidates with an empty graph.
 type GraphResult struct {
 	graph.Graph
+	// Exclude are the effective exclusion patterns.
+	Exclude []string `json:"exclude"`
+	// Packages are the packages reached while walking, drawn or excluded.
+	Packages   []GraphPackage       `json:"packages"`
 	Stages     []ResolutionStage    `json:"stages"`
 	Warnings   []MissingHeadWarning `json:"warnings"`
 	Candidates []ModuleSymbol       `json:"candidates"`
@@ -40,7 +49,8 @@ func invalidGraph(format string, arguments ...any) error {
 		graph.DirectionCallees, graph.DirectionCallers, graph.DirectionBoth, graph.MaxDepth, graph.MaxLimit)}
 }
 
-func (options GraphOptions) normalized() (GraphOptions, error) {
+// normalized fills in the defaults, validates the options, and parses the effective exclusions.
+func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) {
 	if options.Direction == "" {
 		options.Direction = graph.DirectionBoth
 	}
@@ -50,34 +60,46 @@ func (options GraphOptions) normalized() (GraphOptions, error) {
 	if options.Limit == 0 {
 		options.Limit = graph.DefaultLimit
 	}
+	if len(options.Exclude) == 0 {
+		options.Exclude = slices.Clone(DefaultGraphExclusions)
+	}
+	if err := options.validate(); err != nil {
+		return options, graphExclusions{}, err
+	}
+	exclusions, err := parseGraphExclusions(options.Exclude)
+	return options, exclusions, err
+}
+
+func (options GraphOptions) validate() error {
 	switch {
 	case options.Selector == "" && options.Symbol == "":
-		return options, invalidGraph("a call graph requires a selector or a symbol")
+		return invalidGraph("a call graph requires a selector or a symbol")
 	case options.Selector != "" && options.Symbol != "":
-		return options, invalidGraph("a call graph takes a selector or a symbol, not both")
+		return invalidGraph("a call graph takes a selector or a symbol, not both")
 	case options.Direction != graph.DirectionCallees && options.Direction != graph.DirectionCallers && options.Direction != graph.DirectionBoth:
-		return options, invalidGraph("direction %q is not one of %s, %s, %s", options.Direction, graph.DirectionCallees, graph.DirectionCallers, graph.DirectionBoth)
+		return invalidGraph("direction %q is not one of %s, %s, %s", options.Direction, graph.DirectionCallees, graph.DirectionCallers, graph.DirectionBoth)
 	case options.Depth < 1 || options.Depth > graph.MaxDepth:
-		return options, invalidGraph("depth %d is outside 1..%d", options.Depth, graph.MaxDepth)
+		return invalidGraph("depth %d is outside 1..%d", options.Depth, graph.MaxDepth)
 	case options.Limit < 1 || options.Limit > graph.MaxLimit:
-		return options, invalidGraph("limit %d is outside 1..%d", options.Limit, graph.MaxLimit)
+		return invalidGraph("limit %d is outside 1..%d", options.Limit, graph.MaxLimit)
 	case options.Scope.Limit != 0:
-		return options, invalidGraph("the node limit of a call graph is Limit, not the scope's row limit")
+		return invalidGraph("the node limit of a call graph is Limit, not the scope's row limit")
 	case options.Scope.Location != "" && options.Scope.SnapshotID != "":
-		return options, invalidGraph("location and snapshot selectors are mutually exclusive")
+		return invalidGraph("location and snapshot selectors are mutually exclusive")
 	}
-	return options, nil
+	return nil
 }
 
 // Graph builds the call graph around one function or method of the selected snapshots: its callers,
-// its callees, or both, breadth-first to Depth and Limit. Each call site carries the guards read
-// from its hash-verified source; a source that cannot be recovered is listed in
-// Omitted.UnreadableSource and its sites carry none.
+// its callees, or both, breadth-first to Depth and Limit, leaving out the nodes of the packages
+// Exclude matches. Each call site carries the whole call and the guards read from its hash-verified
+// source; a source that cannot be recovered is listed in Omitted.UnreadableSource, and its sites
+// carry the callee as indexed and no guards.
 func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (GraphResult, error) {
 	if pipeline == nil || pipeline.database == nil {
 		return GraphResult{}, errors.New("UIR query database is required")
 	}
-	options, err := options.normalized()
+	options, exclusions, err := options.normalized()
 	if err != nil {
 		return GraphResult{}, err
 	}
@@ -90,8 +112,8 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 		return GraphResult{}, err
 	}
 	result := GraphResult{
-		Graph:    graph.Graph{Roots: []string{}, Nodes: []graph.Node{}, Edges: []graph.Edge{}},
-		Warnings: selection.warnings, Candidates: []ModuleSymbol{},
+		Graph:   graph.Graph{Roots: []string{}, Nodes: []graph.Node{}, Edges: []graph.Edge{}},
+		Exclude: options.Exclude, Packages: []GraphPackage{}, Warnings: selection.warnings, Candidates: []ModuleSymbol{},
 		Stages: []ResolutionStage{{Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, coverageStage(coverage)},
 	}
 	if len(selection.scopes) == 0 {
@@ -117,18 +139,30 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 		result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: fmt.Sprintf("%d candidates", len(roots))})
 		return result, nil
 	}
-	return pipeline.buildGraph(ctx, index, roots[0], options, result)
+	return pipeline.buildGraph(ctx, index, graphBuild{root: roots[0], options: options, exclusions: exclusions}, result)
 }
 
-func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, root ModuleSymbol, options GraphOptions, result GraphResult) (GraphResult, error) {
+type graphBuild struct {
+	root       ModuleSymbol
+	options    GraphOptions
+	exclusions graphExclusions
+}
+
+func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, request graphBuild, result GraphResult) (GraphResult, error) {
 	sources := newScopeSources(index.indexContext)
 	reader := newGuardReader(pipeline.database, sources)
 	source := newIndexGraphSource(index, sources, reader)
-	built, err := graph.Build(ctx, source, []string{root.ID}, graph.Options{Direction: options.Direction, Depth: options.Depth, Limit: options.Limit})
+	options := request.options
+	built, err := graph.Build(ctx, source, []string{request.root.ID}, graph.Options{
+		Direction: options.Direction, Depth: options.Depth, Limit: options.Limit,
+		Exclude: func(node graph.Node) bool { return request.exclusions.excludes(source.packageFacts(node.Group)) },
+	})
 	if err != nil {
 		return GraphResult{}, err
 	}
 	result.Graph = *built
+	result.Packages = graphPackages(built, source.packages, request.exclusions)
+	root := request.root
 	result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: root.QueryName})
 	result.Stages = append(result.Stages, source.stages...)
 	if unreadable := reader.unreadablePaths(); len(unreadable) > 0 {

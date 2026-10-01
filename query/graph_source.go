@@ -67,7 +67,8 @@ func (sources *scopeSources) document(snapshotID, path string) (moduleScope, sto
 
 // indexGraphSource serves the call graph of the selected snapshots from the symbol index. A node is
 // a canonical symbol, an edge the call occurrences between two of them, and a dispatch edge a call
-// of an interface method reaching an implementation. guards is nil when sites need none.
+// of an interface method reaching an implementation. guards reads each site's call and guards from
+// source; a site in an unreadable file keeps the callee text the index recorded and has no guards.
 type indexGraphSource struct {
 	index   *compactIndex
 	sources *scopeSources
@@ -75,10 +76,36 @@ type indexGraphSource struct {
 	symbols map[string]ModuleSymbol
 	nodes   map[string]graph.Node
 	stages  []ResolutionStage
+	// declared are the package paths of the selected snapshots.
+	declared map[string]bool
+	// packages describe the group of every node the source has made, for exclusion patterns.
+	packages map[string]graphPackageFacts
 }
 
 func newIndexGraphSource(index *compactIndex, sources *scopeSources, guards *guardReader) *indexGraphSource {
-	return &indexGraphSource{index: index, sources: sources, guards: guards, symbols: map[string]ModuleSymbol{}, nodes: map[string]graph.Node{}}
+	return &indexGraphSource{
+		index: index, sources: sources, guards: guards, symbols: map[string]ModuleSymbol{}, nodes: map[string]graph.Node{},
+		declared: scopePackages(index.indexContext), packages: map[string]graphPackageFacts{},
+	}
+}
+
+// notePackage describes a group the first time a node of it is made. A package outside the selected
+// snapshots is external; an external test package, p_test, lives beside p and is not.
+func (source *indexGraphSource) notePackage(path, module string, builtin bool) {
+	if _, known := source.packages[path]; known {
+		return
+	}
+	declared := source.declared[path] || source.declared[strings.TrimSuffix(path, "_test")]
+	source.packages[path] = graphPackageFacts{path: path, module: module, builtin: builtin, external: !declared}
+}
+
+// packageFacts describes the group of a node the source made.
+func (source *indexGraphSource) packageFacts(group string) graphPackageFacts {
+	facts, known := source.packages[group]
+	if !known {
+		panic(fmt.Sprintf("query: graph group %q belongs to no node the graph source made", group))
+	}
+	return facts
 }
 
 func (source *indexGraphSource) Describe(ctx context.Context, id string) (graph.Node, error) {
@@ -166,6 +193,7 @@ func (source *indexGraphSource) In(ctx context.Context, id string) ([]graph.Step
 		caller, declared := source.nodes[row.EnclosingID]
 		if !declared {
 			caller = packageScopeNode(row)
+			source.notePackage(row.PackagePath, row.RootKey, false)
 		}
 		if steps, err = source.step(ctx, steps, caller, row); err != nil {
 			return nil, err
@@ -174,18 +202,19 @@ func (source *indexGraphSource) In(ctx context.Context, id string) ([]graph.Step
 	return steps, nil
 }
 
-// step appends the step to a neighbour over one call occurrence row.
+// step appends the step to a neighbour over one call occurrence row. The site's text is the whole call
+// as written, or the callee as the index recorded it when the file is unreadable.
 func (source *indexGraphSource) step(ctx context.Context, steps []graph.Step, neighbour graph.Node, call ModuleMatch) ([]graph.Step, error) {
 	site := graph.Site{Path: call.Path, Text: call.text}
 	if call.Line != nil && call.Column != nil {
 		site.Line, site.Column = *call.Line, *call.Column
 	}
-	if source.guards != nil {
-		guards, err := source.guards.guards(ctx, call)
-		if err != nil {
-			return nil, fmt.Errorf("guards of %s at %s:%d: %w", call.text, call.Path, site.Line, err)
-		}
-		site.Guards = guardTexts(guards)
+	read, readable, err := source.guards.site(ctx, call)
+	if err != nil {
+		return nil, fmt.Errorf("call site of %s at %s:%d: %w", call.text, call.Path, site.Line, err)
+	}
+	if readable {
+		site.Text, site.Guards = read.Call, guardTexts(read.Guards)
 	}
 	kind := uir.RelationshipTypeCall
 	if call.Dispatch {
@@ -236,14 +265,20 @@ func (source *indexGraphSource) remember(ctx context.Context, symbols []ModuleSy
 	return nil
 }
 
-// node describes a symbol. One with no declaration in the selected snapshots, such as a standard
-// library function, has no location. One with several, such as a function declared per build tag,
-// is located at the first by path and carries their count in the declarations property.
+// node describes a symbol. Its group is its package path, or builtin for a predeclared function. One
+// with no declaration in the selected snapshots, such as a standard library function, has no
+// location. One with several, such as a function declared per build tag, is located at the first by
+// path and carries their count in the declarations property.
 func (source *indexGraphSource) node(symbol ModuleSymbol, declarations []ModuleMatch) (graph.Node, error) {
 	node := graph.Node{
 		ID: symbol.ID, Identifier: symbol.identifier(), Kind: symbol.Kind,
 		Label: strings.TrimPrefix(symbol.QueryName, symbol.PackagePath+"."), Group: symbol.PackagePath,
 	}
+	builtin := symbol.Kind == "builtin"
+	if builtin {
+		node.Group = builtinGroup
+	}
+	source.notePackage(node.Group, symbol.ModuleKey, builtin)
 	if len(declarations) == 0 {
 		return node, nil
 	}
