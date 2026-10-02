@@ -207,6 +207,9 @@ func (b *builder) merge(id string, steps []Step, direction int) ([]Step, error) 
 		edge.ID = edge.From + "|" + edge.To + "|" + string(edge.Type)
 		if existing, ok := byEdge[edge.ID]; ok {
 			existing.Edge.Sites = append(existing.Edge.Sites, edge.Sites...)
+			if len(existing.Edge.Properties) == 0 {
+				existing.Edge.Properties = edge.Properties
+			}
 			continue
 		}
 		edge.Sites = append([]Site{}, edge.Sites...)

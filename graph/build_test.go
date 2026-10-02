@@ -94,6 +94,20 @@ var _ = Describe("Build", func() {
 		}}))
 	})
 
+	It("keeps the first non-empty properties of the steps folded into one edge", func() {
+		plans := map[string]string{"plans": "gold"}
+		src := stubSource{edges: []stubEdge{
+			{from: "a", to: "b", kind: call, sites: []graph.Site{{Path: "a.go", Line: 1}}},
+			{from: "a", to: "b", kind: call, sites: []graph.Site{{Path: "a.go", Line: 2}}, properties: plans},
+			{from: "a", to: "b", kind: call, sites: []graph.Site{{Path: "a.go", Line: 3}}, properties: map[string]string{"plans": "silver"}},
+			{from: "a", to: "c", kind: call},
+		}}
+
+		g := build(src, graph.DirectionCallees, 1, "a")
+		Expect(g.Edges[0].Properties).To(Equal(plans))
+		Expect(g.Edges[1].Properties).To(BeNil())
+	})
+
 	It("keeps edges of different types between the same nodes apart", func() {
 		src := calls("a>b").with(stubEdge{from: "a", to: "b", kind: uir.RelationshipTypeDispatch})
 		Expect(shapeOf(build(src, graph.DirectionCallees, 1, "a"))).To(Equal(shape{
@@ -331,7 +345,8 @@ var _ = Describe("Graph JSON", func() {
 			}},
 			Edges: []graph.Edge{{
 				ID: "a|a|call", From: "a", To: "a", Type: call, Kind: "spawn",
-				Sites: []graph.Site{{Path: "orders.go", Line: 9, Column: 2, Text: "a()", Guards: []string{"ok"}}},
+				Sites:      []graph.Site{{Path: "orders.go", Line: 9, Column: 2, Text: "a()", Guards: []string{"ok"}}},
+				Properties: map[string]string{"plans": "gold"},
 			}},
 			Groups:  []graph.Group{{ID: "orders", Label: "Orders", Parent: "shop"}},
 			Omitted: graph.Omitted{NodeLimit: true, BeyondDepth: 1, Unresolved: 2, UnreadableSource: []string{"gone.go"}, Excluded: map[string]int{"fmt": 2}},
@@ -350,7 +365,8 @@ var _ = Describe("Graph JSON", func() {
 			}],
 			"edges": [{
 				"id": "a|a|call", "from": "a", "to": "a", "type": "call", "kind": "spawn",
-				"sites": [{"path": "orders.go", "line": 9, "column": 2, "text": "a()", "guards": ["ok"]}]
+				"sites": [{"path": "orders.go", "line": 9, "column": 2, "text": "a()", "guards": ["ok"]}],
+				"properties": {"plans": "gold"}
 			}],
 			"groups": [{"id": "orders", "label": "Orders", "parent": "shop"}],
 			"omitted": {"node_limit": true, "beyond_depth": 1, "unresolved": 2, "unreadable_source": ["gone.go"], "excluded": {"fmt": 2}}
