@@ -50,7 +50,7 @@ The root is one function or method. A selector that matches exactly one is drawn
 | --- | --- |
 | `roots` | The id of the root node. |
 | `nodes` | One node per symbol: `id` (the canonical symbol id), `identifier`, `kind` (`func`, `method`, `builtin`, `unresolved`, `package`), `label` (the name within its package, `Store.Save`), `group` (the package path, or `builtin` for a predeclared function such as `len`), `depth` (0 for the root, negative for callers, positive for callees), `in` and `out`, and `location`. |
-| `edges` | One edge per caller, callee, and type: `id` (`from|to|type`), `from`, `to`, `type` (`call` or `dispatch`), and `sites`. |
+| `edges` | One edge per caller, callee, and type: `id` (`from|to|type`), `from`, `to`, `type` (`call` or `dispatch`), `sites`, and `properties`. |
 | `groups` | The packages of the nodes, as `id` and `label`, for a renderer that clusters by package. |
 | `omitted` | What the graph leaves out: `node_limit`, `beyond_depth`, `unresolved`, `unreadable_source`, and `excluded`. |
 | `exclude` | The effective [exclusion patterns](#excluding-packages): the ones given, or the defaults. |
@@ -64,6 +64,8 @@ A node's `location` is where the symbol is declared: `root_key`, `checkout_path`
 `in` and `out` count a node's incoming and outgoing edges in the index, not only the edges drawn, so the difference from the edges drawn is how many more there are to expand. They are totals only in the direction the graph was walked: `out` for the root and its callees, `in` for the root and its callers. In the other direction they count the edges drawn. Edges to excluded nodes are not counted.
 
 An edge's `sites` are its call sites in order of path, line, and column. A site has `path`, `line`, `column`, `text` (the whole call as written, arguments included, `channel.Send(order.Kind)`), and `guards`. A site in a file listed in `omitted.unreadable_source` keeps the callee as the index recorded it, `channel.Send`, because the call cannot be read back.
+
+An edge's `properties` are string facts its source knows beyond the sites, such as the configurations that select a dispatch target; the Go index sets none, and the key is absent when there are none. When several steps of a source fold into one edge, the first non-empty properties are kept.
 
 A `dispatch` edge runs from a caller to a method that implements the interface method the caller calls. The same site therefore appears on two edges: the `call` edge to the interface method, and a `dispatch` edge to each implementation in the selected snapshots.
 
@@ -124,6 +126,20 @@ The graph is breadth-first from the root, to `depth` calls and `limit` nodes.
 Only the selected snapshots contribute edges. Callers in a module that is not indexed are absent, and dispatch reaches only the implementations in the selected snapshots. The `stages` entry named `coverage` reports packages that are partially indexed; a call graph over them is incomplete in the same way a [query](query.md#results-and-limits) is.
 
 `uir graph <symbol> --direction callers --depth N` and `uir query '<symbol> <<N'` walk the same caller edges. The query returns rows with a depth and fails beyond 10000 symbols; the graph returns nodes, edges, and guards, and truncates at `--limit`.
+
+## Custom sources
+
+The `graph` package knows nothing about Go. A frontend for another language, or for business rules held outside source files, draws the same graph by implementing `graph.Source`:
+
+| Method | Returns |
+| --- | --- |
+| `Describe(ctx, id)` | The node for an id; an id the source does not know is an error. |
+| `Out(ctx, id)` | One `graph.Step` per call the node makes: the neighbour `Node`, and an `Edge` with its `Type` (`call` or `dispatch`), `Kind`, `Sites` and `Properties`. |
+| `In(ctx, id)` | One step per call made to the node, in the same shape. |
+
+`graph.Build(ctx, source, roots, graph.Options{Direction, Depth, Limit, Exclude, Theme})` walks it and returns the `graph.Graph` envelope described above; `Build` sets each edge's `ID`, `From` and `To`, merges steps to one neighbour of one type, and bounds, orders and counts the result. A node with `Unresolved` set is a leaf that is never asked for its neighbours. Nothing in `Options` is defaulted.
+
+`Graph.Pretty()` draws the result as the tree shown under [Command](#command). A node's name is its label, after the icon and in the colour of its `Kind` when that is a UIR node type; `Graph.Tree(graph.TreeOptions{Name: ...})` draws it with a renderer of the frontend's own, which is how `uir graph` adds the Go symbol icons.
 
 ## Errors
 
