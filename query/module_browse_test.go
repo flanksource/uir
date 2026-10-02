@@ -7,6 +7,7 @@ import (
 
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -62,7 +63,7 @@ var _ = Describe("module browsing", func() {
 		Expect(os.WriteFile(path, []byte("package browse\n\nfunc Target() {}\nfunc Caller() { Target() }\nfunc hidden() {}\n"), 0o644)).To(Succeed())
 		engine, err := indexer.New(database)
 		Expect(err).To(Succeed())
-		published, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace})
+		published, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).To(Succeed())
 		pipeline, err := query.NewPipeline(database)
 		Expect(err).To(Succeed())
@@ -81,7 +82,7 @@ var _ = Describe("module browsing", func() {
 		Expect(content.Origin).To(Equal("local"))
 
 		Expect(os.Remove(path)).To(Succeed())
-		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace})
+		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).To(Succeed())
 		historical, err := pipeline.BrowseModules(ctx, query.ModuleScopeOptions{SnapshotID: published[0].SnapshotID})
 		Expect(err).To(Succeed())

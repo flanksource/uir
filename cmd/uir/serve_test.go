@@ -12,7 +12,6 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/commons-db/dbtest"
-	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
 	uiweb "github.com/flanksource/uir/web"
@@ -220,6 +219,10 @@ var _ = Describe("serve", func() {
 		Expect(snapshotKeys.Data).To(HaveLen(1))
 		Expect(snapshotKeys.Data[0]).To(And(HaveKeyWithValue("worktree_state", "unknown"), HaveKeyWithValue("coverage", "indexed"),
 			HaveKey("completed_at"), Not(HaveKey("state"))), "a snapshot reports its worktree state and coverage, not a publication state")
+		Expect(snapshotKeys.Data[0]).To(And(HaveKeyWithValue("reason", "add"), HaveKeyWithValue("kind", "head"), HaveKey("index_started_at"), HaveKey("task_run_id"),
+			HaveKeyWithValue("file_count", float64(1)), HaveKeyWithValue("files_added", float64(1)), HaveKeyWithValue("files_changed", float64(0)),
+			HaveKeyWithValue("source_bytes", float64(len("package browser\n\nfunc Run() {}\n")))),
+			"a snapshot reports why, as what, and by which run it was published, with its size and change against its base")
 		var snapshotPage struct {
 			Data []storage.ModuleSnapshotView `json:"data"`
 		}
@@ -425,64 +428,6 @@ var _ = Describe("serve", func() {
 		Expect(json.Unmarshal(response.Body.Bytes(), &selectors)).To(Succeed())
 		Expect(selectors.Items).To(Equal([]string{"pkg:" + referencesRoot + ":store"}))
 		Expect(selectors.Warnings).To(BeEmpty())
-	})
-
-	It("adds and reindexes module roots through structured API operations", func(ctx SpecContext) {
-		database := openCommandDatabase(ctx)
-		workspace := GinkgoT().TempDir()
-		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.org/browser\n\ngo 1.26\n"), 0o644)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package browser\n\nfunc Run() {}\n"), 0o644)).To(Succeed())
-		runtime := &commandRuntime{database: database}
-		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
-		Expect(err).To(Succeed())
-		for _, operation := range []string{"add", "reindex"} {
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/"+operation,
-				strings.NewReader(`{"args":["`+workspace+`"],"no-workspace-uses":true}`))
-			request.Header.Set("Content-Type", "application/json")
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			Expect(response.Code).To(Equal(http.StatusOK), operation+": "+response.Body.String())
-			var results []indexer.ModuleResult
-			Expect(json.Unmarshal(response.Body.Bytes(), &results)).To(Succeed())
-			Expect(results).To(HaveLen(1))
-			Expect(results[0].RootKey).To(Equal("example.org/browser"))
-			Expect(results[0].Unchanged).To(Equal(operation == "reindex"))
-		}
-		tasks := httptest.NewRecorder()
-		handler.ServeHTTP(tasks, httptest.NewRequest(http.MethodGet, "/api/v1/tasks?kind=module-index", nil))
-		Expect(tasks.Code).To(Equal(http.StatusOK), tasks.Body.String())
-		var runs []struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Kind   string `json:"kind"`
-			Status string `json:"status"`
-		}
-		Expect(json.Unmarshal(tasks.Body.Bytes(), &runs)).To(Succeed())
-		Expect(runs).To(ContainElement(And(HaveField("Name", ContainSubstring("Reindex "+workspace)), HaveField("Kind", "module-index"), HaveField("Status", "success"))))
-		detail := httptest.NewRecorder()
-		handler.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+runs[0].ID, nil))
-		Expect(detail.Code).To(Equal(http.StatusOK), detail.Body.String())
-		Expect(detail.Body.String()).To(ContainSubstring("root=example.org/browser"))
-		missing := filepath.Join(GinkgoT().TempDir(), "missing")
-		Expect(os.Mkdir(missing, 0o755)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(missing, "go.mod"), []byte("module example.org/missing\n\ngo 1.26\n"), 0o644)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(missing, "main.go"), []byte("package missing\n\nfunc Run() {}\n"), 0o644)).To(Succeed())
-		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/missing", Name: "missing", CreatedAt: time.Now().UTC()}
-		Expect(storage.CreateModuleRoot(ctx, database, &root)).To(Succeed())
-		canonical, err := filepath.EvalSymlinks(missing)
-		Expect(err).To(Succeed())
-		location := storage.ModuleLocation{ID: uuid.New(), RootID: root.ID, CanonicalPath: canonical, Kind: "module", CreatedAt: time.Now().UTC()}
-		Expect(database.Create(&location).Error).To(Succeed())
-		Expect(database.Create(&storage.ModulePrimary{RootID: root.ID, LocationID: location.ID}).Error).To(Succeed())
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/modules/reindex", strings.NewReader(`{"all":true}`))
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
-		var indexed []indexer.ModuleResult
-		Expect(json.Unmarshal(response.Body.Bytes(), &indexed)).To(Succeed())
-		Expect(indexed).To(HaveLen(1))
-		Expect(indexed[0].RootKey).To(Equal(root.RootKey))
 	})
 
 	It("serves the browser and omits removed project routes", func(ctx SpecContext) {

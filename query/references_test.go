@@ -8,6 +8,7 @@ import (
 
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -25,7 +26,7 @@ var _ = Describe("exact indexed references", func() {
 		Expect(os.WriteFile(filepath.Join(root, "refs.go"), []byte(source.String()), 0o644)).To(Succeed())
 		engine, err := indexer.New(database)
 		Expect(err).ToNot(HaveOccurred())
-		indexed, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: root, IncludeTests: true})
+		indexed, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: root, IncludeTests: true, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		pipeline, err := query.NewPipeline(database)
 		Expect(err).ToNot(HaveOccurred())
