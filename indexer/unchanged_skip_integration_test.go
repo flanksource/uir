@@ -37,7 +37,7 @@ func writeSiblingWorkspace(workspace string) {
 // indexWorkspace indexes both modules of the sibling workspace and returns their results by root key.
 func indexWorkspace(ctx context.Context, engine *Indexer, workspace string) map[string]ModuleResult {
 	GinkgoHelper()
-	results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+	results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 	Expect(err).ToNot(HaveOccurred())
 	byRoot := map[string]ModuleResult{}
 	for _, result := range results {
@@ -69,7 +69,7 @@ var _ = Describe("unchanged run", func() {
 			Expect(outcomeOf(edited)).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 2, ReusedFiles: 1}))
 			Expect(*loads).To(Equal(2))
 
-			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true})
+			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true, Reason: storage.ReasonReindex})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(forced).To(HaveLen(1))
 			Expect(forced[0].Unchanged).To(BeFalse())
@@ -123,7 +123,7 @@ var _ = Describe("unchanged run", func() {
 		Expect(err).ToNot(HaveOccurred())
 		indexWorkspace(ctx, engine, workspace)
 		Expect(os.Remove(filepath.Join(workspace, "pricing", "go.mod"))).To(Succeed())
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: filepath.Join(workspace, "shop")})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: filepath.Join(workspace, "shop"), Reason: storage.ReasonAdd})
 		Expect(err).To(MatchError(And(ContainSubstring("read go.work use"), ContainSubstring(filepath.Join("pricing", "go.mod")))))
 	})
 })

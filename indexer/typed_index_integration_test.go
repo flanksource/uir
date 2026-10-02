@@ -292,7 +292,7 @@ var _ = Describe("typed extraction", func() {
 			writeFile(filepath.Join(workspace, "scripts", "script.go"), "//go:build ignore\n\npackage main\n\nfunc main() {}\n")
 			engine, err := New(database)
 			Expect(err).ToNot(HaveOccurred())
-			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, IncludeTests: true})
+			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, IncludeTests: true, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
 			snapshot := loadTypedSnapshot(ctx, database, results[0].SnapshotID)
 			Expect(loadSnapshot(database, results[0].SnapshotID).Coverage).To(Equal(storage.CoverageIndexed), "excluded packages do not weaken the snapshot")
@@ -327,7 +327,7 @@ var _ = Describe("typed extraction", func() {
 			Expect(err).ToNot(HaveOccurred())
 			first := indexOnce(ctx, engine, workspace)
 			before := tableCounts(database)
-			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true})
+			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true, Reason: storage.ReasonReindex})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(forced[0].ParsedFiles).To(Equal(3))
 			expected := map[string]int64{}
@@ -370,11 +370,11 @@ var _ = Describe("typed extraction", func() {
 				}
 				base.head.Version--
 				_, err = publishSnapshot(ctx, transaction, snapshotPublication{
-					root: root, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(),
+					root: root, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(), reason: storage.ReasonReindex,
 				}, &ModuleResult{})
 				return err
 			})
-			Expect(err).To(MatchError(ContainSubstring("head changed during indexing")))
+			Expect(err).To(MatchError(ErrIndexInputsChanged))
 			Expect(tableCounts(database)).To(Equal(before))
 			Expect(countRows(database, &storage.Symbol{}, "name = ?", "Half")).To(BeZero())
 		},

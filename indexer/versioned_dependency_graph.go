@@ -180,7 +180,7 @@ func (indexer *Indexer) publishVersionedGraph(ctx context.Context, graph version
 			result := ModuleResult{RootKey: stored.RootKey, Location: node.prepared.location.CanonicalPath, Files: len(node.prepared.root.Files)}
 			snapshot, err := publishSnapshot(ctx, transaction, snapshotPublication{
 				root: stored, location: node.prepared.location, base: base, extraction: extractions[index],
-				startedAt: time.Now().UTC(), preserveHead: true, snapshotID: ids[index], pendingEdges: &pending,
+				startedAt: time.Now().UTC(), reason: storage.ReasonVersionedDependency, preserveHead: true, snapshotID: ids[index], pendingEdges: &pending,
 			}, &result)
 			if err != nil {
 				return err
@@ -247,7 +247,7 @@ func (indexer *Indexer) reuseVersionedGraph(ctx context.Context, graph versioned
 		if err != nil {
 			return storage.ModuleSnapshot{}, false, fmt.Errorf("extract version %s: %w", node.key, err)
 		}
-		if stored.ContextHash != extraction.contextHash {
+		if stored.ContextHash != extraction.contextHash || stored.Coverage != extraction.coverage {
 			return storage.ModuleSnapshot{}, false, nil
 		}
 	}

@@ -13,6 +13,37 @@ import (
 )
 
 func discoverModules(ctx context.Context, path string, includeTests bool) ([]discoveredRoot, error) {
+	roots, err := locateModuleRoots(path)
+	if err != nil {
+		return nil, err
+	}
+	for i := range roots {
+		if err := populateRoot(ctx, &roots[i], roots, includeTests); err != nil {
+			return nil, err
+		}
+	}
+	return roots, nil
+}
+
+// discoverModule discovers the module rooted at checkout among the modules below path, reading only
+// its sources: path still decides the module's parent and mount path.
+func discoverModule(ctx context.Context, path, checkout string, includeTests bool) (discoveredRoot, error) {
+	roots, err := locateModuleRoots(path)
+	if err != nil {
+		return discoveredRoot{}, err
+	}
+	for i := range roots {
+		if roots[i].LocalPath == checkout {
+			err := populateRoot(ctx, &roots[i], roots, includeTests)
+			return roots[i], err
+		}
+	}
+	return discoveredRoot{}, fmt.Errorf("registered checkout %q is not a Go module below %q", checkout, path)
+}
+
+// locateModuleRoots finds the go.mod roots below path, or the enclosing module when there are none,
+// with their parents and mount paths, without reading their sources.
+func locateModuleRoots(path string) ([]discoveredRoot, error) {
 	if path == "" {
 		path = "."
 	}
@@ -71,7 +102,7 @@ func discoverModules(ctx context.Context, path string, includeTests bool) ([]dis
 		for parent := filepath.Dir(workspace); parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
 			_, err := os.Stat(filepath.Join(parent, "go.mod"))
 			if err == nil {
-				return discoverModules(ctx, parent, includeTests)
+				return locateModuleRoots(parent)
 			}
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("stat enclosing go.mod in %q: %w", parent, err)
@@ -101,11 +132,6 @@ func discoverModules(ctx context.Context, path string, includeTests bool) ([]dis
 			if declaredSubmodule(parent.LocalPath, roots[i].LocalPath) {
 				roots[i].Kind = "git-submodule"
 			}
-		}
-	}
-	for i := range roots {
-		if err := populateRoot(ctx, &roots[i], roots, includeTests); err != nil {
-			return nil, err
 		}
 	}
 	return roots, nil
