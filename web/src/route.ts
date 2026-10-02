@@ -38,6 +38,8 @@ export type Route = {
   graphRoot: string;
   /** Comma-separated exclusion patterns; empty takes the server's defaults. */
   graphExclude: string;
+  /** The task run expanded in the task manager. */
+  taskRun: string;
 };
 
 export function readRoute(location: Pick<Location, "pathname" | "search"> = window.location): Route {
@@ -72,12 +74,13 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     graphDepth: Number(params.get("graphDepth") ?? DEFAULT_GRAPH_DEPTH),
     graphRoot: params.get("graphRoot") ?? "",
     graphExclude: params.get("graphExclude") ?? "",
+    taskRun: params.get("taskRun") ?? "",
   };
 }
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch", "graphRoot", "graphExclude"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch", "graphRoot", "graphExclude", "taskRun"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
   if (route.historyGroup !== "package") params.set("historyGroup", route.historyGroup);

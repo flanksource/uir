@@ -54,10 +54,17 @@ test("the Explorer's Call graph tab expands, follows a call site into Source, ed
   await expect(page.getByRole("tab", { name: "Source" })).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(new RegExp(`[?&]line=${SCOPE_SITE_LINE}(&|$)`));
   await expect(page).not.toHaveURL(/explorerTab=/);
+  const revealedLine = page.locator(".view-lines .view-line", { hasText: new RegExp(`modules\\.go\\sline\\s${SCOPE_SITE_LINE}$`) });
+  await expect(revealedLine).toBeVisible();
+  const [lineBox, viewBox] = await Promise.all([revealedLine.boundingBox(), page.locator(".monaco-editor").first().boundingBox()]);
+  if (!lineBox || !viewBox) throw new Error("the revealed line or the editor has no layout box");
+  const offset = (lineBox.y + lineBox.height / 2 - viewBox.y) / viewBox.height;  expect(offset, "the revealed line sits in the middle half of the editor").toBeGreaterThan(0.25);
+  expect(offset).toBeLessThan(0.75);
 
   await page.getByRole("tab", { name: "Call graph" }).click();
   await page.getByRole("button", { name: /^Packages/ }).click();
   const facets = page.getByRole("menu", { name: "Package exclusions" });
+  await expect(facets.getByRole("textbox", { name: "Filter packages" })).toBeFocused();
   const showFmt = page.waitForRequest((request) => isGraphRequest(request) && graphParams(request).exclude !== undefined);
   await facets.getByRole("switch", { name: "Show fmt" }).click();
   expect(graphParams(await showFmt).exclude).toBe("builtin,gorm.io/...,strings");

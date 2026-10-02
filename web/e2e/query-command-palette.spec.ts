@@ -63,6 +63,7 @@ test("Cmd+K and Query editors show runner failures in Monaco and clear them on e
         declarations: [],
         symbols: [],
         coverage: [],
+        warnings: [],
         stages: [],
         matches: [
           {

@@ -1,7 +1,14 @@
 import { expect, it } from "vitest";
 import type { ModuleHead, ModuleNode, ModuleSource } from "./api";
 import { moduleHeadTree } from "./explorer-model";
-import { fileSelectionPatch, symbolSelectionPatch } from "./explorer-navigation";
+import { fileSelectionPatch, snapshotExplorerPatch, symbolSelectionPatch } from "./explorer-navigation";
+
+it("opens a snapshot in the Explorer with its checkout and a cleared selection", () => {
+  expect(snapshotExplorerPatch({ location: "/work/service", snapshot: "historical-1" })).toEqual({
+    view: "explorer", location: "/work/service", snapshot: "historical-1", source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0,
+  });
+  expect(() => snapshotExplorerPatch({ location: "", snapshot: "historical-1" })).toThrow(/checkout/);
+});
 
 it("only opens a file when an Explorer tree row is selected", () => {
   const source: ModuleSource = { id: "source-1", root_key: "example.org/service", location: "/work/service", snapshot_id: "head-1",
