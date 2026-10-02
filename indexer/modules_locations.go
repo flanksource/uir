@@ -76,6 +76,9 @@ func advanceHead(ctx context.Context, database *gorm.DB, base moduleBase, snapsh
 	if !base.hasHead {
 		head := storage.ModuleLocationHead{RootID: snapshot.RootID, LocationID: snapshot.LocationID, SnapshotID: snapshot.ID, Version: 1}
 		if err := database.WithContext(ctx).Create(&head).Error; err != nil {
+			if storage.IsUniqueViolation(err) {
+				return 0, fmt.Errorf("location %s head was published concurrently: %w: %w", snapshot.LocationID, ErrIndexInputsChanged, err)
+			}
 			return 0, fmt.Errorf("publish first module location head: %w", err)
 		}
 		return head.Version, nil
@@ -88,9 +91,26 @@ func advanceHead(ctx context.Context, database *gorm.DB, base moduleBase, snapsh
 		return 0, fmt.Errorf("publish module location head: %w", updated.Error)
 	}
 	if updated.RowsAffected != 1 {
-		return 0, fmt.Errorf("location %s head changed during indexing", snapshot.LocationID)
+		return 0, fmt.Errorf("location %s head changed: %w", snapshot.LocationID, ErrIndexInputsChanged)
 	}
 	return version, nil
+}
+
+// parentLocation is the location of the module enclosing a nested one: published earlier in the same
+// transaction, or registered by an earlier index, since a task run indexes each module on its own.
+func parentLocation(ctx context.Context, database *gorm.DB, path string, locations map[string]storage.ModuleLocation) (storage.ModuleLocation, error) {
+	if parent, exists := locations[path]; exists {
+		return parent, nil
+	}
+	var parent storage.ModuleLocation
+	err := database.WithContext(ctx).Where("canonical_path = ?", path).Take(&parent).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return storage.ModuleLocation{}, fmt.Errorf("parent module location %q is not registered; index the enclosing module first", path)
+	}
+	if err != nil {
+		return storage.ModuleLocation{}, fmt.Errorf("load parent module location %q: %w", path, err)
+	}
+	return parent, nil
 }
 
 func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered discoveredRoot, locations map[string]storage.ModuleLocation) (storage.ModuleRoot, storage.ModuleLocation, error) {
@@ -115,9 +135,9 @@ func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered dis
 		location.RepositoryURI = &discovered.RepositoryURI
 	}
 	if discovered.ParentRootKey != "" {
-		parent, exists := locations[discovered.ParentRootKey]
-		if !exists {
-			return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("parent module location %q is missing", discovered.ParentRootKey)
+		parent, err := parentLocation(ctx, database, discovered.ParentRootKey, locations)
+		if err != nil {
+			return storage.ModuleRoot{}, storage.ModuleLocation{}, err
 		}
 		location.ParentLocationID = &parent.ID
 	}

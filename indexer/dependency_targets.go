@@ -50,7 +50,9 @@ func (indexer *Indexer) indexLocalDependencies(ctx context.Context, roots []disc
 			if active[path] {
 				return fmt.Errorf("local dependency cycle at %q escaped graph publication", path)
 			}
-			results, err := indexer.IndexModules(ctx, ModuleOptions{Path: path, ExactLocation: path, IncludeTests: includeTests})
+			results, err := indexStep(ctx, "local dependency "+path, func() ([]ModuleResult, error) {
+				return indexer.IndexModules(ctx, ModuleOptions{Path: path, ExactLocation: path, IncludeTests: includeTests, Reason: storage.ReasonLocalDependency})
+			})
 			if err != nil {
 				return fmt.Errorf("index local dependency %q: %w", path, err)
 			}
@@ -98,12 +100,16 @@ func (indexer *Indexer) indexVersionedDependencies(ctx context.Context, roots []
 	return nil
 }
 
+// versionedSnapshot is the snapshot of modulePath at version. A stored, fully indexed snapshot whose
+// dependency closure is still complete is reused as is; anything else, a degraded snapshot or one
+// whose tag has moved or whose closure has a gap, is indexed again from a registered checkout, which
+// reuses the stored snapshot only when the new extraction is identical to it.
 func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, version string, includeTests bool) (snapshot storage.ModuleSnapshot, err error) {
 	snapshot, found, err := indexer.storedVersionSnapshot(ctx, modulePath, version)
 	if err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if found {
+	if found && snapshot.Coverage == storage.CoverageIndexed {
 		complete, err := indexer.versionedClosureComplete(ctx, snapshot.ID)
 		if err != nil {
 			return storage.ModuleSnapshot{}, err
@@ -123,9 +129,6 @@ func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, versi
 	if graph.cyclic() {
 		return indexer.publishVersionedComponents(ctx, graph, includeTests)
 	}
-	if found {
-		return snapshot, nil
-	}
 	key := modulePath + "@" + version
 	active, _ := ctx.Value(activeModuleVersions{}).(map[string]bool)
 	if active[key] {
@@ -140,14 +143,16 @@ func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, versi
 	prepared := graph.nodes[0].prepared
 	result, err := indexer.IndexRevision(ctx, RevisionOptions{
 		RootKey: modulePath, Checkout: prepared.location.CanonicalPath, Commit: prepared.root.GitCommit, Version: version, IncludeTests: includeTests,
+		Reason: storage.ReasonVersionedDependency,
 	})
 	if err != nil {
 		return storage.ModuleSnapshot{}, fmt.Errorf("index version %s from %q: %w", key, prepared.location.CanonicalPath, err)
 	}
-	if err := indexer.database.WithContext(ctx).Where("id = ?", result.SnapshotID).Take(&snapshot).Error; err != nil {
+	var indexed storage.ModuleSnapshot
+	if err := indexer.database.WithContext(ctx).Where("id = ?", result.SnapshotID).Take(&indexed).Error; err != nil {
 		return storage.ModuleSnapshot{}, fmt.Errorf("load version snapshot %s: %w", result.SnapshotID, err)
 	}
-	return snapshot, nil
+	return indexed, nil
 }
 
 func (indexer *Indexer) versionTagMatches(ctx context.Context, modulePath, version, storedCommit string) (bool, error) {
@@ -166,12 +171,15 @@ func (indexer *Indexer) versionTagMatches(ctx context.Context, modulePath, versi
 	return true, nil
 }
 
+// storedVersionSnapshot is the newest clean snapshot of modulePath at version, a fully indexed one
+// before any degraded one. A caller that reuses it without extracting must check its coverage.
 func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, version string) (storage.ModuleSnapshot, bool, error) {
 	var snapshot storage.ModuleSnapshot
 	err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
 		Joins("JOIN modules AS root ON root.id = snapshot.root_id").
 		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ?", modulePath, version, storage.WorktreeClean).
-		Order("snapshot.completed_at DESC").Take(&snapshot).Error
+		Order(fmt.Sprintf("CASE WHEN snapshot.coverage = '%s' THEN 0 ELSE 1 END, snapshot.completed_at DESC", storage.CoverageIndexed)).
+		Take(&snapshot).Error
 	if err == nil {
 		return snapshot, true, nil
 	}

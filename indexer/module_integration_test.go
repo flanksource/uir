@@ -28,10 +28,10 @@ var _ = Describe("module indexing", func() {
 		}
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		first, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		first, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(exec.Command("git", "-C", workspace, "-c", "user.name=Example", "-c", "user.email=example@example.org", "commit", "--allow-empty", "-qm", "new revision").Run()).To(Succeed())
-		second, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		second, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(second[0].Unchanged).To(BeFalse())
 		Expect(second[0].ParsedFiles).To(BeZero())
@@ -46,7 +46,7 @@ var _ = Describe("module indexing", func() {
 		Expect(snapshot.Revision).To(HaveLen(40))
 
 		writeFile(filepath.Join(workspace, "main.go"), "package revisions\n\nfunc Run() { Run() }\n")
-		dirty, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		dirty, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		var dirtySnapshot storage.ModuleSnapshot
 		Expect(database.Where("id = ?", dirty[0].SnapshotID).First(&dirtySnapshot).Error).To(Succeed())
@@ -76,7 +76,7 @@ var _ = Describe("module indexing", func() {
 		Expect(err).ToNot(HaveOccurred())
 		indexedState := func() storage.WorktreeState {
 			GinkgoHelper()
-			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results[0].Files).To(Equal(2), "discovery indexes the ignored file")
 			var snapshot storage.ModuleSnapshot
@@ -99,7 +99,7 @@ var _ = Describe("module indexing", func() {
 		writeFile(filepath.Join(packageDir, "worker.go"), "package worker\n\nfunc Run() {}\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		result, err := engine.IndexModules(ctx, ModuleOptions{Path: packageDir})
+		result, err := engine.IndexModules(ctx, ModuleOptions{Path: packageDir, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].RootKey).To(Equal("example.org/enclosing"))
@@ -117,7 +117,7 @@ var _ = Describe("module indexing", func() {
 		writeFile(filepath.Join(workspace, "new.go"), "package new\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, ExistingOnly: true})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, ExistingOnly: true, Reason: storage.ReasonReindex})
 		Expect(err).To(MatchError(ContainSubstring("not registered")))
 		var roots int64
 		Expect(database.Model(&storage.ModuleRoot{}).Count(&roots).Error).To(Succeed())
@@ -135,13 +135,13 @@ var _ = Describe("module indexing", func() {
 		writeFile(filepath.Join(plugin, "plugin.go"), "package plugin\n\nfunc Use() {\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).To(MatchError(ContainSubstring("parse Go source")))
 		var roots int64
 		Expect(database.Model(&storage.ModuleRoot{}).Count(&roots).Error).To(Succeed())
 		Expect(roots).To(BeZero())
 		writeFile(filepath.Join(plugin, "plugin.go"), "package plugin\n\nfunc Use() {}\n")
-		results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(results).To(HaveLen(2))
 		var parent, child storage.ModuleLocation
@@ -167,12 +167,12 @@ var _ = Describe("module indexing", func() {
 		writeFile(filepath.Join(firstPath, "obsolete.go"), "package service\n\nfunc Obsolete() {}\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		first, err := engine.IndexModules(ctx, ModuleOptions{Path: firstPath})
+		first, err := engine.IndexModules(ctx, ModuleOptions{Path: firstPath, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(first).To(HaveLen(1))
 		Expect(first[0].ParsedFiles).To(Equal(2))
 		Expect(first[0].HeadVersion).To(Equal(int64(1)))
-		second, err := engine.IndexModules(ctx, ModuleOptions{Path: secondPath})
+		second, err := engine.IndexModules(ctx, ModuleOptions{Path: secondPath, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(second).To(HaveLen(1))
 		// service.go's bytes are shared, but its package lost obsolete.go, so the package input hash
@@ -209,7 +209,7 @@ var _ = Describe("module indexing", func() {
 		Expect(sources).To(HaveKey("service.go"))
 		Expect(sources).ToNot(HaveKey("obsolete.go"))
 		writeFile(filepath.Join(secondPath, "service.go"), "package service\n\nfunc Run() {}\nfunc Added() {}\n")
-		third, err := engine.IndexModules(ctx, ModuleOptions{Path: secondPath})
+		third, err := engine.IndexModules(ctx, ModuleOptions{Path: secondPath, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(third[0].ParsedFiles).To(Equal(1))
 		Expect(third[0].HeadVersion).To(Equal(int64(2)))
