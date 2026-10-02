@@ -4,6 +4,7 @@ import (
 	"reflect"
 
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/taskruns"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"gorm.io/gorm"
@@ -26,7 +27,8 @@ var moduleSchema = []tableSchema{
 		indexes: []string{"snapshots_root_id_id_key", "snapshots_location_id_id_key", "snapshots_ordinal_key", "snapshots_location_started_idx", "snapshots_base_idx",
 			"snapshots_root_revision_idx"},
 		constraints: []string{"snapshots_root_id_fkey", "snapshots_location_fkey", "snapshots_base_fkey", "snapshots_worktree_state_check",
-			"snapshots_revision_check", "snapshots_context_hash_check", "snapshots_coverage_check", "snapshots_package_count_check", "snapshots_ordinal_check"}},
+			"snapshots_revision_check", "snapshots_context_hash_check", "snapshots_coverage_check", "snapshots_package_count_check", "snapshots_ordinal_check",
+			"snapshots_reason_check"}},
 	{model: &storage.ModuleLocationHead{}, constraints: []string{"location_heads_location_fkey", "location_heads_snapshot_fkey", "location_heads_version_check"}},
 	{model: &storage.ModulePrimary{}, constraints: []string{"primary_locations_location_fkey"}},
 	{model: &storage.SourceRevision{},
@@ -52,6 +54,7 @@ var moduleSchema = []tableSchema{
 	{model: &storage.PackageCoverage{}, indexes: []string{"package_coverage_input_idx"},
 		constraints: []string{"package_coverage_snapshot_fkey", "package_coverage_input_hash_check", "package_coverage_export_shape_hash_check",
 			"package_coverage_coverage_check", "package_coverage_indexed_check", "package_coverage_package_path_check", "package_coverage_file_count_check"}},
+	{model: &taskruns.Run{}, indexes: []string{"task_runs_kind_started_idx"}, constraints: []string{"task_runs_id_check", "task_runs_status_check"}},
 }
 
 // assertModuleSchema fails when the migrated tables and the GORM models disagree on a column or its

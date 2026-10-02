@@ -168,6 +168,53 @@ table "snapshots" {
     type = bigint
     null = false
   }
+  column "reason" {
+    type    = text
+    null    = false
+    default = "unknown"
+  }
+  column "index_started_at" {
+    type = timestamptz
+    null = true
+  }
+  // The size and change counts are null only on rows published before they existed, until the
+  // storage backfill fills them; every publication writes them.
+  column "file_count" {
+    type = bigint
+    null = true
+  }
+  column "symbol_count" {
+    type = bigint
+    null = true
+  }
+  column "occurrence_count" {
+    type = bigint
+    null = true
+  }
+  column "source_bytes" {
+    type = bigint
+    null = true
+  }
+  column "files_added" {
+    type = integer
+    null = true
+  }
+  column "files_changed" {
+    type = integer
+    null = true
+  }
+  column "files_deleted" {
+    type = integer
+    null = true
+  }
+  column "symbols_changed" {
+    type = integer
+    null = true
+  }
+  column "task_run_id" {
+    type = text
+    null = true
+  }
 
   primary_key { columns = [column.id] }
   foreign_key "snapshots_root_id_fkey" {
@@ -200,6 +247,7 @@ table "snapshots" {
   check "snapshots_coverage_check" { expr = "coverage IN ('indexed', 'partial', 'syntax', 'excluded')" }
   check "snapshots_package_count_check" { expr = "package_count >= 0" }
   check "snapshots_ordinal_check" { expr = "ordinal >= 1" }
+  check "snapshots_reason_check" { expr = "reason IN ('unknown', 'add', 'reindex', 'refactor', 'local-dependency', 'versioned-dependency', 'historical', 'dependency-cycle')" }
 }
 
 table "location_heads" {

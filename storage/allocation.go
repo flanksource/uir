@@ -33,6 +33,20 @@ func allocationConflict(err error, subject string) error {
 	return fmt.Errorf("%s: %w", subject, err)
 }
 
+// sqliteUniqueCodes are SQLite's extended result codes for a violated unique index and primary key.
+var sqliteUniqueCodes = map[int]bool{2067: true, 1555: true}
+
+// IsUniqueViolation reports whether err is a database's rejection of a duplicate key: PostgreSQL's
+// SQLSTATE 23505 or SQLite's unique or primary-key constraint failure.
+func IsUniqueViolation(err error) bool {
+	var postgres interface{ SQLState() string }
+	if errors.As(err, &postgres) {
+		return postgres.SQLState() == "23505"
+	}
+	var sqlite interface{ Code() int }
+	return errors.As(err, &sqlite) && sqliteUniqueCodes[sqlite.Code()]
+}
+
 // RetryAllocationConflicts runs publish in a transaction, and again in a fresh one when it lost an
 // allocation race, at most AllocationAttempts times. Any other error is returned at once.
 func RetryAllocationConflicts(ctx context.Context, database *gorm.DB, publish func(*gorm.DB) error) error {
