@@ -33,7 +33,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		to := repo.commit("shop after")
 		repo.index(ctx, database)
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
 	})
@@ -51,7 +51,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		to := repo.commit("shop after")
 		repo.index(ctx, database)
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
 	})
@@ -67,7 +67,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		original := repo.index(ctx, database)
 		GinkgoT().Setenv("CGO_ENABLED", "0")
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect([]string{result.From.Commit, result.To.Commit, result.From.WorktreeState}).To(Equal([]string{from, to, "clean"}))
 		Expect(result.From.SnapshotID).ToNot(Equal(original))
