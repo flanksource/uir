@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, addModules, applyModuleRefactor, browseModule, getModuleGraph, getSystemInfo, listModuleDependencies, listModuleHeads, listModuleLocations, listModuleSnapshots, previewModuleRefactor, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors, type ModuleGraphResult } from "../../../web/src/api";
+import { ApiError, addModules, applyModuleRefactor, browseModule, compareGitRevisions, getModuleGraph, getSystemInfo, listGitHistory, listModuleDependencies, listModuleHeads, listModuleLocations, listModuleSnapshots, previewModuleRefactor, readModuleSource, reindexModules, runModuleQuery, suggestModuleSymbols, suggestTypedSelectors, type GitHistory, type ModuleGraphResult, type ModuleSnapshot, type Page } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -14,7 +14,7 @@ it("loads dependency edges for the selected immutable snapshot", async () => {
 it("previews then applies the exact selected explorer refactor", async () => {
   const request = { snapshot: "head-1", source: "source-1", node: "node-1", action: "rename" as const, newName: "Persist" };
   const preview = { diff: "--- /checkout/store.go\n+++ /checkout/store.go\n@@ -1 +1 @@\n-Save\n+Persist\n", preview_hash: "sha256", files: ["/checkout/store.go"] };
-  const applied = { applied: true, files: preview.files, snapshots: [{ snapshot_id: "head-2", location: "/checkout" }] };
+  const applied = { applied: true, files: preview.files, snapshots: [{ snapshot_id: "head-2", location: "/checkout" }], run_id: "run-3" };
   const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(preview), { status: 200 }))
     .mockResolvedValueOnce(new Response(JSON.stringify(applied), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
@@ -291,6 +291,27 @@ it("scopes checkout history, source projections, and content to a module snapsho
   ]);
 });
 
+it("lists checkout snapshots with why, as what, and how large each one was published", async () => {
+  const reindexed: ModuleSnapshot = {
+    id: "snapshot-2", root_key: "example.org/service", canonical_path: "/checkout/service", base_snapshot_id: "snapshot-1",
+    revision: "abc123", git_commit: "abc123", worktree_state: "clean", coverage: "indexed", kind: "head", reason: "reindex",
+    index_started_at: "2026-10-01T10:00:00Z", started_at: "2026-10-01T10:00:02Z", completed_at: "2026-10-01T10:00:03Z",
+    task_run_id: "run-1", head: true, head_version: 2,
+    file_count: 12, symbol_count: 140, occurrence_count: 900, source_bytes: 48_000,
+    files_added: 1, files_changed: 2, files_deleted: 0, symbols_changed: 5,
+  };
+  const historical: ModuleSnapshot = {
+    ...reindexed, id: "snapshot-h", base_snapshot_id: "snapshot-2", kind: "historical", reason: "historical", task_run_id: undefined, head: false, head_version: undefined,
+  };
+  const page: Page<ModuleSnapshot> = { data: [reindexed, historical], page: { limit: 100, offset: 0, total: 2 } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(page), { status: 200 })));
+  const listed = await listModuleSnapshots("example.org/service", "/checkout/service", 0);
+  expect(listed.data.map(({ kind, reason, file_count, files_changed, base_snapshot_id }) => ({ kind, reason, file_count, files_changed, base_snapshot_id }))).toEqual([
+    { kind: "head", reason: "reindex", file_count: 12, files_changed: 2, base_snapshot_id: "snapshot-1" },
+    { kind: "historical", reason: "historical", file_count: 12, files_changed: 2, base_snapshot_id: "snapshot-2" },
+  ]);
+});
+
 it("reads symbol kind, visibility, and server timing from the explorer browse response", async () => {
   const browse = { sources: [], nodes: [{ id: "symbol-1", kind: "func", visibility: "exported" }] };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(browse), {
@@ -301,11 +322,11 @@ it("reads symbol kind, visibility, and server timing from the explorer browse re
   ] });
 });
 
-it("sends explicit add and reindex inputs and reports server failures", async () => {
-  const fetcher = vi.fn().mockResolvedValueOnce(new Response("[]", { status: 200 }))
+it("sends explicit add and reindex inputs, takes the started run id, and reports server failures", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ run_id: "run-1" }), { status: 202 }))
     .mockResolvedValueOnce(new Response("index failed", { status: 500, statusText: "Internal Server Error" }));
   vi.stubGlobal("fetch", fetcher);
-  await addModules("/repo", true);
+  await expect(addModules("/repo", true)).resolves.toEqual({ run_id: "run-1" });
   expect(fetcher.mock.calls[0]).toEqual(["/api/v1/modules/add", expect.objectContaining({
     method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, "no-workspace-uses": true }),
   })]);
@@ -316,10 +337,42 @@ it("sends explicit add and reindex inputs and reports server failures", async ()
 });
 
 it("requests reindex of registered checkouts with missing heads", async () => {
-  const fetcher = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ run_id: "run-2" }), { status: 202 }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(reindexModules({ all: true })).resolves.toEqual([]);
+  await expect(reindexModules({ all: true })).resolves.toEqual({ run_id: "run-2" });
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/reindex", expect.objectContaining({
     method: "POST", body: JSON.stringify({ "include-tests": false, force: false, all: true }),
   }));
+});
+
+it("reads which history commits have a snapshot in the listed checkout", async () => {
+  const history: GitHistory = { root_key: "example.org/service", location: "/checkout/service", branches: [], pull_requests: [], commits: [
+    { commit: "c2", parents: ["c1"], subject: "Change", authored_at: "2026-10-01T10:00:00Z",
+      snapshot_id: "snapshot-2", snapshot_reason: "historical", snapshot_completed_at: "2026-10-01T10:05:00Z" },
+    { commit: "c1", parents: [], subject: "Start", authored_at: "2026-09-30T10:00:00Z" },
+  ] };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(history), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const listed = await listGitHistory("example.org/service", "/checkout/service");
+  expect(listed.commits.map(({ commit, snapshot_id, snapshot_reason }) => ({ commit, snapshot_id, snapshot_reason }))).toEqual([
+    { commit: "c2", snapshot_id: "snapshot-2", snapshot_reason: "historical" },
+    { commit: "c1", snapshot_id: undefined, snapshot_reason: undefined },
+  ]);
+});
+
+it("diffs from the checkout being viewed only when one is given", async () => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  await compareGitRevisions("example.org/service", "c1", "c2", "all", false, "/checkout/clone");
+  await compareGitRevisions("example.org/service", "c1", "c2", "all", false);
+  expect(fetcher.mock.calls.map(([, init]) => JSON.parse(init.body).location)).toEqual(["/checkout/clone", undefined]);
+});
+
+it("reports a refactor whose reindex failed as an error saying the apply succeeded", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: "reindex_failed", message: "Gopatch applied the refactor to /checkout/store.go, but reindexing failed: parse failed",
+  }), { status: 500, headers: { "Content-Type": "application/json" } })));
+  await expect(applyModuleRefactor({ snapshot: "head-1", source: "source-1", action: "move", destination: "model/store.go" }, "sha256")).rejects.toMatchObject({
+    name: "ApiError", status: 500, code: "reindex_failed",
+  } satisfies Partial<ApiError>);
 });

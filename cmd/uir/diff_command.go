@@ -17,6 +17,7 @@ type diffOptions struct {
 	SnapshotTo   string `flag:"snapshot-to" help:"Snapshot UUID to use for <to> instead of its newest clean snapshot"`
 	AutoIndex    bool   `flag:"auto-index" help:"Index missing clean commit snapshots without moving the checkout head"`
 	IncludeTests bool   `flag:"include-tests" help:"Include Go test symbols when indexing historical commits"`
+	Location     string `flag:"location" help:"Registered checkout to resolve and index commits from; defaults to the primary checkout"`
 }
 
 func registerDiffCommand(root *cobra.Command) {
@@ -33,9 +34,16 @@ func registerDiffCommand(root *cobra.Command) {
 		if err != nil {
 			return symboldiff.Result{}, err
 		}
+		var taskContext context.Context
+		if options.AutoIndex {
+			if taskContext, err = runContext(ctx); err != nil {
+				return symboldiff.Result{}, err
+			}
+		}
 		return symboldiff.Diff(ctx, database, symboldiff.Options{
 			RootKey: options.Root, From: from, To: to, SnapshotFrom: options.SnapshotFrom, SnapshotTo: options.SnapshotTo,
 			Visibility: visibility, Stat: options.Stat, AutoIndex: options.AutoIndex, IncludeTests: options.IncludeTests,
+			TaskContext: taskContext, Location: options.Location,
 		})
 	})
 	command.Use = "diff <from>..<to>"

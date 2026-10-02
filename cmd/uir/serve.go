@@ -59,6 +59,8 @@ func runServe(ctx context.Context, root *cobra.Command, runtime *commandRuntime,
 	if _, err := runtime.Database(ctx); err != nil {
 		return fmt.Errorf("open UIR database for serve: %w", err)
 	}
+	runtime.serveContext = ctx
+	defer func() { returnErr = errors.Join(returnErr, runtime.waitForDetachedRuns(detachedRunShutdown)) }()
 	ui, err := uiweb.Handler()
 	if err != nil {
 		return fmt.Errorf("load UIR web assets: %w", err)
@@ -83,6 +85,9 @@ func runServe(ctx context.Context, root *cobra.Command, runtime *commandRuntime,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		// Requests, and the runs they start, end with serve, which is what lets shutdown cancel and
+		// drain those runs before the database closes.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	shutdownResult := make(chan error, 1)
 	serveDone := make(chan struct{})
@@ -117,10 +122,14 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 	if server.Executor() == nil {
 		return nil, errors.New("register UIR Clicky operations: executor is unavailable")
 	}
+	taskRuns, err := runtime.TaskRuns(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("open the task run store for serve: %w", err)
+	}
 	mux := http.NewServeMux()
 	router := route.NewRouter(mux)
 	server.RegisterRoutes(router)
-	task.RegisterHandlers(router, "/api/v1")
+	task.RegisterHandlersWithSource(router, "/api/v1", taskRuns)
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" {
 			http.NotFound(w, r)
@@ -136,6 +145,25 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		ctx := context.WithValue(r.Context(), runtimeContextKey{}, runtime)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})), nil
+}
+
+// detachedRunShutdown bounds how long serve waits, after the serve context is cancelled, for the runs
+// requests started to finish cancelling before the database closes.
+const detachedRunShutdown = 30 * time.Second
+
+// waitForDetachedRuns waits for every run an HTTP request started, failing when one outlives timeout.
+func (runtime *commandRuntime) waitForDetachedRuns(timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		runtime.detached.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("task runs started by requests were still running %s after serve stopped", timeout)
+	}
 }
 
 func localRefactorRequest(r *http.Request) bool {
