@@ -79,6 +79,10 @@ type Edge struct {
 	// Sites are the call sites behind the edge, ordered by path, line and column.
 	// The edge is conditional when every site has guards.
 	Sites []Site `json:"sites"`
+	// Properties are what a Source knows about the edge beyond its sites, such
+	// as which configurations select a dispatch target. When several steps fold
+	// into one edge, the first non-empty properties are kept.
+	Properties map[string]string `json:"properties,omitempty"`
 }
 
 type Site struct {

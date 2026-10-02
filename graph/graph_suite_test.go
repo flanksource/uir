@@ -28,9 +28,10 @@ type stubSource struct {
 }
 
 type stubEdge struct {
-	from, to string
-	kind     uir.RelationshipType
-	sites    []graph.Site
+	from, to   string
+	kind       uir.RelationshipType
+	sites      []graph.Site
+	properties map[string]string
 }
 
 func calls(edges ...string) stubSource {
@@ -85,7 +86,7 @@ func (s stubSource) steps(id string, neighbour func(stubEdge) (string, bool)) ([
 		if !ok {
 			continue
 		}
-		step := graph.Step{Node: stubNode(other), Edge: graph.Edge{Type: edge.kind, Sites: edge.sites}}
+		step := graph.Step{Node: stubNode(other), Edge: graph.Edge{Type: edge.kind, Sites: edge.sites, Properties: edge.properties}}
 		if s.reverse {
 			steps = append([]graph.Step{step}, steps...)
 			continue
