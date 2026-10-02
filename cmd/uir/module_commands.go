@@ -12,7 +12,6 @@ import (
 	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/commons/logger"
 	"github.com/flanksource/uir"
-	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
 	"github.com/spf13/cobra"
@@ -118,21 +117,6 @@ type moduleGetOptions struct {
 	Root string `args:"true" required:"true"`
 }
 
-type moduleAddOptions struct {
-	Path                 string `args:"true"`
-	IncludeTests         bool   `flag:"include-tests" help:"Index Go test files"`
-	Force                bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
-	IncludeWorkspaceUses bool   `flag:"include-workspace-uses" help:"Also add go.work use paths outside the requested directory"`
-	NoWorkspaceUses      bool   `flag:"no-workspace-uses" help:"Do not add go.work use paths outside the requested directory"`
-}
-
-type moduleReindexOptions struct {
-	Path         string `args:"true"`
-	All          bool   `flag:"all" help:"Reindex every registered checkout with no indexed head"`
-	IncludeTests bool   `flag:"include-tests" help:"Index Go test files"`
-	Force        bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
-}
-
 type moduleLocationOptions struct {
 	Root string `flag:"root" help:"Module path" required:"true"`
 }
@@ -193,38 +177,7 @@ func (row moduleQueryRow) Row() map[string]any {
 func registerModuleCommands(root *cobra.Command) {
 	registerModuleBrowseCommands(root)
 	registerModuleGraphCommand(root)
-	var add *cobra.Command
-	add = clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) ([]indexer.ModuleResult, error) {
-		path := options.Path
-		if path == "" {
-			path = "."
-		}
-		pathOptions := addPathOptions{Path: path, IncludeWorkspaceUses: options.IncludeWorkspaceUses, NoWorkspaceUses: options.NoWorkspaceUses}
-		if entity.OperationSurfaceFromContext(ctx) == "cli" {
-			pathOptions.Input, pathOptions.Prompt = add.InOrStdin(), add.ErrOrStderr()
-		}
-		paths, err := addPaths(pathOptions)
-		if err != nil {
-			return nil, err
-		}
-		database, err := databaseFor(ctx)
-		if err != nil {
-			return nil, err
-		}
-		var results []indexer.ModuleResult
-		for _, selected := range paths {
-			indexed, err := indexModules(ctx, database, indexer.ModuleOptions{Path: selected, IncludeTests: options.IncludeTests, Force: options.Force})
-			if err != nil {
-				return nil, err
-			}
-			results = append(results, indexed...)
-		}
-		return results, nil
-	})
-	add.Use = "add [path]"
-	add.Short = "Add Go modules below a directory and index them immediately"
-	add.Args = cobra.MaximumNArgs(1)
-	setModuleRoute(add, "modules/add")
+	registerModuleIndexCommands(root)
 
 	list := clicky.AddNamedCommandWithContext("list", root, struct{}{}, func(ctx context.Context, _ struct{}) ([]moduleRootRow, error) {
 		database, err := databaseFor(ctx)
@@ -321,31 +274,6 @@ func registerModuleCommands(root *cobra.Command) {
 	snapshots.Short = "List immutable snapshots for one registered checkout"
 	setModuleRoute(snapshots, "modules/snapshots")
 	snapshots.Annotations["clicky/operation-method"] = http.MethodGet
-
-	reindex := clicky.AddNamedCommandWithContext("reindex", root, moduleReindexOptions{}, func(ctx context.Context, options moduleReindexOptions) ([]indexer.ModuleResult, error) {
-		if options.All && options.Path != "" {
-			return nil, errors.New("reindex --all does not accept a path")
-		}
-		if options.All && options.Force {
-			return nil, errors.New("reindex --all does not accept --force")
-		}
-		path := options.Path
-		if path == "" {
-			path = "."
-		}
-		database, err := databaseFor(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if options.All {
-			return reindexAllModules(ctx, database, options.IncludeTests)
-		}
-		return indexModules(ctx, database, indexer.ModuleOptions{Path: path, IncludeTests: options.IncludeTests, Force: options.Force, ExistingOnly: true})
-	})
-	reindex.Use = "reindex [path]"
-	reindex.Short = "Incrementally reindex registered Go modules"
-	reindex.Args = cobra.MaximumNArgs(1)
-	setModuleRoute(reindex, "modules/reindex")
 }
 
 func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOptions) (moduleQueryResult, error) {
@@ -473,26 +401,6 @@ func setModuleRoute(command *cobra.Command, path string) {
 		command.Annotations = make(map[string]string)
 	}
 	command.Annotations["clicky/operation-path"] = path
-}
-
-func addModules(ctx context.Context, database *gorm.DB, path string, force bool) ([]indexer.ModuleResult, error) {
-	return indexModules(ctx, database, indexer.ModuleOptions{Path: path, Force: force})
-}
-
-func indexModules(ctx context.Context, database *gorm.DB, options indexer.ModuleOptions) ([]indexer.ModuleResult, error) {
-	engine, err := indexer.New(database)
-	if err != nil {
-		return nil, err
-	}
-	return indexer.RunModulesTask(ctx, engine, options)
-}
-
-func reindexAllModules(ctx context.Context, database *gorm.DB, includeTests bool) ([]indexer.ModuleResult, error) {
-	engine, err := indexer.New(database)
-	if err != nil {
-		return nil, err
-	}
-	return indexer.RunMissingModulesTask(ctx, engine, includeTests)
 }
 
 func listModuleRoots(ctx context.Context, database *gorm.DB) ([]moduleRootRow, error) {
