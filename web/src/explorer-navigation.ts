@@ -11,6 +11,11 @@ export function fileSelectionPatch(item: HeadFileItem): Pick<Route, "location" |
     source: item.source.id, node: "", fileSearch: "", symbolSearch: "", offset: 0 };
 }
 
+export function snapshotExplorerPatch(target: Pick<Route, "location" | "snapshot">): Pick<Route, "view" | "location" | "snapshot" | "source" | "node" | "fileSearch" | "symbolSearch" | "offset"> {
+  if (!target.location || !target.snapshot) throw new Error(`Snapshot ${target.snapshot} has no checkout to open in the Explorer`);
+  return { view: "explorer", location: target.location, snapshot: target.snapshot, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 };
+}
+
 export function symbolSelectionPatch(head: Pick<Route, "location" | "snapshot">, node: ModuleNode): Pick<Route, "location" | "snapshot" | "source" | "node" | "line" | "column" | "fileSearch" | "symbolSearch" | "offset"> {
   if (!head.location || !head.snapshot) throw new Error(`Symbol ${node.id} has no selected checkout head`);
   if (!node.source_id || !node.line || node.line < 1) throw new Error(`Symbol ${node.id} has no indexed source line`);

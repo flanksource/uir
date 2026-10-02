@@ -4,7 +4,7 @@ import { Badge, ServerTimingBadge, type ServerTimingMetric } from "@flanksource/
 import { UiFilter, UiHome, UiWarningTriangle } from "@flanksource/clicky-ui/icons";
 import type { ModuleGraphDirection, ModuleGraphOmitted, ModuleGraphPackage } from "./api";
 import {
-  addExcludePattern, EXCLUDE_EXTERNAL, excludePackage, excludePatternError, includePackage, removeExcludePattern, setExternalHidden,
+  addExcludePattern, EXCLUDE_EXTERNAL, EXCLUDE_NONE, excludePackage, excludePatternError, includePackage, removeExcludePattern, setExternalHidden,
 } from "./call-graph-exclude";
 import { excludedTally, omittedParts } from "./call-graph-labels";
 import { MAX_GRAPH_DEPTH } from "./call-graph-model";
@@ -67,13 +67,16 @@ function PackageFacets({ exclude, packages, onExclude, onDefaults, busy }: Exclu
     setPattern("");
     onExclude(addExcludePattern(exclude, typed));
   };
+  const patterns = exclude.filter((entry) => entry !== EXCLUDE_NONE);
+  // The filter box comes first: the menu focuses its first control on opening, which must not be one that drops an exclusion.
   return <fieldset disabled={busy} aria-busy={busy} className="flex w-96 min-w-0 max-w-[90vw] flex-col gap-2 p-2 text-sm">
+    <TextInput aria-label="Filter packages" placeholder="Filter packages" value={filter} onChange={(event) => setFilter(event.target.value)} />
     <div className="flex flex-wrap items-center gap-1" aria-label="Exclusion patterns">
       <span className="text-xs text-muted-foreground">Excluding</span>
-      {exclude.map((entry) => <button key={entry} type="button" className="rounded border border-border px-1.5 font-mono text-xs hover:bg-muted"
+      {patterns.length === 0 && <span className="text-xs text-muted-foreground">nothing</span>}
+      {patterns.map((entry) => <button key={entry} type="button" className="rounded border border-border px-1.5 font-mono text-xs hover:bg-muted"
         aria-label={`Stop excluding ${entry}`} title={`Stop excluding ${entry}`} onClick={() => onExclude(removeExcludePattern(exclude, entry))}>{entry} ×</button>)}
     </div>
-    <TextInput aria-label="Filter packages" placeholder="Filter packages" value={filter} onChange={(event) => setFilter(event.target.value)} />
     <ul className="max-h-72 overflow-y-auto pr-1" aria-label="Packages">
       {shown.map((pkg) => <PackageRow key={pkg.path} pkg={pkg}
         onToggle={() => onExclude(pkg.excluded ? includePackage(exclude, pkg, packages) : excludePackage(exclude, pkg.path))} />)}

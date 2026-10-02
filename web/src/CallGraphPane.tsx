@@ -69,7 +69,7 @@ export function CallGraphPane({ route, selectedNode, onRoute }: { route: Route; 
   const [expanded, setExpanded] = useState<Held>();
   const [last, setLast] = useState<Held>();
   const [selection, setSelection] = useState<Selection>();
-  const [expanding, setExpanding] = useState<{ id: string; error?: string }>();
+  const [expanding, setExpanding] = useState<{ key: string; label: string; error?: string }>();
   const [opening, setOpening] = useState({ nonce: 0, fit: false });
   const fresh = useMemo<Held | undefined>(() => load.data && (expanded?.key === key ? expanded : { key, graph: load.data, revealed: [] }), [load.data, expanded, key]);
   if (fresh && fresh !== last) setLast(fresh);
@@ -82,19 +82,21 @@ export function CallGraphPane({ route, selectedNode, onRoute }: { route: Route; 
   const selectedGraphNode = current?.kind === "node" ? visible?.nodes.find((node) => node.id === current.id) : undefined;
   const selectedEdge = current?.kind === "edge" ? visible?.edges.find((edge) => edge.id === current.id) : undefined;
   const effectiveExclude = exclude ?? shown?.graph.exclude;
+  const expansion = expanding?.key === shown?.key ? expanding : undefined;
 
   // A `+N` loads one more hop on the node's outer side and merges it into the graph this request drew.
   const expand = async (drawn: Held, drawnRequest: ModuleGraphOptions, id: string) => {
-    setExpanding({ id });
+    const node = requireNode(drawn.graph, id);
+    setExpanding({ key: drawn.key, label: node.label });
     try {
-      const { data } = await getModuleGraph({ symbol: id, depth: 1, direction: expansionDirection(requireNode(drawn.graph, id)), exclude, root: drawnRequest.root, snapshot: drawnRequest.snapshot });
+      const { data } = await getModuleGraph({ symbol: id, depth: 1, direction: expansionDirection(node), exclude, root: drawnRequest.root, snapshot: drawnRequest.snapshot });
       setExpanded((held) => {
         const base = held?.key === drawn.key ? held : drawn;
         return { key: drawn.key, graph: mergeGraph(base.graph, data), revealed: [...base.revealed, ...data.nodes.map((node) => node.id)] };
       });
       setExpanding(undefined);
     } catch (error) {
-      setExpanding({ id, error: `Cannot expand ${requireNode(drawn.graph, id).label}: ${errorMessage(error)}` });
+      setExpanding({ key: drawn.key, label: node.label, error: `Cannot expand ${node.label}: ${errorMessage(error)}` });
     }
   };
 
@@ -115,7 +117,8 @@ export function CallGraphPane({ route, selectedNode, onRoute }: { route: Route; 
     {!shown && load.loading && <Notice>Loading call graph…</Notice>}
     {shown && shown.graph.candidates.length > 0 && <Candidates graph={shown.graph} onRoute={onRoute} />}
     {shown && !rootId && shown.graph.candidates.length === 0 && <Notice>The selection resolved to no indexed function or method in this scope.</Notice>}
-    {shown && rootId && diagram && <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+    {shown && rootId && !selectedEdge && !selectedGraphNode && <p className="text-xs text-muted-foreground">Select an edge to list its call sites, or a node to see where it is declared.</p>}
+    {shown && rootId && diagram && <div className="flex min-h-0 flex-1 gap-3">
       <div className={`relative min-h-64 min-w-0 flex-1 rounded-lg border border-border bg-background ${load.loading ? "opacity-60" : ""}`}>
         <GraphDiagram key={`${shown.key}:${opening.nonce}`} nodes={diagram.nodes} edges={diagram.edges} groups={diagram.groups} layout="columns" zoomable edgeFocus="auto"
           focusId={rootId} {...(opening.fit ? {} : { fitMinScale: READABLE_SCALE })} nodeWidth={NODE_WIDTH} nodeHeight={NODE_HEIGHT} columnGap={columnGap(diagram)} rowGap={ROW_GAP}
@@ -123,14 +126,16 @@ export function CallGraphPane({ route, selectedNode, onRoute }: { route: Route; 
           onNodeSelect={(id: string) => setSelection({ key: shown.key, kind: "node", id })} onEdgeSelect={(id: string) => setSelection({ key: shown.key, kind: "edge", id })}
           {...(fresh && request ? { onNodeExpand: (id: string) => void expand(fresh, request, id) } : {})} {...(selectedGraphNode ? { selectedId: selectedGraphNode.id } : {})} {...(selectedEdge ? { selectedEdgeId: selectedEdge.id } : {})} />
       </div>
-      <aside className="w-full shrink-0 overflow-y-auto rounded-lg border border-border bg-card p-3 lg:w-80" aria-label="Selection">
-        {expanding && <p role="status" className="mb-2 text-xs text-muted-foreground">{expanding.error ?? `Loading more around ${requireNode(shown.graph, expanding.id).label}…`}</p>}
+      {(selectedEdge || selectedGraphNode || expansion) && <aside className="w-80 max-w-[45%] shrink-0 overflow-y-auto rounded-lg border border-border bg-card p-3" aria-label="Selection">
+        {expansion && <p role="status" className="mb-2 text-xs text-muted-foreground">{expansion.error ?? `Loading more around ${expansion.label}…`}</p>}
+        {(selectedEdge || selectedGraphNode) && <div className="mb-1 flex justify-end">
+          <Button type="button" size="sm" variant="ghost" aria-label="Close selection" onClick={() => setSelection(undefined)}>×</Button>
+        </div>}
         {selectedEdge ? <EdgeSites edge={selectedEdge} graph={shown.graph}
           {...(canRevealSites(shown.graph, selectedEdge) ? { onReveal: (site) => onRoute(siteRevealPatch(shown.graph, selectedEdge, site, route.snapshot)) } : {})} />
-          : selectedGraphNode ? <NodeDetails node={selectedGraphNode} graph={shown.graph} isRoot={selectedGraphNode.id === rootId}
-            onOpen={() => onRoute(nodeRevealPatch(selectedGraphNode))} onFocus={() => onRoute({ graphRoot: selectedGraphNode.id })} />
-          : <Muted>Select an edge to list its call sites, or a node to see where it is declared.</Muted>}
-      </aside>
+          : selectedGraphNode && <NodeDetails node={selectedGraphNode} graph={shown.graph} isRoot={selectedGraphNode.id === rootId}
+            onOpen={() => onRoute(nodeRevealPatch(selectedGraphNode))} onFocus={() => onRoute({ graphRoot: selectedGraphNode.id })} />}
+      </aside>}
     </div>}
     {shown && rootId && <div className="shrink-0"><Legend graph={shown.graph} /></div>}
   </div>;
