@@ -28,7 +28,7 @@ func publishedSnapshot(location storage.ModuleLocation, base *uuid.UUID, revisio
 		Revision: revision, WorktreeState: storage.WorktreeClean, ContentSetHash: digest("content " + revision),
 		ConfigurationHash: digest("configuration"), ContextHash: digest("context " + revision),
 		Coverage: storage.CoverageSyntax, PackageCount: packages, Diagnostics: storage.JSON(`[]`),
-		StartedAt: now, CompletedAt: now, Ordinal: snapshotOrdinals.Add(1),
+		StartedAt: now, CompletedAt: now, Ordinal: snapshotOrdinals.Add(1), Reason: storage.ReasonReindex,
 	}
 }
 
@@ -105,6 +105,12 @@ var _ = Describe("module root storage", func() {
 			{ID: primary.ID, RootKey: root.RootKey, CanonicalPath: primary.CanonicalPath, Kind: primary.Kind, Primary: true, HeadSnapshotID: first.ID, HeadVersion: 1},
 			{ID: worktree.ID, RootKey: root.RootKey, CanonicalPath: worktree.CanonicalPath, Kind: worktree.Kind, HeadSnapshotID: second.ID, HeadVersion: 1},
 		}))
+		_, _, err = storage.ModuleSnapshots(ctx, database, storage.ModuleSnapshotListOptions{RootKey: root.RootKey, Location: worktree.CanonicalPath, Limit: 10})
+		Expect(err).To(MatchError(ContainSubstring("has no recorded size and change counts")), "a row without stats fails instead of listing zeros")
+		for _, snapshot := range []storage.ModuleSnapshot{first, second} {
+			_, err = storage.RecordSnapshotStats(ctx, database, snapshot.ID)
+			Expect(err).ToNot(HaveOccurred())
+		}
 		snapshots, total, err := storage.ModuleSnapshots(ctx, database, storage.ModuleSnapshotListOptions{
 			RootKey: root.RootKey, Location: worktree.CanonicalPath, Limit: 10,
 		})
@@ -113,7 +119,7 @@ var _ = Describe("module root storage", func() {
 		Expect(snapshots).To(Equal([]storage.ModuleSnapshotView{{
 			ID: second.ID, RootKey: root.RootKey, CanonicalPath: worktree.CanonicalPath,
 			BaseSnapshotID: &first.ID, Revision: "feature", WorktreeState: storage.WorktreeClean, Coverage: storage.CoverageSyntax,
-			StartedAt: now, CompletedAt: now, Head: true, HeadVersion: 1,
+			Kind: storage.SnapshotKindHead, Reason: storage.ReasonReindex, StartedAt: now, CompletedAt: now, Head: true, HeadVersion: 1,
 		}}))
 		_, _, err = storage.ModuleSnapshots(ctx, database, storage.ModuleSnapshotListOptions{
 			RootKey: root.RootKey, Location: primary.CanonicalPath, Limit: -1,
