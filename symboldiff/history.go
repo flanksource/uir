@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
 )
 
@@ -16,11 +17,16 @@ type GitRef struct {
 	Commit string `json:"commit"`
 }
 
+// GitCommit is one commit of the listed checkout. The snapshot fields are set when the commit has a
+// snapshot in that checkout: the newest clean one, else the newest.
 type GitCommit struct {
-	Commit     string   `json:"commit"`
-	Parents    []string `json:"parents"`
-	Subject    string   `json:"subject"`
-	AuthoredAt string   `json:"authored_at"`
+	Commit              string     `json:"commit"`
+	Parents             []string   `json:"parents"`
+	Subject             string     `json:"subject"`
+	AuthoredAt          string     `json:"authored_at"`
+	SnapshotID          string     `json:"snapshot_id,omitempty"`
+	SnapshotReason      string     `json:"snapshot_reason,omitempty"`
+	SnapshotCompletedAt *time.Time `json:"snapshot_completed_at,omitempty"`
 }
 
 type PullRequestRef struct {
@@ -43,6 +49,8 @@ type CommitOptions struct {
 	Visibility   Visibility
 	Stat         bool
 	IncludeTests bool
+	// TaskContext bounds the module-index runs for the commit and its parent; see Options.
+	TaskContext context.Context
 }
 
 // DiffCommit compares a commit with its first parent and indexes missing clean snapshots.
@@ -71,7 +79,7 @@ func DiffCommit(ctx context.Context, database *gorm.DB, options CommitOptions) (
 		return Result{}, fmt.Errorf("commit %s has no parent to compare", commit)
 	}
 	return Diff(ctx, database, Options{RootKey: options.RootKey, From: parents[1], To: commit,
-		Visibility: options.Visibility, Stat: options.Stat, AutoIndex: true, IncludeTests: options.IncludeTests})
+		Visibility: options.Visibility, Stat: options.Stat, AutoIndex: true, IncludeTests: options.IncludeTests, TaskContext: options.TaskContext})
 }
 
 func ListHistory(ctx context.Context, database *gorm.DB, rootKey, location string, limit int) (History, error) {
@@ -85,28 +93,58 @@ func ListHistory(ctx context.Context, database *gorm.DB, rootKey, location strin
 	if len(scope.locations) == 0 {
 		return History{}, fmt.Errorf("root %q has no registered checkout", rootKey)
 	}
-	checkout := scope.locations[0].CanonicalPath
 	if location != "" {
-		checkout = ""
-		for _, candidate := range scope.locations {
-			if candidate.CanonicalPath == location {
-				checkout = location
-				break
-			}
-		}
-		if checkout == "" {
-			return History{}, fmt.Errorf("checkout %q is not registered for root %q", location, rootKey)
+		if scope, err = scope.preferring(location); err != nil {
+			return History{}, err
 		}
 	}
-	result := History{RootKey: rootKey, Location: checkout, Branches: []GitRef{}, Commits: []GitCommit{}, PullRequests: []PullRequestRef{}}
-	if result.Branches, err = listBranches(ctx, checkout); err != nil {
+	checkout := scope.locations[0]
+	result := History{RootKey: rootKey, Location: checkout.CanonicalPath, Branches: []GitRef{}, Commits: []GitCommit{}, PullRequests: []PullRequestRef{}}
+	if result.Branches, err = listBranches(ctx, checkout.CanonicalPath); err != nil {
 		return History{}, err
 	}
-	if result.Commits, err = listCommits(ctx, checkout, limit); err != nil {
+	if result.Commits, err = listCommits(ctx, checkout.CanonicalPath, limit); err != nil {
 		return History{}, err
 	}
-	result.PullRequests, result.PullRequestError = listPullRequests(ctx, checkout)
+	if err := markIndexedCommits(ctx, database, checkout, result.Commits); err != nil {
+		return History{}, err
+	}
+	result.PullRequests, result.PullRequestError = listPullRequests(ctx, checkout.CanonicalPath)
 	return result, nil
+}
+
+// markIndexedCommits sets the snapshot of each commit that has one in the checkout, matched by
+// git_commit: the newest clean snapshot, else the newest.
+func markIndexedCommits(ctx context.Context, database *gorm.DB, checkout storage.ModuleLocation, commits []GitCommit) error {
+	if len(commits) == 0 {
+		return nil
+	}
+	hashes := make([]string, 0, len(commits))
+	for _, commit := range commits {
+		hashes = append(hashes, commit.Commit)
+	}
+	var snapshots []storage.ModuleSnapshot
+	if err := database.WithContext(ctx).Select("id", "git_commit", "reason", "completed_at", "worktree_state").
+		Where("location_id = ? AND git_commit IN ?", checkout.ID, hashes).
+		Order(fmt.Sprintf("CASE WHEN worktree_state = '%s' THEN 0 ELSE 1 END, completed_at DESC, ordinal DESC", storage.WorktreeClean)).
+		Find(&snapshots).Error; err != nil {
+		return fmt.Errorf("load snapshots of the commits of %q: %w", checkout.CanonicalPath, err)
+	}
+	newest := make(map[string]storage.ModuleSnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		if _, seen := newest[snapshot.GitCommit]; !seen {
+			newest[snapshot.GitCommit] = snapshot
+		}
+	}
+	for index := range commits {
+		snapshot, indexed := newest[commits[index].Commit]
+		if !indexed {
+			continue
+		}
+		completed := snapshot.CompletedAt
+		commits[index].SnapshotID, commits[index].SnapshotReason, commits[index].SnapshotCompletedAt = snapshot.ID.String(), string(snapshot.Reason), &completed
+	}
+	return nil
 }
 
 func listBranches(ctx context.Context, checkout string) ([]GitRef, error) {

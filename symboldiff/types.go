@@ -4,6 +4,7 @@
 package symboldiff
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -60,6 +61,13 @@ type Options struct {
 	Stat         bool
 	AutoIndex    bool
 	IncludeTests bool
+	// TaskContext bounds the module-index run AutoIndex starts for a missing commit snapshot. The run
+	// outlives the diff's own context, which bounds only the wait, so a diff that goes away neither
+	// stops an index another diff of the commit is waiting on nor leaves it half done.
+	TaskContext context.Context
+	// Location is the registered checkout to resolve and index commits from; empty means the primary
+	// checkout first, then any other that has the commit.
+	Location string
 }
 
 // ParseRange splits "<from>..<to>" into its two commits; both must be non-empty.
