@@ -94,7 +94,7 @@ func (repo *repository) index(ctx context.Context, database *gorm.DB) string {
 	GinkgoHelper()
 	engine, err := indexer.New(database)
 	Expect(err).ToNot(HaveOccurred())
-	results, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: repo.path})
+	results, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: repo.path, Reason: storage.ReasonAdd})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(results).To(HaveLen(1))
 	return results[0].SnapshotID

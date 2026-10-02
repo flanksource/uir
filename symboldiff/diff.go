@@ -40,6 +40,11 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
+	if options.Location != "" {
+		if scope, err = scope.preferring(options.Location); err != nil {
+			return Result{}, err
+		}
+	}
 	before, after, err := selectSides(ctx, database, scope, options)
 	if err != nil {
 		return Result{}, err
@@ -75,17 +80,7 @@ func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, option
 		}
 		var snapshot storage.ModuleSnapshot
 		if options.AutoIndex && request.override == "" {
-			checkout, checkoutErr := scope.checkoutFor(ctx, commit)
-			if checkoutErr != nil {
-				return selectedSide{}, selectedSide{}, checkoutErr
-			}
-			engine, createErr := indexer.New(database)
-			if createErr != nil {
-				return selectedSide{}, selectedSide{}, createErr
-			}
-			indexed, indexErr := engine.IndexRevision(ctx, indexer.RevisionOptions{
-				RootKey: scope.root.RootKey, Checkout: checkout, Commit: commit, IncludeTests: options.IncludeTests,
-			})
+			indexed, indexErr := autoIndex(ctx, database, scope, commit, options)
 			if indexErr != nil {
 				return selectedSide{}, selectedSide{}, indexErr
 			}
@@ -103,6 +98,35 @@ func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, option
 			sides[0].snapshot.ID, sides[1].snapshot.ID, sides[0].snapshot.ConfigurationHash, sides[1].snapshot.ConfigurationHash)
 	}
 	return sides[0], sides[1], nil
+}
+
+// autoIndex uses the commit's reusable snapshot when it has one. Otherwise it indexes the commit as a
+// module-index run under options.TaskContext, joining the run of a concurrent diff of the same commit,
+// and waits for it under ctx alone.
+func autoIndex(ctx context.Context, database *gorm.DB, scope rootScope, commit string, options Options) (indexer.ModuleResult, error) {
+	if options.TaskContext == nil {
+		return indexer.ModuleResult{}, fmt.Errorf("auto-index needs a task context to index commit %s of %q", commit, scope.root.RootKey)
+	}
+	checkout, err := scope.checkoutFor(ctx, commit)
+	if err != nil {
+		return indexer.ModuleResult{}, err
+	}
+	engine, err := indexer.New(database)
+	if err != nil {
+		return indexer.ModuleResult{}, err
+	}
+	revision := indexer.RevisionOptions{
+		RootKey: scope.root.RootKey, Checkout: checkout, Commit: commit, IncludeTests: options.IncludeTests, Reason: storage.ReasonHistorical,
+	}
+	reusable, found, err := engine.ReusableRevision(ctx, revision)
+	if err != nil || found {
+		return reusable, err
+	}
+	run, err := indexer.StartRevisionTask(options.TaskContext, engine, revision)
+	if err != nil {
+		return indexer.ModuleResult{}, err
+	}
+	return run.Wait(ctx)
 }
 
 // compareSnapshots finds the changed files from both snapshots' document headers, classifies their
