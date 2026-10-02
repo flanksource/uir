@@ -78,7 +78,7 @@ var _ = Describe("module dependency snapshots", func() {
 
 	It("keeps syntax and unresolved declarations when a historical commit cannot load packages", func(ctx SpecContext) {
 		database := openIndexerDB(ctx, indexerSQLiteOptions())
-		checkout := GinkgoT().TempDir()
+		checkout := canonicalTempDir()
 		writeFile(filepath.Join(checkout, "go.mod"), "module example.org/history\n\ngo 1.26\n")
 		writeFile(filepath.Join(checkout, "history.go"), "package history\n\nfunc Present() {}\n")
 		for _, args := range [][]string{{"init"}, {"add", "go.mod", "history.go"}, {"-c", "user.name=Example", "-c", "user.email=example@example.org", "commit", "-m", "test: base"}} {
@@ -97,7 +97,7 @@ var _ = Describe("module dependency snapshots", func() {
 		commit, err := exec.CommandContext(ctx, "git", "-C", checkout, "rev-parse", "HEAD").Output()
 		Expect(err).ToNot(HaveOccurred())
 		GinkgoT().Setenv("GOPROXY", "off")
-		indexed, err := engine.IndexRevision(ctx, RevisionOptions{RootKey: "example.org/history", Checkout: checkout, Commit: strings.TrimSpace(string(commit))})
+		indexed, err := engine.IndexRevision(ctx, RevisionOptions{RootKey: "example.org/history", Checkout: checkout, Commit: strings.TrimSpace(string(commit)), Reason: storage.ReasonHistorical})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(loadSnapshot(database, indexed.SnapshotID).Coverage).To(Equal(storage.CoverageSyntax))
 		dependencies, err := storage.ModuleDependencies(ctx, database, uuid.MustParse(indexed.SnapshotID))

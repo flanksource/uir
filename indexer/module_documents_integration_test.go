@@ -82,7 +82,7 @@ var _ = Describe("document publication", func() {
 			writeTwoPackageModule(workspace)
 			engine, err := New(database)
 			Expect(err).ToNot(HaveOccurred())
-			first, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+			first, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
 			Expect([]int{first[0].ParsedFiles, first[0].ReusedFiles}).To(Equal([]int{3, 0}))
 			var snapshot storage.ModuleSnapshot
@@ -104,7 +104,7 @@ var _ = Describe("document publication", func() {
 			original := activeDocumentIDs(ctx, database, first[0].SnapshotID)
 			Expect(original).To(HaveLen(3))
 
-			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true})
+			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true, Reason: storage.ReasonReindex})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(forced[0].ParsedFiles).To(Equal(3), "force re-extracts and verifies every document")
 			Expect(countRows(database, &storage.Document{}, "1 = 1")).To(Equal(int64(3)), "a re-run must not duplicate documents")
@@ -114,7 +114,7 @@ var _ = Describe("document publication", func() {
 			Expect(forcedSnapshot.ContextHash).To(Equal(snapshot.ContextHash))
 
 			writeFile(filepath.Join(workspace, "checkout.go"), "package shop\n\nfunc Checkout(c *Cart) int { return 2 * len(c.Items) }\n")
-			edited, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+			edited, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
 			Expect([]int{edited[0].ParsedFiles, edited[0].ReusedFiles}).To(Equal([]int{2, 1}), "an edit re-extracts its whole package")
 			current := activeDocumentIDs(ctx, database, edited[0].SnapshotID)
@@ -134,13 +134,13 @@ var _ = Describe("document publication", func() {
 			writeTwoPackageModule(workspace)
 			engine, err := New(database)
 			Expect(err).ToNot(HaveOccurred())
-			_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+			_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
 			stale := map[string]any{"search_name": "check_out", "visibility": "internal"}
 			Expect(database.Model(&storage.Symbol{}).Where("name = ?", "Checkout").Updates(stale).Error).To(Succeed(),
 				"a row written under an earlier normalization")
 
-			_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true})
+			_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true, Reason: storage.ReasonReindex})
 			Expect(err).ToNot(HaveOccurred())
 			var symbol storage.Symbol
 			Expect(database.Where("name = ?", "Checkout").First(&symbol).Error).To(Succeed())
@@ -156,7 +156,7 @@ var _ = Describe("document publication", func() {
 		writeTwoPackageModule(workspace)
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		var document storage.Document
 		Expect(database.Where("path_key = ?", "tax/tax.go").First(&document).Error).To(Succeed())
@@ -166,7 +166,7 @@ var _ = Describe("document publication", func() {
 		content.Symbols[0].Shape = "func Rate() string"
 		Expect(database.Model(&document).Update("content", mustJSON(content)).Error).To(Succeed())
 
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true, Reason: storage.ReasonReindex})
 		Expect(err).To(MatchError(ContainSubstring(`document for "tax/tax.go" under input hash`)))
 		Expect(err).To(MatchError(ContainSubstring("changed without an indexer version change")))
 	})
@@ -190,7 +190,7 @@ var _ = Describe("document publication", func() {
 			writeTwoPackageModule(workspace)
 			engine, err := New(database)
 			Expect(err).ToNot(HaveOccurred())
-			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(activeDocumentIDs(ctx, database, results[0].SnapshotID)).To(HaveLen(3))
 		},

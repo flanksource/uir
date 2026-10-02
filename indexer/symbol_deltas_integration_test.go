@@ -238,7 +238,7 @@ var _ = Describe("symbol deltas", func() {
 			Expect(err).ToNot(HaveOccurred())
 			group.Go(func() {
 				var published []ModuleResult
-				published, errs[i] = engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+				published, errs[i] = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 				if errs[i] == nil {
 					results[i] = published[0]
 				}
