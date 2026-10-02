@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Button, Modal } from "@flanksource/clicky-ui/components";
 import { CodeDiff } from "@flanksource/clicky-ui/data";
-import { applyModuleRefactor, errorMessage, previewModuleRefactor, type ModuleNode, type ModuleRefactorPreview, type ModuleRefactorRequest, type ModuleSource } from "./api";
+import { ApiError, applyModuleRefactor, errorMessage, previewModuleRefactor, type ModuleNode, type ModuleRefactorPreview, type ModuleRefactorRequest, type ModuleSource } from "./api";
 import { ErrorMessage, Field, Muted, TextInput } from "./ui";
 
 export function ExplorerRefactorDialog({ action, snapshot, source, node, onClose, onApplied }: {
@@ -42,14 +42,12 @@ export function ExplorerRefactorDialog({ action, snapshot, source, node, onClose
     try {
       const result = await applyModuleRefactor(preview.request, preview.result.preview_hash);
       setPreview(undefined);
-      if (result.index_error) {
-        setError(`Gopatch applied the change, but UIR could not refresh its index: ${result.index_error}`);
-        return;
-      }
       const updated = result.snapshots.find((item) => item.location === source.location);
       if (!updated) throw new Error(`Gopatch applied the change, but no refreshed snapshot was returned for ${source.location}`);
       onApplied(updated.snapshot_id);
     } catch (reason) {
+      // The files changed even though the index did not follow, so the preview is spent.
+      if (reason instanceof ApiError && reason.code === "reindex_failed") setPreview(undefined);
       setError(errorMessage(reason));
     } finally {
       setPending(null);

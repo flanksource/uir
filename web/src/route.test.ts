@@ -29,6 +29,12 @@ it("opens the task manager at its own route", () => {
   expect(routeURL(route)).toBe("/tasks?module=example.org%2Fservice");
 });
 
+it("focuses a task run in the task manager through the URL", () => {
+  const route = readRoute({ pathname: "/tasks", search: "?taskRun=run-42" });
+  expect(route.taskRun).toBe("run-42");
+  expect(routeURL(route)).toBe("/tasks?taskRun=run-42");
+});
+
 it("round trips a Git comparison and selected log commit through the history URL", () => {
   const route = readRoute({ pathname: "/history", search: "?module=example.org%2Fservice&compareFrom=main&compareTo=pr%3A12&logCommit=abc123&historyGroup=file&historyLayout=sidebar&historySearch=fix" });
   expect(route).toMatchObject({ view: "history", compareFrom: "main", compareTo: "pr:12", logCommit: "abc123", historyGroup: "file", historyLayout: "sidebar", historySearch: "fix" });

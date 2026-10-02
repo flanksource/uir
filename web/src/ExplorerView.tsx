@@ -51,10 +51,16 @@ function revealPosition(editor: EditorInstance, line: number, column: number) {
   editor.revealLineInCenter(line);
 }
 
-function SourcePane({ snapshot, source, line, column }: { snapshot: string; source?: ModuleSource; line: number; column: number }) {
+// SourcePane stays mounted while another center tab shows, hidden with display:none. A hidden editor
+// has no size, so the reveal waits until the pane is active and lays the editor out first.
+function SourcePane({ snapshot, source, line, column, active }: { snapshot: string; source?: ModuleSource; line: number; column: number; active: boolean }) {
   const content = useLoad<ModuleSourceContent>(source ? () => readModuleSource(snapshot, source.path) : null, `${snapshot}:${source?.id}`);
   const editor = useRef<EditorInstance | null>(null);
-  useEffect(() => { if (editor.current && content.data) revealPosition(editor.current, line, column); }, [content.data, line, column]);
+  useEffect(() => {
+    if (!active || !editor.current || !content.data) return;
+    editor.current.layout();
+    revealPosition(editor.current, line, column);
+  }, [active, content.data, line, column]);
 
   if (!source) return <div className="p-3"><Muted>Select a file to view its verified content.</Muted></div>;
   return <div className="flex h-full min-h-0 flex-col">
@@ -68,7 +74,7 @@ function SourcePane({ snapshot, source, line, column }: { snapshot: string; sour
     {content.data && <div className="min-h-0 flex-1">
       <MonacoProvider getWorker={getMonacoWorker}>
         <Editor value={content.data.content} language="go" path={`file:///uir/${snapshot}/${source.path}`} height="100%" options={{ readOnly: true, automaticLayout: true, minimap: { enabled: false } }}
-          onMount={(instance) => { editor.current = instance; revealPosition(instance, line, column); }} />
+          onMount={(instance) => { editor.current = instance; if (active) revealPosition(instance, line, column); }} />
       </MonacoProvider>
     </div>}
   </div>;
@@ -265,7 +271,7 @@ export function ExplorerView({ route, roots, heads, browse, locations, onRoute, 
   const panes: WorkspacePaneSpec[] = [
     ...navigationPanes,
     { id: "source", label: selectedSource?.path ?? "Source", icon: <FileTypeIcon filename={selectedSource?.path ?? ""} />, location: "center", collapsible: false,
-      content: <CenterTabs route={route} onRoute={onRoute} source={<SourcePane snapshot={route.snapshot} source={selectedSource} line={revealed.line} column={revealed.column} />}>
+      content: <CenterTabs route={route} onRoute={onRoute} source={<SourcePane snapshot={route.snapshot} source={selectedSource} line={revealed.line} column={revealed.column} active={route.explorerTab === "source"} />}>
         <CallGraphPane route={route} selectedNode={selectedNode} onRoute={onRoute} />
       </CenterTabs>, contentClassName: "overflow-hidden" },
     { id: "details", label: "Details", icon: <UiListTree />, location: "right", width: 320,

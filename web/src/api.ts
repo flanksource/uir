@@ -41,6 +41,12 @@ export type ModuleLocation = {
   head_version: number;
 };
 
+export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local-dependency" | "versioned-dependency" | "historical" | "dependency-cycle";
+
+export type SnapshotKind = "head" | "historical" | "versioned";
+
+// ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts are against
+// base_snapshot_id; index_started_at is absent on snapshots published before it was recorded.
 export type ModuleSnapshot = {
   id: string;
   root_key: string;
@@ -52,10 +58,22 @@ export type ModuleSnapshot = {
   revision: string;
   worktree_state: "clean" | "dirty" | "unknown";
   coverage: "indexed" | "partial" | "syntax" | "excluded";
+  kind: SnapshotKind;
+  reason: SnapshotReason;
+  index_started_at?: string;
   started_at: string;
   completed_at: string;
+  task_run_id?: string;
   head: boolean;
   head_version?: number;
+  file_count: number;
+  symbol_count: number;
+  occurrence_count: number;
+  source_bytes: number;
+  files_added: number;
+  files_changed: number;
+  files_deleted: number;
+  symbols_changed: number;
 };
 
 export type ModuleSource = {
@@ -105,7 +123,8 @@ export type ModuleDependency = { module_path: string; declared_version: string; 
 export type ModuleDependencies = { captured: boolean; items: ModuleDependency[] };
 export type ModuleRefactorRequest = { snapshot: string; source: string; node?: string; action: "rename" | "move"; newName?: string; destination?: string };
 export type ModuleRefactorPreview = { diff: string; preview_hash: string; files: string[] };
-export type ModuleRefactorApply = { applied: boolean; files: string[]; snapshots: ModuleIndexResult[]; index_error?: string };
+/** A failed reindex after a successful apply is an error response (code reindex_failed), not a field. */
+export type ModuleRefactorApply = { applied: boolean; files: string[]; snapshots: ModuleIndexResult[]; run_id: string };
 export type ModuleQueryRow = {
   kind: string;
   node_kind?: string;
@@ -205,9 +224,15 @@ export type ModuleIndexResult = {
   parsed_files: number;
   reused_files: number;
   unchanged: boolean;
+  /** Why this module of the run failed; its counts are then zero. */
+  error?: string;
 };
+/** An add or reindex answers 202 Accepted with the task run that indexes in the background. */
+export type ModuleIndexRun = { run_id: string };
 export type GitRef = { name: string; commit: string };
-export type GitCommit = { commit: string; parents: string[]; subject: string; authored_at: string };
+/** snapshot_* are set when the commit has a snapshot in the listed checkout: the newest clean one, else the newest. */
+export type GitCommit = { commit: string; parents: string[]; subject: string; authored_at: string;
+  snapshot_id?: string; snapshot_reason?: SnapshotReason; snapshot_completed_at?: string };
 export type GitHistory = { root_key: string; location: string; branches: GitRef[]; commits: GitCommit[];
   pull_requests: { number: number; commit: string }[]; pull_request_error?: string };
 export type SymbolChange = { class: "added" | "removed" | "signature" | "body" | "moved"; kind: string;
@@ -362,11 +387,11 @@ function isGraphResult(value: unknown): value is ModuleGraphResult {
     && ["roots", "nodes", "edges", "exclude", "packages", "stages", "warnings", "candidates"].every((key) => Array.isArray(result[key]));
 }
 
-export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexResult[]> {
+export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexRun> {
   return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, "no-workspace-uses": true }) });
 }
 
-export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexResult[]> {
+export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexRun> {
   return request(moduleURL("reindex"), { method: "POST", body: JSON.stringify({
     ...(options.path ? { args: [options.path] } : {}), "include-tests": options.includeTests ?? false,
     force: options.force ?? false, all: options.all ?? false,
@@ -377,6 +402,8 @@ export function listGitHistory(root: string, location: string): Promise<GitHisto
   return request(moduleURL("history", { root, location, limit: "50" }));
 }
 
-export function compareGitRevisions(root: string, from: string, to: string, visibility: string, includeTests: boolean): Promise<SymbolDiff> {
-  return request(moduleURL("diff"), { method: "POST", body: JSON.stringify({ args: [`${from}..${to}`], root, visibility, stat: true, "auto-index": true, "include-tests": includeTests }) });
+/** location, when given, is the registered checkout the commits resolve and auto-index from. */
+export function compareGitRevisions(root: string, from: string, to: string, visibility: string, includeTests: boolean, location?: string): Promise<SymbolDiff> {
+  return request(moduleURL("diff"), { method: "POST", body: JSON.stringify({ args: [`${from}..${to}`], root, visibility, stat: true, "auto-index": true, "include-tests": includeTests,
+    ...(location ? { location } : {}) }) });
 }
