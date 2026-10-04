@@ -109,7 +109,7 @@ var _ = Describe("symbol handle allocation", func() {
 			full.Handle = handleOf(2, 0, exported, symbolhandle.KindConst, symbolhandle.MaxLocal)
 			Expect(database.Create(&full).Error).To(Succeed())
 			_, err = publishSymbols(ctx, database, handleSymbol(serviceModule, serviceModule+"/a", "const", "Next", "exported"))
-			Expect(err).To(MatchError(ContainSubstring("local 4294967296 exceeds 32 bits")))
+			Expect(err).To(MatchError(ContainSubstring("local 536870912 exceeds 29 bits")))
 		},
 		Entry("SQLite", sqliteOptions("handle-errors.db")),
 		Entry("PostgreSQL", postgresOptions("uir_handle_errors")),

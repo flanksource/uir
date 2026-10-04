@@ -20,12 +20,12 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl
 var migrations embed.FS
 
-// UirDB opens the database, discards a pre-handle index, applies the schema, and then discards the
-// uir_-prefixed legacy tables. The pre-handle cutover must precede migration, which cannot reconcile
-// the current schema onto those tables.
+// UirDB opens the database, discards a pre-handle or H64a index, applies the schema, seeds the builtin
+// symbol kinds, records the handle layout, and then discards the uir_-prefixed legacy tables. The
+// layout cutover must precede migration, which cannot reconcile the current schema onto those tables.
 func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if strings.TrimSpace(options.DSN) == "" {
 		return nil, errors.New("UIR database DSN is required")
@@ -52,7 +52,7 @@ func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 }
 
 func migrate(ctx context.Context, database *gorm.DB, dsn, schema string) error {
-	if err := discardPreHandleGeneration(ctx, database, schema); err != nil {
+	if err := discardStaleGeneration(ctx, database, schema); err != nil {
 		return err
 	}
 	migrationOptions := []commonsmigrate.Option{
@@ -63,6 +63,12 @@ func migrate(ctx context.Context, database *gorm.DB, dsn, schema string) error {
 	}
 	if err := commonsmigrate.Apply(ctx, dsn, migrations, migrationOptions...); err != nil {
 		return fmt.Errorf("migrate UIR schema: %w", err)
+	}
+	if err := seedBuiltinKinds(ctx, database); err != nil {
+		return err
+	}
+	if err := recordHandleLayout(ctx, database); err != nil {
+		return err
 	}
 	if err := discardLegacyTables(ctx, database); err != nil {
 		return err

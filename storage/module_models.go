@@ -31,6 +31,11 @@ type ModuleLocation struct {
 
 func (ModuleLocation) TableName() string { return "locations" }
 
+// LocationExternal is the kind of a location a non-Go producer publishes with indexer.Publish: its
+// canonical path is the producer's URI rather than a checkout, and only that producer refreshes it, so
+// add, reindex, and reindex --all never read it. A Go location is a module, git, or git-submodule.
+const LocationExternal = "external"
+
 // WorktreeState records whether a snapshot's bytes are exactly its Git revision's bytes.
 type WorktreeState string
 
@@ -63,6 +68,8 @@ const (
 	ReasonVersionedDependency SnapshotReason = "versioned-dependency"
 	ReasonHistorical          SnapshotReason = "historical"
 	ReasonDependencyCycle     SnapshotReason = "dependency-cycle"
+	// ReasonImport marks a snapshot a non-Go producer published with indexer.Publish.
+	ReasonImport SnapshotReason = "import"
 )
 
 // ModuleSnapshot is a published index run; a row exists only once its publication committed. Ordinal
