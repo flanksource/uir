@@ -120,7 +120,7 @@ func (index *compactIndex) selectorRanges(ctx context.Context, selector Selector
 		return nil, nil
 	case selector.Kind == "pkg":
 		return index.packageRanges(ctx, modules, packageFilter(selector, glob))
-	case selector.Kind != "mod" && strings.Contains(selector.Pattern, "/"):
+	case selector.Kind != "mod" && selector.Owner == "" && strings.Contains(selector.Pattern, "/"):
 		return index.packageRanges(ctx, modules, qualifiedPackageFilter(selector.Pattern))
 	}
 	ranges := make([]symbolhandle.Range, 0, len(modules))

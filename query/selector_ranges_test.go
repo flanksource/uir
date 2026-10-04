@@ -7,7 +7,7 @@ import (
 )
 
 var _ = Describe("selector handle ranges", func() {
-	// The module field starts at bit 52 and the package field at bit 36 of an H64a handle.
+	// The module field starts at bit 52 and the package field at bit 36 of an H64b handle.
 	packageRange := func(module, pkg int64) symbolhandle.Range {
 		low := module<<52 | pkg<<36
 		return symbolhandle.Range{Low: low, High: low + 1<<36 - 1}

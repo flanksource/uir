@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
 func (index *compactIndex) evaluateRelation(ctx context.Context, expression *Expr, result *ModuleQueryResult) (compactValue, error) {
@@ -30,7 +31,7 @@ func (index *compactIndex) evaluateRelation(ctx context.Context, expression *Exp
 	var matches []ModuleMatch
 	compatible := 0
 	for _, target := range left.symbols {
-		if !relationAccepts(expression.Relation, target.Kind) {
+		if !index.relationAccepts(expression.Relation, target.Kind) {
 			continue
 		}
 		compatible++
@@ -79,17 +80,6 @@ func (index *compactIndex) evaluateRelation(ctx context.Context, expression *Exp
 	return value, err
 }
 
-func relationAccepts(relation, kind string) bool {
-	switch relation {
-	case ">":
-		return kind == "func" || kind == "method"
-	case ":impl", ":inherits", ":methods":
-		return kind == "type"
-	default:
-		return kind != "module" && kind != "package"
-	}
-}
-
 func (index *compactIndex) filterRelationRight(ctx context.Context, value compactValue, expression *Expr, result *ModuleQueryResult) (compactValue, error) {
 	right, err := index.evaluate(ctx, expression.Right, result)
 	if err != nil {
@@ -100,7 +90,7 @@ func (index *compactIndex) filterRelationRight(ctx context.Context, value compac
 	callables := 0
 	for _, symbol := range right.symbols {
 		allowed[symbol.ID] = true
-		if callable(symbol) {
+		if index.callable(symbol) {
 			callables++
 		}
 	}
@@ -130,8 +120,8 @@ func (index *compactIndex) filterRelationRight(ctx context.Context, value compac
 func (index *compactIndex) relationRows(ctx context.Context, target ModuleSymbol, relation string, result *ModuleQueryResult) ([]ModuleMatch, error) {
 	switch relation {
 	case "<":
-		if target.Kind == "func" || target.Kind == "method" {
-			dispatch := target.Kind == "method"
+		if index.callable(target) {
+			dispatch := target.Kind == symbolhandle.KindMethod.String()
 			if dispatch {
 				owner, err := index.declarations(ctx, []string{target.OwnerID}, "definition")
 				if err != nil {
@@ -152,7 +142,7 @@ func (index *compactIndex) relationRows(ctx context.Context, target ModuleSymbol
 			return occurrence.Role != "definition"
 		})
 	case ">":
-		if target.Kind != "func" && target.Kind != "method" {
+		if !index.callable(target) {
 			return nil, fmt.Errorf("outgoing calls require a function or method, got %s", target.Kind)
 		}
 		return index.callees(ctx, target)

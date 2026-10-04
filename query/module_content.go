@@ -64,8 +64,16 @@ type verifiedSource struct {
 
 // readVerifiedSource returns the indexed bytes of a source and where they came from: the local file
 // while it still has the indexed hash, else the stored blob of a dirty or non-Git snapshot, else the
-// pinned Git blob. Bytes with any other hash are never returned.
+// pinned Git blob. An external location is a producer's URI, not a checkout, so its sources are only
+// the blobs its publication stored. Bytes with any other hash are never returned.
 func readVerifiedSource(ctx context.Context, database *gorm.DB, scope moduleScope, source verifiedSource) ([]byte, string, error) {
+	if scope.location.Kind == storage.LocationExternal {
+		content, found, err := readStoredSource(ctx, database, source)
+		if err == nil && !found {
+			err = fmt.Errorf("source %q of external snapshot %s has no stored bytes", source.path, source.snapshot)
+		}
+		return content, "snapshot", err
+	}
 	modulePath := filepath.Join(scope.location.CanonicalPath, filepath.FromSlash(source.path))
 	resolvedRoot, err := filepath.EvalSymlinks(scope.location.CanonicalPath)
 	if err != nil {

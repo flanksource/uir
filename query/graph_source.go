@@ -166,7 +166,7 @@ func (source *indexGraphSource) In(ctx context.Context, id string) ([]graph.Step
 		return nil, nil
 	}
 	symbol, err := source.symbol(ctx, id)
-	if err != nil || !callable(symbol) {
+	if err != nil || !source.index.callable(symbol) {
 		return nil, err
 	}
 	noted := &ModuleQueryResult{}
@@ -271,7 +271,7 @@ func (source *indexGraphSource) remember(ctx context.Context, symbols []ModuleSy
 // path and carries their count in the declarations property.
 func (source *indexGraphSource) node(symbol ModuleSymbol, declarations []ModuleMatch) (graph.Node, error) {
 	node := graph.Node{
-		ID: symbol.ID, Identifier: symbol.identifier(), Kind: symbol.Kind,
+		ID: symbol.ID, Identifier: source.index.identifier(symbol), Kind: symbol.Kind,
 		Label: strings.TrimPrefix(symbol.QueryName, symbol.PackagePath+"."), Group: symbol.PackagePath,
 	}
 	builtin := symbol.Kind == "builtin"

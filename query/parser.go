@@ -108,6 +108,12 @@ func (parser *expressionParser) primary() (*Expr, error) {
 			return nil, err
 		}
 		left = &Expr{Kind: ExprSelector, Selector: &selector}
+	} else if token, ok := parser.take("entity_field"); ok {
+		selector, err := parseEntityField(token.value)
+		if err != nil {
+			return nil, err
+		}
+		left = &Expr{Kind: ExprSelector, Selector: &selector}
 	} else if token, ok := parser.take("symbol"); ok {
 		if err := validateSymbolPattern(token.value); err != nil {
 			return nil, err
@@ -184,7 +190,7 @@ func (parser *expressionParser) chain() (*Expr, error) {
 		}
 		if parser.index < len(parser.tokens) {
 			switch parser.tokens[parser.index].kind {
-			case "selector", "symbol", "open":
+			case "selector", "entity_field", "symbol", "open":
 				if token.value == "=" {
 					return nil, errors.New("definition relation has no right operand")
 				}

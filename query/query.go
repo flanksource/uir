@@ -45,10 +45,16 @@ type Filter struct {
 	Value string `json:"value,omitempty"`
 }
 
+// Selector is a typed selector. SymbolKind is the registered kind a kind: selector names, such as
+// oipa.rule; Pattern then matches the names of that kind's symbols, every one when it was omitted.
+// Owner is the glob an Entity:Field reference matches against the name of a field's direct owner;
+// Pattern then matches the field's own name.
 type Selector struct {
 	Kind          string `json:"kind"`
 	Pattern       string `json:"pattern"`
 	ModulePattern string `json:"module_pattern,omitempty"`
+	SymbolKind    string `json:"symbol_kind,omitempty"`
+	Owner         string `json:"owner,omitempty"`
 }
 
 type TypedModifier struct {
