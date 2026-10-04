@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/clicky/api"
+	"github.com/flanksource/clicky/api/icons"
 
 	"github.com/flanksource/uir"
 )
@@ -176,11 +177,26 @@ func compareFirstSites(left, right Edge) int {
 	return compareSites(left.Sites[0], right.Sites[0])
 }
 
-// edgeLabel is one line of the tree: the neighbour, how many call sites the edge has when more than
-// one, and the guards and position of the first.
+// accessThemes label the edges that read or write data rather than call it.
+var accessThemes = map[uir.RelationshipType]struct{ label, style string }{
+	uir.RelationshipTypeRead:  {" reads", "text-blue-600"},
+	uir.RelationshipTypeWrite: {" writes", "text-orange-600"},
+}
+
+// edgeLabel is one line of the tree: how the edge reaches the neighbour unless it calls it, the
+// neighbour, how many call sites the edge has when more than one, and the guards and position of
+// the first. A read or write edge names its kind (the construct it is written in, e.g. sql), and its
+// first site's text: what the site reads or writes.
 func (tree *graphTree) edgeLabel(parent, neighbour Node, edge Edge) api.Text {
 	label := api.Text{}
-	if edge.Type == uir.RelationshipTypeDispatch {
+	access, accesses := accessThemes[edge.Type]
+	switch {
+	case accesses:
+		label = label.Add(icons.ArrowRight).Append(access.label, access.style).Space()
+		if edge.Kind != "" {
+			label = label.Append(edge.Kind, uir.StyleDim).Space()
+		}
+	case edge.Type == uir.RelationshipTypeDispatch:
 		label = label.Add(edge.Type.Pretty()).Space()
 	}
 	label = label.Add(tree.name(neighbour))
@@ -202,6 +218,9 @@ func (tree *graphTree) edgeLabel(parent, neighbour Node, edge Edge) api.Text {
 	}
 	if site.Path != "" {
 		label = label.Space().Append(fmt.Sprintf("%s:%d", site.Path, site.Line), uir.StyleDim)
+	}
+	if accesses && site.Text != "" {
+		label = label.Space().Append(site.Text, uir.StyleComment)
 	}
 	return label
 }
