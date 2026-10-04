@@ -82,6 +82,47 @@ var _ = Describe("Graph.Pretty", func() {
 		}))
 	})
 
+	It("labels read and write edges with their access and kind, and names what the first site reads or writes", func() {
+		rule := graph.Node{ID: "rule", Kind: "copybook", Label: "Settle", Group: "Plan"}
+		policy := graph.Node{ID: "table:AsPolicy", Kind: "db-table", Label: "AsPolicy", Group: "Database", Depth: 1}
+		log := graph.Node{ID: "table:AsPolicyLog", Kind: "db-table", Label: "AsPolicyLog", Group: "Database", Depth: 1}
+		status := graph.Node{ID: "field:Policy.Status", Kind: "field", Label: "Status", Group: "Plan", Depth: 1}
+		update := graph.Node{ID: "procedure:Update", Kind: "procedure", Label: "Update", Group: "Database", Depth: 1}
+		read := edgeOf(rule, policy, uir.RelationshipTypeRead,
+			graph.Site{Path: "rule", Line: 4, Text: "SELECT STATUSCODE FROM AsPolicy WHERE POLICYGUID = @p1"}, graph.Site{Path: "rule", Line: 9, Text: "MathVariable"})
+		read.Kind = "sql"
+		write := edgeOf(rule, log, uir.RelationshipTypeWrite, graph.Site{Path: "rule", Line: 6, Guards: []string{"rush"}, Text: "INSERT INTO AsPolicyLog (PolicyGUID) VALUES (@p1)"})
+		write.Kind = "sql"
+		copyTo := edgeOf(rule, status, uir.RelationshipTypeWrite, graph.Site{Path: "rule", Line: 7, Text: "CopyToPolicyFields"})
+		copyTo.Kind = "copyto, mathupdate"
+		exec := edgeOf(rule, update, uir.RelationshipTypeCall, graph.Site{Path: "rule", Line: 8, Text: "Query"})
+		exec.Kind = "exec"
+		g := graph.Graph{Roots: []string{rule.ID}, Nodes: []graph.Node{rule, policy, log, status, update}, Edges: []graph.Edge{read, write, copyTo, exec}}
+
+		Expect(treeLines(g.Pretty())).To(Equal([]string{
+			"Settle Plan",
+			"╰── callees",
+			"    ├── → reads sql AsPolicy Database ×2 rule:4 SELECT STATUSCODE FROM AsPolicy WHERE POLICYGUID = @p1",
+			"    ├── → writes sql AsPolicyLog Database [rush] rule:6 INSERT INTO AsPolicyLog (PolicyGUID) VALUES (@p1)",
+			"    ├── → writes copyto, mathupdate Status rule:7 CopyToPolicyFields",
+			"    ╰── Update Database rule:8",
+		}))
+	})
+
+	It("draws a read or write edge with no sites by its access and kind alone", func() {
+		rule := graph.Node{ID: "rule", Kind: "copybook", Label: "Settle"}
+		policy := graph.Node{ID: "table:AsPolicy", Kind: "db-table", Label: "AsPolicy", Depth: -1}
+		read := edgeOf(policy, rule, uir.RelationshipTypeRead)
+		read.Kind = "sql"
+		g := graph.Graph{Roots: []string{rule.ID}, Nodes: []graph.Node{rule, policy}, Edges: []graph.Edge{read}}
+
+		Expect(treeLines(g.Pretty())).To(Equal([]string{
+			"Settle",
+			"╰── callers",
+			"    ╰── → reads sql AsPolicy",
+		}))
+	})
+
 	It("says so when the graph has no root", func() {
 		Expect(treeLines(graph.Graph{}.Pretty())).To(Equal([]string{"no call graph"}))
 	})
