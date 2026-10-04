@@ -13,7 +13,7 @@ const PAGE_SIZE = 100;
 
 const reasonTones: Record<SnapshotReason, BadgeTone> = {
   unknown: "neutral", add: "success", reindex: "info", refactor: "warning",
-  "local-dependency": "neutral", "versioned-dependency": "neutral", historical: "info", "dependency-cycle": "neutral",
+  "local-dependency": "neutral", "versioned-dependency": "neutral", historical: "info", "dependency-cycle": "neutral", import: "success",
 };
 
 type Props = { snapshots: Load<Page<ModuleSnapshot>>; route: Route; onRoute: (patch: Partial<Route>) => void };

@@ -1,7 +1,9 @@
 import type { Monaco } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import { suggestModuleSymbols, suggestTypedSelectors } from "./api";
-import { queryCompletionContext, querySyntaxCompletions } from "./query-completion";
+import {
+  entityField, queryCompletionContext, querySyntaxCompletions, quoteQuerySymbol, quotedValue, selectorKinds, unquoteQueryValue,
+} from "./query-completion";
 
 export const queryLanguageId = "uir-query";
 type Scope = { root: string; snapshot: string } | null;
@@ -13,7 +15,9 @@ export function registerQueryLanguage(monaco: Monaco): void {
     tokenizer: { root: [
       [/\s+/, "white"],
       [/<<[1-8]?|>>[1-8]?|[<>=&|]/, "operator"],
-      [/[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):/, "keyword"],
+      [new RegExp(`[+-]?(?:${selectorKinds}):`), "keyword"],
+      [new RegExp(entityField), "type"],
+      [new RegExp(quotedValue), "string"],
       [/:impl|:inherits|:methods|~w|[+-]pkg|-f/, "keyword"],
       [/[()]/, "delimiter.parenthesis"],
       [/[A-Za-z_*?][A-Za-z0-9_./*?@#$!\-]*/, "identifier"],
@@ -85,7 +89,7 @@ export function queryCompletionProvider(monaco: Monaco, options: {
           kind: monaco.languages.CompletionItemKind.Operator, range,
         }))] };
       }
-	  if (/^(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path)$/.test(context.prefix)) {
+	  if (new RegExp(`^(?:${selectorKinds})$`).test(context.prefix)) {
 	    return { suggestions: querySyntaxCompletions(context).map((option) => ({
 	      label: option.label, insertText: option.insert, detail: option.help, documentation: option.help,
 	      kind: monaco.languages.CompletionItemKind.Operator, range,
@@ -100,7 +104,7 @@ export function queryCompletionProvider(monaco: Monaco, options: {
       const controller = new AbortController();
       const subscription = cancellation.onCancellationRequested(() => controller.abort());
       try {
-        const symbols = await suggestModuleSymbols(context.prefix, selected.root, selected.snapshot, controller.signal);
+        const symbols = await suggestModuleSymbols(unquoteQueryValue(context.prefix), selected.root, selected.snapshot, controller.signal);
         reportError("");
         if (cancellation.isCancellationRequested) return { suggestions: [] };
         return { suggestions: symbols.map((symbol) => ({
@@ -110,7 +114,7 @@ export function queryCompletionProvider(monaco: Monaco, options: {
               : symbol.query_name.slice(symbol.query_name.lastIndexOf("/") + 1),
             description: symbol.package_path,
           },
-          insertText: `${symbol.query_name} `, filterText: `${context.prefix} ${symbol.query_name}`,
+          insertText: `${quoteQuerySymbol(symbol.query_name)} `, filterText: `${context.prefix} ${symbol.query_name}`,
           detail: symbol.kind, documentation: symbol.query_name,
           kind: monaco.languages.CompletionItemKind.Reference, range,
           command: { id: "editor.action.triggerSuggest", title: "Suggest next query token" },

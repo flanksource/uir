@@ -74,6 +74,28 @@ describe("query Monaco completion", () => {
     expect(suggestTypedSelectors).toHaveBeenCalledWith("pkg:example.org/shop:st", "example.org/shop", "snapshot-1", expect.any(AbortSignal));
   });
 
+  it("requests a quoted symbol by its literal text and inserts it quoted", async () => {
+    vi.mocked(suggestModuleSymbols).mockResolvedValue([{
+      id: "symbol-3", module_key: "Acme Regional/Group Life", package_path: "Acme Regional/Group Life/GL",
+      kind: "oipa.rule", name: "Add Rider", query_name: "Acme Regional/Group Life/GL.Add Rider",
+      visibility: "exported", parameter_types: [],
+    }]);
+    const { result } = complete('main.* >> "Add Ri');
+    const suggestions = (await result)?.suggestions ?? [];
+    expect(suggestModuleSymbols).toHaveBeenCalledWith("Add Ri", "example.org/shop", "snapshot-1", expect.any(AbortSignal));
+    expect(suggestions).toEqual([expect.objectContaining({
+      label: { label: "Add Rider", description: "Acme Regional/Group Life/GL" },
+      insertText: '"Acme Regional/Group Life/GL.Add Rider" ',
+    })]);
+  });
+
+  it("completes an Entity:Field reference through the selector suggestions", async () => {
+    vi.mocked(suggestTypedSelectors).mockResolvedValue(["Plan:PlanField1"]);
+    const { result } = complete("func:Touch > Plan:Pl");
+    expect((await result)?.suggestions).toContainEqual(expect.objectContaining({ label: "Plan:PlanField1", insertText: "Plan:PlanField1 " }));
+    expect(suggestTypedSelectors).toHaveBeenCalledWith("Plan:Pl", "example.org/shop", "snapshot-1", expect.any(AbortSignal));
+  });
+
   it("does not offer completions for another expression editor's model", async () => {
     const { result } = complete("store.Store.Save ");
     expect((await result)?.suggestions.length).toBeGreaterThan(0);

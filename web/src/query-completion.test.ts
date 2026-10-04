@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { queryCompletionContext, querySyntaxCompletions } from "./query-completion";
+import { queryCompletionContext, querySyntaxCompletions, quoteQuerySymbol, unquoteQueryValue } from "./query-completion";
 
 describe("query completion", () => {
   it.each([
@@ -27,8 +27,43 @@ describe("query completion", () => {
     ["func:Run +pkg:example.org/shop:app", "selector", "+pkg:example.org/shop:app"],
     ["type:Base :inherits ", "filter", ""],
     ["method:Save +path:example.org/shop/store/**", "selector", "+path:example.org/shop/store/**"],
+    ["kind:oipa.rule:Rate*", "selector", "kind:oipa.rule:Rate*"],
+    ["kind:foreign_key ", "relation", ""],
+    ["func:Run -kind:oipa.rule", "selector", "-kind:oipa.rule"],
+    ['mod:"Acme Regional/Gr', "selector", 'mod:"Acme Regional/Gr'],
+    ['func:Run < mod:"Acme Regional/Group Life" ', "relation", ""],
+    ['kind:oipa.rule:"CopyBook-Cyc', "selector", 'kind:oipa.rule:"CopyBook-Cyc'],
+    ['"Add Ri', "symbol", '"Add Ri'],
+    ['"Add Rider" ', "relation", ""],
+    ['main.* >> "Premium Calc (Ann', "symbol", '"Premium Calc (Ann'],
+    ["Plan:Pl", "selector", "Plan:Pl"],
+    ['Plan:"Field With', "selector", 'Plan:"Field With'],
+    ['"type":Co', "selector", '"type":Co'],
+    ["pkgx:Fi", "selector", "pkgx:Fi"],
+    ["Plan:PlanField1 ", "relation", ""],
+    ["Plan:PlanField1 ~w ", "filter", ""],
+    ["func:Save < Plan:Pl", "selector", "Plan:Pl"],
+    ["Thing :i", "relation", ":i"],
   ] as const)("classifies %s at the caret", (draft, mode, prefix) => {
     expect(queryCompletionContext(draft, draft.length)).toMatchObject({ mode, prefix });
+  });
+
+  it.each([
+    ['"Add Ri', "Add Ri"],
+    ['"Add Rider"', "Add Rider"],
+    ['"Say \\"Hi\\" \\\\ now"', 'Say "Hi" \\ now'],
+    ["store.Save", "store.Save"],
+  ])("reads the literal text of %s", (value, literal) => {
+    expect(unquoteQueryValue(value)).toBe(literal);
+  });
+
+  it.each([
+    ["example.org/shop/store.Store.Save", "example.org/shop/store.Store.Save"],
+    ["Acme Regional/Group Life/GL.Add Rider", '"Acme Regional/Group Life/GL.Add Rider"'],
+    ["Co/Prod.CopyBook-CycleA", "Co/Prod.CopyBook-CycleA"],
+    ['Co/Prod.Say "Hi" *now*', '"Co/Prod.Say \\"Hi\\" \\*now\\*"'],
+  ])("spells %s as a symbol that matches exactly it", (name, spelled) => {
+    expect(quoteQuerySymbol(name)).toBe(spelled);
   });
 
   it("offers every valid next operator after a symbol", () => {
@@ -60,6 +95,6 @@ describe("query completion", () => {
 
   it("offers typed selectors as binary relation operands", () => {
     const options = querySyntaxCompletions(queryCompletionContext("func:Save < ", 12));
-    expect(options.map((option) => option.label)).toEqual(expect.arrayContaining(["pkg:", "mod:", "func:", "field:", "struct:"]));
+    expect(options.map((option) => option.label)).toEqual(expect.arrayContaining(["pkg:", "mod:", "func:", "field:", "struct:", "kind:"]));
   });
 });
