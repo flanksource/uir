@@ -15,6 +15,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Task
+        uses: go-task/setup-task@v2
+        with:
+          version: "3.50.0"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -73,6 +78,61 @@ jobs:
       - name: Test Python UIR model
         run: python3 python/test_uir.py
 
+  bindings:
+    name: Bindings (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [typescript, python, java]
+    env:
+      GOWORK: "off"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Task
+        uses: go-task/setup-task@v2
+        with:
+          version: "3.50.0"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up pnpm
+        if: matrix.language == 'typescript'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        if: matrix.language == 'typescript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up uv and Python
+        if: matrix.language == 'python'
+        uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.10"
+          enable-cache: true
+          cache-dependency-glob: |
+            Taskfile.yml
+            bindings/python/pyproject.toml
+
+      - name: Set up Java
+        if: matrix.language == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Generate and validate bindings
+        run: task "bindings:${{ matrix.language }}:check"
+
   image:
     runs-on: ubuntu-latest
     steps:
@@ -97,7 +157,7 @@ jobs:
         run: test "$(docker run --rm uir:ci --version)" = "uir version ci"
 
   release:
-    needs: [go, python, image]
+    needs: [go, python, bindings, image]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     permissions:
       contents: write

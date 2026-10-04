@@ -36,6 +36,11 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      - name: Set up Task
+        uses: go-task/setup-task@v2
+        with:
+          version: "3.50.0"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
