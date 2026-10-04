@@ -57,6 +57,13 @@ table "symbols" {
     on_update   = NO_ACTION
     on_delete   = NO_ACTION
   }
+  // A symbol's kind is a builtin or a custom kind registered in symbol_kinds (10_symbol_kinds.hcl).
+  foreign_key "symbols_kind_fkey" {
+    columns     = [column.kind]
+    ref_columns = [table.symbol_kinds.column.name]
+    on_update   = NO_ACTION
+    on_delete   = NO_ACTION
+  }
   unique "symbols_canonical_key_key" { columns = [column.canonical_key] }
   unique "symbols_handle_key" { columns = [column.handle] }
   index "symbols_lookup_idx" { columns = [column.module_key, column.package_path, column.kind, column.owner_id, column.name] }
@@ -64,7 +71,6 @@ table "symbols" {
   check "symbols_id_check" { expr = "length(id) = 64" }
   check "symbols_handle_check" { expr = "handle >= 0" }
   check "symbols_identity_version_check" { expr = "identity_version >= 1" }
-  check "symbols_kind_check" { expr = "kind IN ('package', 'type', 'func', 'method', 'field', 'var', 'const', 'builtin')" }
   check "symbols_visibility_check" { expr = "visibility IN ('exported', 'internal')" }
   check "symbols_name_check" { expr = "length(name) > 0" }
   check "symbols_canonical_key_check" { expr = "length(canonical_key) > 0" }
@@ -153,7 +159,7 @@ table "documents" {
 }
 
 // symbol_postings keys every row by compact surrogates: the document's ordinal, the root's ordinal as
-// the discriminator a reference lookup filters on, the symbol's H64a handle, and the role as 0
+// the discriminator a reference lookup filters on, the symbol's H64b handle, and the role as 0
 // (definition), 1 (reference), or 2 (implements).
 table "symbol_postings" {
   schema = schema.public

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
 // DocumentFormatVersion is the version of DocumentContent written to documents.content.
@@ -85,14 +86,29 @@ type DocumentDiagnostic struct {
 	Message string `json:"message"`
 }
 
-var (
-	documentSymbolKinds = map[string]bool{"package": true, "type": true, "func": true, "method": true, "field": true, "var": true, "const": true, "builtin": true}
-	visibilities        = map[string]bool{"exported": true, "internal": true}
-)
+var visibilities = map[string]bool{"exported": true, "internal": true}
+
+// decodeOptions are the registries a document is validated against.
+type decodeOptions struct {
+	kinds symbolhandle.Kinds
+}
+
+// DecodeOption configures DecodeDocument.
+type DecodeOption func(*decodeOptions)
+
+// WithKinds validates symbol kinds against a database's registry (LoadSymbolKinds), so a document may
+// declare that database's custom kinds. Without it only the builtin kinds are valid.
+func WithKinds(kinds symbolhandle.Kinds) DecodeOption {
+	return func(options *decodeOptions) { options.kinds = kinds }
+}
 
 // DecodeDocument decodes and validates a document against the source revision it describes, by the
 // rules of its coverage: syntax, typed (indexed or partial), or excluded.
-func DecodeDocument(document Document, source SourceRevision) (DocumentContent, error) {
+func DecodeDocument(document Document, source SourceRevision, options ...DecodeOption) (DocumentContent, error) {
+	decode := decodeOptions{kinds: symbolhandle.Builtins()}
+	for _, option := range options {
+		option(&decode)
+	}
 	subject := fmt.Sprintf("document %s for %q", document.ID, document.PathKey)
 	switch {
 	case document.RootID != source.RootID || document.PathKey != source.PathKey || document.SourceRevisionID != source.ID:
@@ -108,13 +124,13 @@ func DecodeDocument(document Document, source SourceRevision) (DocumentContent, 
 	if err := decoder.Decode(&content); err != nil {
 		return DocumentContent{}, fmt.Errorf("decode %s: %w", subject, err)
 	}
-	if err := validateDocumentContent(document, content); err != nil {
+	if err := validateDocumentContent(document, content, decode.kinds); err != nil {
 		return DocumentContent{}, fmt.Errorf("%s: %w", subject, err)
 	}
 	return content, nil
 }
 
-func validateDocumentContent(document Document, content DocumentContent) error {
+func validateDocumentContent(document Document, content DocumentContent, kinds symbolhandle.Kinds) error {
 	switch {
 	case content.Version < 1 || content.Version > DocumentFormatVersion:
 		return fmt.Errorf("format version %d, expected 1 through %d", content.Version, DocumentFormatVersion)
@@ -136,9 +152,9 @@ func validateDocumentContent(document Document, content DocumentContent) error {
 	}
 	switch document.Coverage {
 	case CoverageSyntax:
-		return validateSyntaxContent(content)
+		return validateSyntaxContent(content, kinds)
 	case CoverageIndexed, CoveragePartial:
-		return validateTypedContent(content, document.Coverage == CoveragePartial)
+		return validateTypedContent(content, document.Coverage == CoveragePartial, kinds)
 	case CoverageExcluded:
 		if len(content.Symbols) > 0 || len(content.Occurrences) > 0 {
 			return errors.New("an excluded document has no symbols or occurrences")
@@ -148,31 +164,35 @@ func validateDocumentContent(document Document, content DocumentContent) error {
 	return fmt.Errorf("unknown coverage %q", document.Coverage)
 }
 
-func validateSyntaxContent(content DocumentContent) error {
+func validateSyntaxContent(content DocumentContent, kinds symbolhandle.Kinds) error {
 	for index, symbol := range content.Symbols {
 		if symbol.ID != nil || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || len(symbol.Embeds) > 0 || symbol.TypeForm != "" {
 			return fmt.Errorf("symbol %d (%s): a syntax symbol has no id, shape_hash, or implements", index, symbol.Key)
 		}
 	}
-	keys, err := validateSymbolEntries(content.Symbols)
+	keys, err := validateSymbolEntries(content.Symbols, kinds)
 	if err != nil {
 		return err
 	}
 	return validateSyntaxOccurrences(content.Occurrences, keys)
 }
 
-// validateSymbolEntries checks what every symbol entry shares: key, kind, visibility, shape, body
-// hash, ranges, and extents sorted by start and overlapping only by nesting. It returns the keys.
-func validateSymbolEntries(symbols []DocumentSymbol) (map[string]bool, error) {
+// validateSymbolEntries checks what every symbol entry shares: key, a registered kind, visibility,
+// shape, body hash, ranges, and extents sorted by start and overlapping only by nesting. It returns the
+// keys.
+func validateSymbolEntries(symbols []DocumentSymbol, kinds symbolhandle.Kinds) (map[string]bool, error) {
 	keys := make(map[string]bool, len(symbols))
 	var open []ByteSpan
 	for index, symbol := range symbols {
 		subject := fmt.Sprintf("symbol %d (%s)", index, symbol.Key)
+		if _, err := kinds.Lookup(symbol.Kind); err != nil {
+			return nil, fmt.Errorf("%s: %w", subject, err)
+		}
 		switch {
 		case symbol.Key == "" || symbol.Key != symbol.Identifier.IdentityKey():
 			return nil, fmt.Errorf("%s: key does not match identifier key %q", subject, symbol.Identifier.IdentityKey())
-		case !documentSymbolKinds[symbol.Kind] || !visibilities[symbol.Visibility]:
-			return nil, fmt.Errorf("%s: invalid kind %q or visibility %q", subject, symbol.Kind, symbol.Visibility)
+		case !visibilities[symbol.Visibility]:
+			return nil, fmt.Errorf("%s: invalid visibility %q", subject, symbol.Visibility)
 		case len(symbol.BodyHash) != 64 || symbol.Shape == "":
 			return nil, fmt.Errorf("%s: shape and a 64-character body_hash are required", subject)
 		}

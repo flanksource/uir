@@ -1,4 +1,4 @@
-// symbol_modules numbers the module keys that H64a handles pack into their 11-bit module field. The
+// symbol_modules numbers the module keys that H64b handles pack into their 11-bit module field. The
 // empty key (builtins) is always 0 and "std" is always 1; every other key is allocated from 2.
 table "symbol_modules" {
   schema = schema.public
