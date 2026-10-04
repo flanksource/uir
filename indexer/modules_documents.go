@@ -68,7 +68,38 @@ type pendingDocument struct {
 // document another writer inserted are never written twice. It returns the handle of every symbol the
 // new documents name.
 func publishDocuments(ctx context.Context, database *gorm.DB, publication snapshotPublication, current map[string]storage.SourceRevision, result *ModuleResult) (map[string]int64, error) {
+	pending, err := pendingDocuments(ctx, database, publication, current, result)
+	if err != nil {
+		return nil, err
+	}
+	handles, err := ensureSymbols(ctx, database, publication.extraction.symbols, pending)
+	if err != nil {
+		return nil, err
+	}
+	if err := assignDocumentOrdinals(ctx, database, pending); err != nil {
+		return nil, err
+	}
+	for _, next := range pending {
+		if err := publishDocument(ctx, database, next, publication.root.Ordinal, handles); err != nil {
+			return nil, err
+		}
+		result.ParsedFiles++
+	}
+	return handles, nil
+}
+
+// pendingDocuments validates every file's document against its revision and the database's kind
+// registry, and returns the ones the publication must insert, or verify under force, counting the rest
+// as reused.
+func pendingDocuments(ctx context.Context, database *gorm.DB, publication snapshotPublication, current map[string]storage.SourceRevision, result *ModuleResult) ([]pendingDocument, error) {
 	extraction := publication.extraction
+	if extraction.indexerVersion == "" {
+		return nil, fmt.Errorf("publish module %q: extraction names no indexer version", extraction.root.RootKey)
+	}
+	kinds, err := storage.LoadSymbolKinds(ctx, database)
+	if err != nil {
+		return nil, err
+	}
 	var pending []pendingDocument
 	for _, file := range extraction.root.Files {
 		extracted, found := extraction.documents[file.PathKey]
@@ -78,11 +109,11 @@ func publishDocuments(ctx context.Context, database *gorm.DB, publication snapsh
 		revision := current[file.PathKey]
 		document := storage.Document{
 			ID: uuid.New(), RootID: revision.RootID, PathKey: file.PathKey, SourceRevisionID: revision.ID,
-			PackagePath: file.PackagePath, InputHash: extracted.inputHash, IndexerVersion: IndexerVersion,
+			PackagePath: file.PackagePath, InputHash: extracted.inputHash, IndexerVersion: extraction.indexerVersion,
 			Coverage: extracted.coverage, SymbolCount: extracted.symbolCount, OccurrenceCount: extracted.occurrenceCount,
 			Content: extracted.content,
 		}
-		if _, err := storage.DecodeDocument(document, revision); err != nil {
+		if _, err := storage.DecodeDocument(document, revision, storage.WithKinds(kinds)); err != nil {
 			return nil, fmt.Errorf("validate extracted document: %w", err)
 		}
 		existing, found, err := loadDocument(ctx, database, revision.RootID, file.PathKey, extracted.inputHash)
@@ -101,20 +132,7 @@ func publishDocuments(ctx context.Context, database *gorm.DB, publication snapsh
 			result.ReusedFiles++
 		}
 	}
-	handles, err := ensureSymbols(ctx, database, extraction.symbols, pending)
-	if err != nil {
-		return nil, err
-	}
-	if err := assignDocumentOrdinals(ctx, database, pending); err != nil {
-		return nil, err
-	}
-	for _, next := range pending {
-		if err := publishDocument(ctx, database, next, publication.root.Ordinal, handles); err != nil {
-			return nil, err
-		}
-		result.ParsedFiles++
-	}
-	return handles, nil
+	return pending, nil
 }
 
 // assignDocumentOrdinals numbers the documents this publication inserts from one past the largest

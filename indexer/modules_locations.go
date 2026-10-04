@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/flanksource/uir/storage"
@@ -114,11 +113,14 @@ func parentLocation(ctx context.Context, database *gorm.DB, path string, locatio
 }
 
 func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered discoveredRoot, locations map[string]storage.ModuleLocation) (storage.ModuleRoot, storage.ModuleLocation, error) {
+	if discovered.Name == "" {
+		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("register module %q at %q: the root has no name", discovered.RootKey, discovered.LocalPath)
+	}
 	now := time.Now().UTC()
 	var root storage.ModuleRoot
 	err := database.WithContext(ctx).Where("root_key = ?", discovered.RootKey).Take(&root).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		created := storage.ModuleRoot{ID: uuid.New(), RootKey: discovered.RootKey, Name: filepath.Base(discovered.RootKey), CreatedAt: now}
+		created := storage.ModuleRoot{ID: uuid.New(), RootKey: discovered.RootKey, Name: discovered.Name, CreatedAt: now}
 		if err := storage.CreateModuleRoot(ctx, database, &created); err != nil {
 			return storage.ModuleRoot{}, storage.ModuleLocation{}, err
 		}
@@ -126,6 +128,9 @@ func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered dis
 	}
 	if err != nil {
 		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("load module root: %w", err)
+	}
+	if err := requireLocationFamily(ctx, database, root, discovered); err != nil {
+		return storage.ModuleRoot{}, storage.ModuleLocation{}, err
 	}
 	location := storage.ModuleLocation{
 		ID: uuid.New(), RootID: root.ID, CanonicalPath: discovered.LocalPath,
@@ -153,4 +158,22 @@ func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered dis
 		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("set primary module location: %w", err)
 	}
 	return root, location, nil
+}
+
+// requireLocationFamily refuses to mix producers in one root: a root indexed from Go checkouts cannot
+// take an external location, and a root an external producer publishes cannot take a Go checkout, since
+// queries read one root's primary head and reindex refreshes only Go checkouts.
+func requireLocationFamily(ctx context.Context, database *gorm.DB, root storage.ModuleRoot, discovered discoveredRoot) error {
+	var registered []storage.ModuleLocation
+	if err := database.WithContext(ctx).Select("canonical_path", "kind").Where("root_id = ?", root.ID).Find(&registered).Error; err != nil {
+		return fmt.Errorf("load the locations of root %q: %w", root.RootKey, err)
+	}
+	external := discovered.Kind == storage.LocationExternal
+	for _, location := range registered {
+		if (location.Kind == storage.LocationExternal) != external {
+			return fmt.Errorf("root %q has a %s location %q; it cannot also take the %s location %q",
+				root.RootKey, location.Kind, location.CanonicalPath, discovered.Kind, discovered.LocalPath)
+		}
+	}
+	return nil
 }

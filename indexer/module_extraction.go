@@ -16,9 +16,12 @@ import (
 
 // moduleExtraction is everything publication writes for one root, computed before any transaction.
 // reusedHead is set instead of the extracted facts when the root's head snapshot is reusable.
+// indexerVersion is what produced the documents: IndexerVersion for Go, ExternalIndexerVersion for a
+// publication.
 type moduleExtraction struct {
 	root           discoveredRoot
 	reusedHead     uuid.UUID
+	indexerVersion string
 	indexStartedAt time.Time
 	contextHash    string
 	packages       []extractedPackage
@@ -81,7 +84,7 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 	for _, file := range root.Files {
 		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
 	}
-	extraction := moduleExtraction{root: root, indexStartedAt: startedAt, documents: map[string]extractedDocument{}}
+	extraction := moduleExtraction{root: root, indexerVersion: IndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{}}
 	inputHashes := map[string]string{}
 	var coverages []storage.Coverage
 	for _, packagePath := range sortedKeys(grouped) {
@@ -232,11 +235,11 @@ func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.S
 		if symbol.ID == nil {
 			continue
 		}
-		if row := rows[*symbol.ID]; row.Kind != symbol.Kind || row.Visibility != symbol.Visibility {
-			return nil, nil, fmt.Errorf("symbol %s is a %s %s entry but a %s %s row", *symbol.ID, symbol.Visibility, symbol.Kind, row.Visibility, row.Kind)
-		}
 		if err := count(*symbol.ID, storage.RoleDefinition); err != nil {
 			return nil, nil, err
+		}
+		if row := rows[*symbol.ID]; row.Kind != symbol.Kind || row.Visibility != symbol.Visibility {
+			return nil, nil, fmt.Errorf("symbol %s is a %s %s entry but a %s %s row", *symbol.ID, symbol.Visibility, symbol.Kind, row.Visibility, row.Kind)
 		}
 		for _, implemented := range symbol.Implements {
 			if err := count(implemented, storage.RoleImplements); err != nil {
