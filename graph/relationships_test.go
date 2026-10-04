@@ -56,7 +56,7 @@ var _ = Describe("FromRelationships", func() {
 	)
 	relationships := func() []uir.UIRRelationship {
 		guarded := uir.NewRelationship(uir.RelationshipTypeCall, run.AsRef(), save.AsRef()).
-			Source("a.go", 7, 7).Text("b.save(order)").Build()
+			Source("a.go", 7, 7).Text("b.save(order)").Kind("method-call").Via("CallExpr").Build()
 		guarded.Column = new(3)
 		guarded.Guards = []uir.ConditionStmt{
 			uir.NewCondition(uir.VarExpr("ok")),
@@ -99,7 +99,7 @@ var _ = Describe("FromRelationships", func() {
 		}))
 	})
 
-	It("carries each call site's location, text and guard text", func() {
+	It("carries each call site's kind, location, text and guard text", func() {
 		g := build(source(relationships()), graph.DirectionCallees, 1, run.IdentityKey())
 
 		Expect(g.Edges[0]).To(Equal(graph.Edge{
@@ -107,6 +107,7 @@ var _ = Describe("FromRelationships", func() {
 			From: run.IdentityKey(),
 			To:   save.IdentityKey(),
 			Type: uir.RelationshipTypeCall,
+			Kind: "method-call",
 			Sites: []graph.Site{{
 				Path: "a.go", Line: 7, Column: 3, Text: "b.save(order)", Guards: []string{"ok", "!done"},
 			}},
@@ -131,21 +132,51 @@ var _ = Describe("FromRelationships", func() {
 		Expect(g.Omitted).To(Equal(graph.Omitted{Unresolved: 1}))
 	})
 
-	It("ignores relationships that are not calls, even ones with no source", func() {
-		policy := uir.NewRef(uir.Identifier{Type: "AsPolicy", NodeType: uir.NodeTypeRecord})
+	It("ignores relationships that are not calls or data access, even ones with no source", func() {
 		rels := append(relationships(),
-			uir.NewRelationship(uir.RelationshipTypeRead, run.AsRef(), policy).Build(),
-			uir.NewRelationship(uir.RelationshipTypeWrite, nil, policy).Build(),
 			uir.NewRelationship(uir.RelationshipTypeImport, run.AsRef(), save.AsRef()).Build(),
+			uir.NewRelationship(uir.RelationshipTypeImplements, nil, save.AsRef()).Build(),
 		)
-		src := source(rels)
 
-		Expect(build(src, graph.DirectionBoth, 2, run.IdentityKey())).To(Equal(build(source(relationships()), graph.DirectionBoth, 2, run.IdentityKey())))
-		_, err := src.Describe(context.Background(), policy.GetIdentifier().IdentityKey())
-		Expect(err).To(MatchError(ContainSubstring("no call or dispatch relationship names")))
+		Expect(build(source(rels), graph.DirectionBoth, 2, run.IdentityKey())).To(Equal(build(source(relationships()), graph.DirectionBoth, 2, run.IdentityKey())))
 	})
 
-	DescribeTable("rejects a call or dispatch relationship with a missing end",
+	Describe("data access", func() {
+		policy := uir.Identifier{Type: "AsPolicy", NodeType: uir.NodeTypeRecord}
+		withData := func() []uir.UIRRelationship {
+			return append(relationships(),
+				uir.NewRelationship(uir.RelationshipTypeRead, run.AsRef(), policy.AsRef()).Build(),
+				uir.NewRelationship(uir.RelationshipTypeWrite, save.AsRef(), policy.AsRef()).Build(),
+			)
+		}
+		accessShape := func(access ...uir.RelationshipType) named {
+			GinkgoHelper()
+			opts := graph.Options{Direction: graph.DirectionCallers, Depth: 1, Limit: graph.DefaultLimit, Access: access}
+			return namedShape(buildWith(source(withData()), opts, policy.IdentityKey()))
+		}
+
+		It("draws reads and writes as edges to what they access", func() {
+			Expect(accessShape()).To(Equal(named{
+				Nodes: []string{"A:run@-1", "B:save@-1", "AsPolicy@0"},
+				// The call between the two readers is drawn back from the depth bound.
+				Edges: []string{"A:run>B:save call", "A:run>AsPolicy read", "B:save>AsPolicy write"},
+			}))
+		})
+
+		It("leaves out the access types Options.Access does not follow", func() {
+			Expect(accessShape(uir.RelationshipTypeWrite)).To(Equal(named{
+				Nodes: []string{"B:save@-1", "AsPolicy@0"},
+				Edges: []string{"B:save>AsPolicy write"},
+			}))
+		})
+
+		It("draws only the calls when Options.Access follows only calls", func() {
+			opts := graph.Options{Direction: graph.DirectionCallees, Depth: 2, Limit: graph.DefaultLimit, Access: []uir.RelationshipType{uir.RelationshipTypeCall}}
+			Expect(buildWith(source(withData()), opts, run.IdentityKey())).To(Equal(build(source(relationships()), graph.DirectionCallees, 2, run.IdentityKey())))
+		})
+	})
+
+	DescribeTable("rejects a call, dispatch, read or write relationship with a missing end",
 		func(relType uir.RelationshipType, from, to uir.Node, want string) {
 			rels := append(relationships(), uir.NewRelationship(relType, from, to).Source("a.go", 9, 9).Build())
 			_, err := graph.FromRelationships(rels, describeByType)
@@ -154,6 +185,8 @@ var _ = Describe("FromRelationships", func() {
 		Entry("a call with no source", uir.RelationshipTypeCall, nil, methodRef("B", "save"), "relationships[3]: call to B:save at a.go:9 has no source"),
 		Entry("a dispatch with no source", uir.RelationshipTypeDispatch, nil, methodRef("B", "save"), "relationships[3]: dispatch to B:save at a.go:9 has no source"),
 		Entry("a call with no target", uir.RelationshipTypeCall, methodRef("A", "run"), nil, "relationships[3]: call from A:run at a.go:9 has no target"),
+		Entry("a write with no source", uir.RelationshipTypeWrite, nil, methodRef("B", "save"), "relationships[3]: write to B:save at a.go:9 has no source"),
+		Entry("a read with no target", uir.RelationshipTypeRead, methodRef("A", "run"), nil, "relationships[3]: read from A:run at a.go:9 has no target"),
 	)
 
 	It("rejects a missing describe", func() {

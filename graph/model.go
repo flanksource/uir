@@ -1,7 +1,8 @@
-// Package graph builds a bounded, cycle-safe nodes-and-edges graph of calls from
-// any Source of neighbours: the UIR relationships of a lowered body
-// (FromRelationships) or an index. It knows nothing about a language; a Theme
-// renames and restyles what a Source reports.
+// Package graph builds a bounded, cycle-safe nodes-and-edges graph of calls and
+// data access from any Source of neighbours: the UIR relationships of a lowered
+// body (FromRelationships), references resolved by name (FromResolver) or an
+// index. It knows nothing about a language; a Theme renames and restyles what a
+// Source reports.
 package graph
 
 import (
@@ -44,7 +45,8 @@ type Node struct {
 	// a node at depth <= 0 when callers are walked. In the direction Build did not
 	// ask about, and for an unresolved node, which is never asked, the count is
 	// the edges drawn, so it may be short of the Source's total. Edges a Theme
-	// drops and edges to nodes Options.Exclude leaves out are not counted.
+	// drops, edges of a type Options.Access does not follow and edges to nodes
+	// Options.Exclude leaves out are not counted.
 	In  int `json:"in"`
 	Out int `json:"out"`
 	// Unresolved marks a target the Source could not place; it is drawn as a leaf.
@@ -73,7 +75,10 @@ type Edge struct {
 	ID   string `json:"id"`
 	From string `json:"from"`
 	To   string `json:"to"`
-	// Type is uir.RelationshipTypeCall or uir.RelationshipTypeDispatch.
+	// Type is the relationship the edge draws: uir.RelationshipTypeCall,
+	// RelationshipTypeDispatch for a call reaching one implementation,
+	// RelationshipTypeRead or RelationshipTypeWrite for data access, or any
+	// other type a Source reports.
 	Type uir.RelationshipType `json:"type"`
 	Kind string               `json:"kind,omitempty"`
 	// Sites are the call sites behind the edge, ordered by path, line and column.
@@ -165,4 +170,8 @@ type Options struct {
 	// node already in the graph are never excluded. A nil Exclude keeps every
 	// node.
 	Exclude func(Node) bool
+	// Access lists the edge types Build follows, as Follows reads it: a step of
+	// any other type is not drawn, counted in In or Out, or walked. Empty
+	// follows every type a Source reports.
+	Access []uir.RelationshipType
 }
