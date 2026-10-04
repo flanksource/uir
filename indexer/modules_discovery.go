@@ -88,7 +88,7 @@ func locateModuleRoots(path string) ([]discoveredRoot, error) {
 		if module.Module == nil || strings.TrimSpace(module.Module.Mod.Path) == "" {
 			return fmt.Errorf("%s has no module path", modPath)
 		}
-		root := discoveredRoot{RootKey: module.Module.Mod.Path, LocalPath: current, Kind: "module"}
+		root := discoveredRoot{RootKey: module.Module.Mod.Path, Name: filepath.Base(module.Module.Mod.Path), LocalPath: current, Kind: "module"}
 		if isGitRoot(current) {
 			root.Kind = "git"
 		}

@@ -52,10 +52,10 @@ var _ = Describe("typed extraction", func() {
 			}
 
 			add := findSymbol(database, moneyPackage, "func", "Add")
-			Expect(add.CanonicalKey).To(Equal(symbolIdentity{
+			Expect(add.CanonicalKey).To(Equal(Identity{
 				ModuleKey: ledgerModule, PackagePath: moneyPackage, Kind: "func", Name: "Add",
 				ParameterTypes: []string{moneyPackage + ".Amount", moneyPackage + ".Amount"},
-			}.canonicalKey()))
+			}.CanonicalKey()))
 			Expect(add.ParameterTypes).To(MatchJSON(`["example.org/ledger/money.Amount","example.org/ledger/money.Amount"]`))
 			addEntry := snapshot.entry("money/money.go", add.ID)
 			Expect([]string{addEntry.Kind, addEntry.Visibility, addEntry.Shape, addEntry.ShapeHash}).To(Equal([]string{
