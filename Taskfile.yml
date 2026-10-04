@@ -1,0 +1,316 @@
+version: '3'
+
+vars:
+  LOCALBIN: '{{.ROOT_DIR}}/.bin'
+  VERSION: dev
+  GOLANGCI_LINT_VERSION: v2.6.2
+  BINDINGS_OUT: '{{.ROOT_DIR}}/.tmp/bindings'
+  BINDINGS_ABSOLUTE: '{{if isAbs .BINDINGS_OUT}}{{.BINDINGS_OUT}}{{else}}{{.ROOT_DIR}}/{{.BINDINGS_OUT}}{{end}}'
+  PYTHON_GENERATOR_VERSION: 0.83.0
+  PYTHON_VERSION: '3.10'
+  TYPESCRIPT_GENERATOR_VERSION: 16.0.0
+  JAVA_GENERATOR_VERSION: 7.25.0
+  OPENAPI_GENERATOR_JAR: '{{.LOCALBIN}}/openapi-generator-cli-{{.JAVA_GENERATOR_VERSION}}.jar'
+  JAVA_GRADLE_FLAGS: ''
+  UIR_CORPUS_DSN: '{{.ROOT_DIR}}/.tmp/uir-corpus.db'
+  UIR_CORPUS_SCHEMA: ''
+  UIR_HISTORY_DSN: '{{.ROOT_DIR}}/.tmp/uir-history.db'
+  UIR_HISTORY_SCHEMA: ''
+  GAVEL_FLAGS: ''
+
+env:
+  GOWORK: '{{.GOWORK | default "auto"}}'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+
+  build:
+    desc: Build browser assets, the CLI and all Go packages
+    cmds:
+      - task: web:build
+      - task: binary
+      - go build ./...
+
+  binary:
+    desc: Link the UIR CLI using built browser assets
+    cmds:
+      - mkdir -p '{{.LOCALBIN}}'
+      - go build -ldflags '-s -w -X main.version={{.VERSION}}' -o '{{.LOCALBIN}}/uir' ./cmd/uir
+    env:
+      CGO_ENABLED: '0'
+
+  web:build:
+    desc: Build embedded browser assets
+    cmds: [pnpm --dir web run build]
+    env:
+      VITE_UIR_VERSION: '{{.VERSION}}'
+
+  install:
+    desc: Install the CLI with embedded browser assets
+    cmds:
+      - task: web:build
+      - go install -ldflags '-X main.version={{.VERSION}}' ./cmd/uir
+
+  schema:
+    desc: Generate JSON Schema, OpenAPI models and Python statement kinds from Go
+    run: once
+    cmds: [go run ./cmd/genschema]
+
+  schema:check:
+    desc: Check generated schema artifacts without rewriting them
+    run: once
+    cmds:
+      - go run ./cmd/genschema --check
+      - go test ./internal/schemagen ./cmd/genschema
+
+  bindings:
+    desc: Generate all pinned language binding previews
+    deps: [bindings:python, bindings:typescript, bindings:java]
+
+  bindings:python:
+    desc: Generate Python 3.10 standard-library dataclasses and metadata
+    deps: [schema]
+    cmds:
+      - task: bindings:python:preview
+      - cp '{{.BINDINGS_ABSOLUTE}}/python/model.py' bindings/python/src/uir/model.py
+      - cp '{{.BINDINGS_ABSOLUTE}}/python/models.json' bindings/python/src/uir/models.json
+      - cp schema/uir.schema.json bindings/python/src/uir/uir.schema.json
+
+  bindings:python:preview:
+    internal: true
+    cmds:
+      - mkdir -p '{{.BINDINGS_ABSOLUTE}}/python'
+      - >-
+        uvx --from datamodel-code-generator=={{.PYTHON_GENERATOR_VERSION}} datamodel-codegen
+        --input schema/uir.schema.json --input-file-type jsonschema
+        --output-model-type dataclasses.dataclass --target-python-version {{.PYTHON_VERSION}}
+        --disable-timestamp --enum-field-as-literal all
+        --formatters builtin --ignore-pyproject --strict-refs --no-allow-remote-refs
+        --emit-model-metadata '{{.BINDINGS_ABSOLUTE}}/python/models.json'
+        --output '{{.BINDINGS_ABSOLUTE}}/python/model.py'
+      - uv run --python {{.PYTHON_VERSION}} --no-project --no-config '{{.BINDINGS_ABSOLUTE}}/python/model.py'
+
+  bindings:typescript:
+    desc: Generate and strictly check TypeScript wire declarations
+    deps: [schema]
+    cmds:
+      - task: bindings:typescript:preview
+      - cp '{{.BINDINGS_ABSOLUTE}}/typescript/model.d.ts' bindings/typescript/model.d.ts
+      - cp schema/uir.schema.json bindings/typescript/uir.schema.json
+
+  bindings:typescript:preview:
+    internal: true
+    deps: [tools:typescript]
+    cmds:
+      - mkdir -p '{{.BINDINGS_ABSOLUTE}}/typescript/type-roots'
+      - >-
+        pnpm dlx json-schema-to-typescript@{{.TYPESCRIPT_GENERATOR_VERSION}}
+        --input schema/uir.schema.json --output '{{.BINDINGS_ABSOLUTE}}/typescript/model.d.ts'
+      - >-
+        pnpm --dir bindings/typescript exec tsc --noEmit --strict --target es2022
+        --typeRoots '{{.BINDINGS_ABSOLUTE}}/typescript/type-roots'
+        '{{.BINDINGS_ABSOLUTE}}/typescript/model.d.ts'
+
+  bindings:java:
+    desc: Generate Java Jackson model sources with discriminator mappings
+    deps: [schema]
+    cmds:
+      - task: bindings:java:preview
+
+  bindings:java:preview:
+    internal: true
+    deps: [tools:openapi]
+    cmds:
+      - >-
+        bindings/java/gradlew --project-dir bindings/java --no-daemon generateModels
+        '-PbindingOutput={{.BINDINGS_ABSOLUTE}}/java' '-PgeneratorJar={{.OPENAPI_GENERATOR_JAR}}'
+
+  bindings:typescript:check:
+    desc: Build the TypeScript SDK and verify Go to TypeScript to Go conformance
+    cmds:
+      - task: bindings:typescript:drift
+      - pnpm --dir bindings/typescript run build
+      - >-
+        pnpm --dir bindings/typescript exec tsc --noEmit --strict --target es2022
+        --module nodenext --moduleResolution nodenext
+        --typeRoots '{{.BINDINGS_ABSOLUTE}}/typescript/type-roots' consumer.ts
+      - pnpm --dir bindings/typescript test
+      - go test -tags bindings ./internal/bindings -ginkgo.focus 'TypeScript binding'
+
+  bindings:typescript:drift:
+    desc: Check generated TypeScript sources without overwriting SDK artifacts
+    cmds:
+      - task: schema:check
+      - task: bindings:typescript:preview
+      - cmp '{{.BINDINGS_ABSOLUTE}}/typescript/model.d.ts' bindings/typescript/model.d.ts
+      - cmp schema/uir.schema.json bindings/typescript/uir.schema.json
+
+  bindings:check:
+    desc: Check all language SDKs before replacing plugin models
+    deps: [bindings:python:check, bindings:typescript:check, bindings:java:check]
+
+  bindings:python:check:
+    desc: Verify Python SDK drift, installed wheel and Go round trips on Python 3.10
+    cmds:
+      - task: bindings:python:build
+      - uv venv --python {{.PYTHON_VERSION}} --allow-existing '{{.BINDINGS_ABSOLUTE}}/python/test-env'
+      - >-
+        uv pip install --python '{{.BINDINGS_ABSOLUTE}}/python/test-env/bin/python' --reinstall
+        '{{.BINDINGS_ABSOLUTE}}/python/dist/flanksource_uir-1.0.0-py3-none-any.whl'
+        pytest==8.4.2 'jsonschema[format]==4.25.1'
+      - "'{{.BINDINGS_ABSOLUTE}}/python/test-env/bin/python' -I -m pytest bindings/python/tests"
+      - uv venv --python {{.PYTHON_VERSION}} --allow-existing '{{.BINDINGS_ABSOLUTE}}/python/consumer-env'
+      - >-
+        uv pip install --python '{{.BINDINGS_ABSOLUTE}}/python/consumer-env/bin/python' --reinstall --no-deps
+        '{{.BINDINGS_ABSOLUTE}}/python/dist/flanksource_uir-1.0.0-py3-none-any.whl'
+      - go test -tags bindings ./internal/bindings -ginkgo.focus 'Python binding'
+      - task: bindings:python:lint
+    env:
+      UIR_PYTHON_BIN: '{{.BINDINGS_ABSOLUTE}}/python/consumer-env/bin/python'
+
+  bindings:python:lint:
+    desc: Lint handwritten Python codec, tests and consumer examples
+    cmds:
+      - >-
+        uvx --from ruff==0.13.3 ruff check
+        bindings/python/src/uir/__init__.py bindings/python/src/uir/codec.py bindings/python/src/uir/_schema.py
+        bindings/python/tests bindings/python/examples internal/bindings/python
+
+  bindings:python:build:
+    desc: Build the Python wheel and source archive after checking generated artifacts
+    cmds:
+      - task: bindings:python:drift
+      - uv build --python {{.PYTHON_VERSION}} --out-dir '{{.BINDINGS_ABSOLUTE}}/python/dist' bindings/python
+
+  bindings:python:drift:
+    desc: Check Python dataclasses, metadata and schema without rewriting owned artifacts
+    cmds:
+      - task: schema:check
+      - task: bindings:python:preview
+      - cmp '{{.BINDINGS_ABSOLUTE}}/python/model.py' bindings/python/src/uir/model.py
+      - cmp '{{.BINDINGS_ABSOLUTE}}/python/models.json' bindings/python/src/uir/models.json
+      - cmp schema/uir.schema.json bindings/python/src/uir/uir.schema.json
+
+  tools:typescript:
+    internal: true
+    run: once
+    cmds:
+      - pnpm --dir bindings/typescript install --frozen-lockfile
+
+  tools:openapi:
+    internal: true
+    run: once
+    status:
+      - test -f '{{.OPENAPI_GENERATOR_JAR}}'
+    cmds:
+      - mkdir -p '{{.LOCALBIN}}'
+      - >-
+        curl --fail --location --output '{{.OPENAPI_GENERATOR_JAR}}.download'
+        'https://repo.maven.apache.org/maven2/org/openapitools/openapi-generator-cli/{{.JAVA_GENERATOR_VERSION}}/openapi-generator-cli-{{.JAVA_GENERATOR_VERSION}}.jar'
+      - mv '{{.OPENAPI_GENERATOR_JAR}}.download' '{{.OPENAPI_GENERATOR_JAR}}'
+
+  bindings:java:check:
+    desc: Build the Java SDK and verify Go to Java to Go wire conformance
+    cmds:
+      - task: bindings:java:build
+      - go test -tags bindings ./internal/bindings -ginkgo.focus 'Java binding'
+    env:
+      UIR_BINDINGS_OUT: '{{.BINDINGS_ABSOLUTE}}'
+      UIR_JAVA_CLASSPATH: '{{.BINDINGS_ABSOLUTE}}/java/libs/uir-1.0.0.jar:{{.BINDINGS_ABSOLUTE}}/java/runtime/*'
+
+  bindings:java:build:
+    desc: Build the Java SDK archive with locked runtime dependencies
+    deps: [tools:openapi]
+    cmds:
+      - task: schema:check
+      - >-
+        bindings/java/gradlew --project-dir bindings/java --no-daemon assemble syncRuntime generatePomFileForUirPublication
+        '-PbindingOutput={{.BINDINGS_ABSOLUTE}}/java' '-PgeneratorJar={{.OPENAPI_GENERATOR_JAR}}'
+        {{.JAVA_GRADLE_FLAGS}}
+
+  query-parser:
+    desc: Regenerate the PEG query parser
+    cmds: [go generate ./query]
+
+  test:
+    desc: Run Go, browser and API tests
+    cmds:
+      - go test ./...
+      - pnpm --dir web run test
+      - pnpm --dir packages/api run test
+
+  test:python:
+    desc: Run the existing Python model test
+    cmds: [python3 python/test_uir.py]
+
+  fmt:
+    desc: Format and tidy Go sources
+    cmds: [go fmt ./..., go mod tidy]
+
+  wasm:check:
+    desc: Compile the model for browser consumers
+    cmds: [go build -o /dev/null .]
+    env:
+      GOOS: js
+      GOARCH: wasm
+
+  vet:
+    desc: Run Go vet
+    cmds: [go vet ./...]
+
+  lint:
+    desc: Run Go and browser lint
+    deps: [tools:lint]
+    cmds:
+      - "'{{.LOCALBIN}}/golangci-lint' run"
+      - pnpm --dir web run lint
+
+  tools:lint:
+    internal: true
+    status:
+      - test -f '{{.LOCALBIN}}/golangci-lint'
+    cmds:
+      - mkdir -p '{{.LOCALBIN}}'
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_LINT_VERSION}}
+    env:
+      GOBIN: '{{.LOCALBIN}}'
+
+  lint:schema:
+    desc: Lint schema generation and binding conformance code
+    deps: [tools:lint]
+    cmds:
+      - "'{{.LOCALBIN}}/golangci-lint' run ./internal/schemagen ./cmd/genschema"
+      - "'{{.LOCALBIN}}/golangci-lint' run --build-tags bindings ./internal/bindings"
+
+  fixture:corpus:env:
+    desc: Configure the query fixture corpus
+    cmds:
+      - mkdir -p .tmp
+      - printf "UIR_DSN='%s'\nUIR_SCHEMA='%s'\n" '{{.UIR_CORPUS_DSN}}' '{{.UIR_CORPUS_SCHEMA}}' > .tmp/uir-corpus.env
+
+  fixture:corpus:
+    desc: Index the five local Flanksource checkouts
+    cmds:
+      - task: binary
+      - task: fixture:corpus:env
+      - gavel fixtures fixtures/bench/index-corpus.md {{.GAVEL_FLAGS}}
+    env:
+      UIR_DSN: '{{.UIR_CORPUS_DSN}}'
+      UIR_SCHEMA: '{{.UIR_CORPUS_SCHEMA}}'
+
+  fixture:history:
+    desc: Build and diff the scripted commons history
+    cmds:
+      - task: binary
+      - mkdir -p .tmp
+      - printf "HISTORY_DSN='%s'\nHISTORY_SCHEMA='%s'\n" '{{.UIR_HISTORY_DSN}}' '{{.UIR_HISTORY_SCHEMA}}' > .tmp/uir-history.env
+      - gavel fixtures fixtures/bench/history.md {{.GAVEL_FLAGS}}
+    env:
+      HISTORY_DSN: '{{.UIR_HISTORY_DSN}}'
+      HISTORY_SCHEMA: '{{.UIR_HISTORY_SCHEMA}}'
+
+  clean:
+    desc: Remove local build and scratch output
+    cmds: ["rm -rf '{{.LOCALBIN}}' .tmp coverage.out coverage.html"]

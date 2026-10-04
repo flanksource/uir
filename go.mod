@@ -12,6 +12,7 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/pkg/diff v0.0.0-20241224192749-4e6772a4315c
 	github.com/samber/lo v1.53.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/mod v0.37.0

@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flanksource-uir"
+version = "1.0.0"
+description = "Generated UIR dataclasses and wire codecs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.package-data]
+uir = ["*.json"]

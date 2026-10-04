@@ -8,7 +8,9 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +20,7 @@ type sourceFacts struct {
 	typeDocs  map[string]string
 	fieldDocs map[string]map[string]string
 	enums     map[string][]string
+	wireTags  map[string]map[string]string
 }
 
 func (s *sourceFacts) fieldDoc(owner, field string) string {
@@ -51,12 +54,64 @@ func loadSource(dir, pkgPath string) (*sourceFacts, error) {
 	facts := &sourceFacts{
 		typeDocs:  map[string]string{},
 		fieldDocs: map[string]map[string]string{},
+		wireTags:  map[string]map[string]string{},
 	}
 	collectDocs(files, facts)
+	if err := collectWireTags(files, facts); err != nil {
+		return nil, err
+	}
 	if facts.enums, err = collectEnums(fset, files, pkgPath); err != nil {
 		return nil, err
 	}
 	return facts, nil
+}
+
+// Custom codecs shadow promoted fields with wire-specific tags. Read the Go
+// codec's tags too, so omitempty and names follow the encoder rather than its alias.
+func collectWireTags(files []*ast.File, facts *sourceFacts) error {
+	for _, file := range files {
+		for _, declaration := range file.Decls {
+			method, ok := declaration.(*ast.FuncDecl)
+			if !ok || method.Name.Name != "MarshalJSON" || method.Recv == nil {
+				continue
+			}
+			receiver := method.Recv.List[0].Type
+			if pointer, ok := receiver.(*ast.StarExpr); ok {
+				receiver = pointer.X
+			}
+			name, ok := receiver.(*ast.Ident)
+			if !ok {
+				return fmt.Errorf("unsupported MarshalJSON receiver %T", receiver)
+			}
+			tags := map[string]string{}
+			var problem error
+			ast.Inspect(method.Body, func(node ast.Node) bool {
+				structure, ok := node.(*ast.StructType)
+				if !ok {
+					return true
+				}
+				for _, field := range structure.Fields.List {
+					if field.Tag == nil {
+						continue
+					}
+					literal, err := strconv.Unquote(field.Tag.Value)
+					if err != nil {
+						problem = fmt.Errorf("%s.MarshalJSON tag: %w", name.Name, err)
+						return false
+					}
+					for _, fieldName := range field.Names {
+						tags[fieldName.Name] = reflect.StructTag(literal).Get("json")
+					}
+				}
+				return false
+			})
+			if problem != nil {
+				return problem
+			}
+			facts.wireTags[name.Name] = tags
+		}
+	}
+	return nil
 }
 
 func collectDocs(files []*ast.File, facts *sourceFacts) {
