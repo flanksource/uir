@@ -129,6 +129,31 @@ var _ = Describe("UIR JSON codec regressions", func() {
 		Expect(got.GetTo()).To(Equal(&to))
 	})
 
+	It("keeps a relationship's reference kind and the construct it was written in under kind and via", func() {
+		rel := NewRelationship(RelationshipTypeIncludes, NewRef(Identifier{Type: "Caller"}), NewRef(Identifier{Type: "CopyBook-Rates"})).
+			Kind("copybook").Via("CopyBook").Text("SELECT 1").Build()
+
+		data, err := json.Marshal(rel)
+		Expect(err).NotTo(HaveOccurred())
+		var keys map[string]json.RawMessage
+		Expect(json.Unmarshal(data, &keys)).To(Succeed())
+		Expect(keys).To(HaveKeyWithValue("kind", json.RawMessage(`"copybook"`)))
+		Expect(keys).To(HaveKeyWithValue("via", json.RawMessage(`"CopyBook"`)))
+		Expect(keys).To(HaveKeyWithValue("content", json.RawMessage(`"SELECT 1"`)))
+		var got UIRRelationship
+		Expect(json.Unmarshal(data, &got)).To(Succeed(), "decoding %s", data)
+		Expect([]string{got.Kind, got.Via, *got.Content}).To(Equal([]string{"copybook", "CopyBook", "SELECT 1"}))
+	})
+
+	It("omits an unset reference kind and construct", func() {
+		data, err := json.Marshal(NewRelationship(RelationshipTypeCall, nil, NewRef(Identifier{Type: "Callee"})).Build())
+		Expect(err).NotTo(HaveOccurred())
+		var keys map[string]json.RawMessage
+		Expect(json.Unmarshal(data, &keys)).To(Succeed())
+		Expect(keys).NotTo(HaveKey("kind"))
+		Expect(keys).NotTo(HaveKey("via"))
+	})
+
 	It("refuses a node slot holding a typed nil", func() {
 		var record *ASTRecord
 		_, err := MarshalStatement(NewRecordRead(RecordTypeTable, record).Build())

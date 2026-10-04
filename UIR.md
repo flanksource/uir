@@ -886,11 +886,13 @@ Use `NodeRef` when one node points at another and you do not want to duplicate t
 | source location fields | `SourceCode` | Relationship source location. |
 | `id` | `uuid` | Relationship ID. |
 | `relationship_type` | `RelationshipType` | Import, call, dispatch, read, write, inheritance, and related relationship kinds. |
+| `kind` | `string` | The producer's own, finer name for the reference (an include, a function call, a column read); omitted when the type says all there is. |
+| `via` | `string` | The construct the reference is written in, such as the element or statement that carries it; omitted when the producer does not say. |
 | `from` | `Node` | Source node. |
 | `to` | `Node` | Target node. |
 | `guards` | `[]ConditionStmt` | Conditions that must hold to reach the relationship's statement, outermost first. |
 
-`CollectRelationships(method)` walks a method body with `WalkStatements` and returns its calls, reads and writes with `from` set to the method and `guards` set from the enclosing `if`, `switch` and loop conditions. An else branch carries the negated condition, a switch case the match against the switch's value, and its default the negated disjunction of the other cases. A `DispatchCallStmt` yields one `call` to its declared target plus one `dispatch` per candidate. The `graph` package turns these relationships into a bounded nodes-and-edges call graph.
+`CollectRelationships(method)` walks a method body with `WalkStatements` and returns its calls, reads and writes with `from` set to the method and `guards` set from the enclosing `if`, `switch` and loop conditions. An else branch carries the negated condition, a switch case the match against the switch's value, and its default the negated disjunction of the other cases. A `DispatchCallStmt` yields one `call` to its declared target plus one `dispatch` per candidate. The `graph` package turns these relationships into a bounded nodes-and-edges call graph, each relationship's `kind` its edge's kind and its location, `content` and guards one call site. A non-Go lowering records its references with `lower.Recorder`, which returns them as relationships with `kind`, `via` and `content` set.
 
 ## Enumerations
 
