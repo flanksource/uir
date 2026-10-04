@@ -262,7 +262,7 @@ tasks:
 
   lint:
     desc: Run Go and browser lint
-    deps: [tools:lint]
+    deps: [tools:lint, web:build]
     cmds:
       - "'{{.LOCALBIN}}/golangci-lint' run"
       - pnpm --dir web run lint

@@ -1,4 +1,6 @@
 TASK ?= task
+VERSION ?= dev
+TASK := $(TASK) VERSION=$(VERSION)
 
 .PHONY: help build binary install schema schema-check bindings bindings-python bindings-typescript bindings-java query-parser test test-python fmt wasm-check vet lint clean web-build fixture-corpus-env fixture-corpus fixture-history
 
