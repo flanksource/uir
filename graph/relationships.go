@@ -4,12 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flanksource/uir"
 )
 
-// FromRelationships serves call and dispatch relationships as a Source; every
-// other relationship type is not a call-graph edge and is ignored.
+// graphRelationships are the relationship types FromRelationships draws.
+var graphRelationships = []uir.RelationshipType{
+	uir.RelationshipTypeCall, uir.RelationshipTypeDispatch, uir.RelationshipTypeRead, uir.RelationshipTypeWrite,
+}
+
+// FromRelationships serves call, dispatch, read and write relationships as a
+// Source; every other relationship type is not a call-graph edge and is
+// ignored. Options.Access chooses which of them a Build follows.
+//
+// Each relationship is one step: its Kind is the edge's Kind, and its location,
+// Content and guards are the step's one Site.
 //
 // A node's id is the IdentityKey of the relationship end it stands for. describe
 // supplies the rest of each node once per id: FromRelationships sets ID and
@@ -17,15 +27,15 @@ import (
 // identifier as written) when describe leaves them empty. describe reports an
 // identifier it cannot place by returning a Node with Unresolved set.
 //
-// A call or dispatch relationship missing either end is an error: an edge needs
-// both, and uir.CollectRelationships always sets them.
+// A drawn relationship missing either end is an error: an edge needs both, and
+// uir.CollectRelationships always sets them.
 func FromRelationships(rels []uir.UIRRelationship, describe func(uir.Identifier) Node) (Source, error) {
 	if describe == nil {
 		return nil, errors.New("graph: FromRelationships: describe is required")
 	}
 	src := &relationshipSource{describe: describe, nodes: map[string]Node{}, out: map[string][]Step{}, in: map[string][]Step{}}
 	for i, rel := range rels {
-		if rel.RelationshipType != uir.RelationshipTypeCall && rel.RelationshipType != uir.RelationshipTypeDispatch {
+		if !slices.Contains(graphRelationships, rel.RelationshipType) {
 			continue
 		}
 		from, to := rel.GetFrom(), rel.To
@@ -36,7 +46,7 @@ func FromRelationships(rels []uir.UIRRelationship, describe func(uir.Identifier)
 			return nil, fmt.Errorf("graph: relationships[%d]: %s from %s at %s has no target", i, rel.RelationshipType, endName(from), rel.Location)
 		}
 		caller, callee := src.node(from.GetIdentifier()), src.node(to.GetIdentifier())
-		edge := Edge{Type: rel.RelationshipType, Sites: []Site{siteOf(rel)}}
+		edge := Edge{Type: rel.RelationshipType, Kind: rel.Kind, Sites: []Site{siteOf(rel)}}
 		src.out[caller.ID] = append(src.out[caller.ID], Step{Node: callee, Edge: edge})
 		src.in[callee.ID] = append(src.in[callee.ID], Step{Node: caller, Edge: edge})
 	}
@@ -95,7 +105,7 @@ func (s *relationshipSource) node(id uir.Identifier) Node {
 func (s *relationshipSource) Describe(_ context.Context, id string) (Node, error) {
 	node, ok := s.nodes[id]
 	if !ok {
-		return Node{}, fmt.Errorf("graph: no call or dispatch relationship names %q", id)
+		return Node{}, fmt.Errorf("graph: no call, dispatch, read or write relationship names %q", id)
 	}
 	return node, nil
 }
