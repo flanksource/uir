@@ -3,7 +3,7 @@ module github.com/flanksource/uir
 go 1.26.1
 
 require (
-	github.com/flanksource/clicky v1.21.72
+	github.com/flanksource/clicky v1.21.73
 	github.com/flanksource/commons v1.59.1
 	github.com/flanksource/commons-db v0.1.40-0.20260929091054-54ca532652a0
 	github.com/google/go-cmp v0.7.0
