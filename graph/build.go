@@ -52,7 +52,7 @@ func (o Options) validate() error {
 	if o.Limit < 1 || o.Limit > MaxLimit {
 		return fmt.Errorf("graph: limit %d is outside 1..%d", o.Limit, MaxLimit)
 	}
-	return nil
+	return validateAccess(o.Access)
 }
 
 type builder struct {
@@ -189,7 +189,7 @@ func (b *builder) record(edge Edge) {
 
 // merge folds the steps from id into one per neighbour and edge type, ordered by
 // edge id so the graph does not depend on the order the source reports them in,
-// and leaves out the edges the theme drops.
+// and leaves out the edges Options.Access does not follow and the theme drops.
 func (b *builder) merge(id string, steps []Step, direction int) ([]Step, error) {
 	byEdge := map[string]*Step{}
 	for _, step := range steps {
@@ -198,6 +198,9 @@ func (b *builder) merge(id string, steps []Step, direction int) ([]Step, error) 
 		}
 		if step.Edge.Type == uir.RelationshipTypeNA {
 			return nil, fmt.Errorf("graph: the source returned a step between %q and %q with no edge type", id, step.Node.ID)
+		}
+		if !Follows(b.opts.Access, step.Edge.Type) {
+			continue
 		}
 		edge := step.Edge
 		edge.From, edge.To = id, step.Node.ID
