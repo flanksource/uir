@@ -1,32 +1,32 @@
 TASK ?= task
 VERSION ?= dev
-TASK := $(TASK) VERSION=$(VERSION)
+RUN_TASK = $(TASK) VERSION=$(VERSION)
 
 .PHONY: help build binary install schema schema-check bindings bindings-python bindings-typescript bindings-java query-parser test test-python fmt wasm-check vet lint clean web-build fixture-corpus-env fixture-corpus fixture-history
 
 help:
-	$(TASK) --list
+	$(RUN_TASK) --list
 
 build binary install schema bindings query-parser test fmt vet lint clean:
-	$(TASK) $@
+	$(RUN_TASK) $@
 
 schema-check:
-	$(TASK) schema:check
+	$(RUN_TASK) schema:check
 
 bindings-python bindings-typescript bindings-java:
-	$(TASK) $(subst bindings-,bindings:,$@)
+	$(RUN_TASK) $(subst bindings-,bindings:,$@)
 
 test-python:
-	$(TASK) test:python
+	$(RUN_TASK) test:python
 
 wasm-check:
-	$(TASK) wasm:check
+	$(RUN_TASK) wasm:check
 
 web-build:
-	$(TASK) web:build
+	$(RUN_TASK) web:build
 
 fixture-corpus-env:
-	$(TASK) fixture:corpus:env
+	$(RUN_TASK) fixture:corpus:env
 
 fixture-corpus fixture-history:
-	$(TASK) $(subst fixture-,fixture:,$@)
+	$(RUN_TASK) $(subst fixture-,fixture:,$@)
