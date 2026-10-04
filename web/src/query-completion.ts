@@ -41,14 +41,44 @@ const selectors: QueryCompletion[] = [
   { label: "package:", insert: "package:", help: "Package node" },
   { label: "all:", insert: "all:", help: "All declared symbols" },
   { label: "path:", insert: "path:", help: "Full module, package, or qualified symbol path" },
+  { label: "kind:", insert: "kind:", help: "Symbols of one registered kind, such as kind:oipa.rule or kind:oipa.rule:Rate*" },
 ];
+// selectorKinds is the alternation of every typed selector's kind, the prefix before its first colon.
+export const selectorKinds = selectors.map((option) => option.label.slice(0, -1)).join("|");
+// quotedValue is a double-quoted value with \ escapes; its closing quote may still be untyped.
+export const quotedValue = String.raw`"(?:\\.|[^"\\])*"?`;
+const selectorValue = String.raw`(?:${quotedValue}|[A-Za-z0-9_./*?@#$!\-]*)`;
+const entityChars = String.raw`[A-Za-z0-9_*?\-]`;
+// entityField is the start of an Entity:Field reference: an entity, unquoted or quoted, and a colon
+// that does not begin the :impl, :inherits, or :methods relation.
+export const entityField = String.raw`(?:${quotedValue}|[A-Za-z_*?]${entityChars}*):(?!(?:impl|inherits|methods)(?!${entityChars}))`;
+const selectorToken = new RegExp(`^[+-]?(?:${selectorKinds}):`);
+const entityFieldToken = new RegExp(`^${entityField}`);
 const typedModifiers: QueryCompletion[] = selectors.flatMap((option) => [
   { ...option, label: `+${option.label}`, insert: `+${option.insert}`, help: `Include ${option.help.toLowerCase()}` },
   { ...option, label: `-${option.label}`, insert: `-${option.insert}`, help: `Exclude ${option.help.toLowerCase()}` },
 ]);
 
-const tokenPattern = /[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):[A-Za-z0-9_./*?@#$!\-]*(?::[A-Za-z0-9_./*?@#$!\-]*)?|<<\d*|>>\d*|:[A-Za-z]*|~[A-Za-z]*|[+-][A-Za-z]*|[<>=&|()]|[A-Za-z_*?][A-Za-z0-9_./*?-]*/g;
+const tokenPattern = new RegExp(
+  `[+-]?(?:${selectorKinds}):${selectorValue}(?::${selectorValue})?|${entityField}(?:${quotedValue}|${entityChars}*)|${quotedValue}|<<\\d*|>>\\d*|:[A-Za-z]*|~[A-Za-z]*|[+-][A-Za-z]*|[<>=&|()]|[A-Za-z_*?][A-Za-z0-9_./*?-]*`,
+  "g",
+);
 type Token = { text: string; start: number; end: number };
+
+// unquoteQueryValue is the literal text of a symbol or selector value: its quotes, closed or not, and
+// its escapes removed.
+export function unquoteQueryValue(value: string): string {
+  if (!value.startsWith('"')) return value;
+  const body = value.length > 1 && /(?:^|[^\\])(?:\\\\)*"$/.test(value.slice(1)) ? value.slice(1, -1) : value.slice(1);
+  return body.replace(/\\(.)/g, "$1");
+}
+
+// quoteQuerySymbol spells a qualified name as a bare symbol that matches exactly it, quoting a name the
+// unquoted grammar cannot spell and escaping \, ", *, and ?.
+export function quoteQuerySymbol(name: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_./-]*$/.test(name)) return name;
+  return `"${name.replace(/[\\"*?]/g, "\\$&")}"`;
+}
 
 export function queryCompletionContext(draft: string, cursor: number): QueryCompletionContext {
   const tokens: Token[] = Array.from(draft.matchAll(tokenPattern), (match) => ({
@@ -67,7 +97,7 @@ export function queryCompletionContext(draft: string, cursor: number): QueryComp
       filter = token.text;
       continue;
     }
-	if (/^[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):/.test(token.text)) { mode = "relation"; continue; }
+	if (selectorToken.test(token.text) || entityFieldToken.test(token.text)) { mode = "relation"; continue; }
     if (mode === "value") { mode = "filter"; filter = undefined; continue; }
     if (/^(?:<<\d*|<|>|=|:impl|:inherits|:methods|~w)$/.test(token.text)) { mode = "filter"; continue; }
     if (mode === "symbol") mode = "relation";
@@ -77,8 +107,8 @@ export function queryCompletionContext(draft: string, cursor: number): QueryComp
     return { mode: current.text === ")" ? "relation" : "symbol", prefix: "", start: cursor, end: cursor };
   }
   const prefix = current ? draft.slice(current.start, cursor) : "";
-  if (/^[+-]?(?:pkg|mod|func|method|var|type|field|struct|module|package|all|path):/.test(current?.text ?? "")) mode = "selector";
-  else if (mode === "filter" && /^[A-Za-z_]/.test(current?.text ?? "")) mode = "symbol";
+  if (selectorToken.test(current?.text ?? "") || entityFieldToken.test(current?.text ?? "")) mode = "selector";
+  else if (mode === "filter" && /^[A-Za-z_"]/.test(current?.text ?? "")) mode = "symbol";
   return {
     mode, prefix,
     start: current?.start ?? cursor, end: current?.end ?? cursor,

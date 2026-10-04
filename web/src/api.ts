@@ -41,7 +41,7 @@ export type ModuleLocation = {
   head_version: number;
 };
 
-export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local-dependency" | "versioned-dependency" | "historical" | "dependency-cycle";
+export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local-dependency" | "versioned-dependency" | "historical" | "dependency-cycle" | "import";
 
 export type SnapshotKind = "head" | "historical" | "versioned";
 
