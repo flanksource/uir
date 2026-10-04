@@ -42,7 +42,7 @@ func (index *indexContext) candidates(ctx context.Context, symbols []ModuleSymbo
 	}
 	for _, symbol := range symbols {
 		if !slices.ContainsFunc(matches, func(match ModuleMatch) bool { return match.SymbolID == symbol.ID }) {
-			matches = append(matches, ModuleMatch{Kind: "candidate", SymbolID: symbol.ID, Identifier: symbol.identifier()})
+			matches = append(matches, ModuleMatch{Kind: "candidate", SymbolID: symbol.ID, Identifier: index.identifier(symbol)})
 		}
 	}
 	return matches, nil

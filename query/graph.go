@@ -190,7 +190,7 @@ func (index *compactIndex) graphRoots(ctx context.Context, options GraphOptions,
 		if len(symbols) == 0 {
 			return nil, &UnresolvedSymbolError{Symbol: options.Symbol, Coverage: coverageSummary(coverage)}
 		}
-		if !callable(symbols[0]) {
+		if !index.callable(symbols[0]) {
 			return nil, invalidGraph("a call graph requires a function or method, %s is a %s", symbols[0].QueryName, symbols[0].Kind)
 		}
 		return symbols, nil
@@ -214,7 +214,7 @@ func (index *compactIndex) graphRoots(ctx context.Context, options GraphOptions,
 	}
 	var roots []ModuleSymbol
 	for _, symbol := range value.symbols {
-		if callable(symbol) {
+		if index.callable(symbol) {
 			roots = append(roots, symbol)
 		}
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -58,7 +59,8 @@ type rootDocuments struct {
 
 // indexContext answers symbol queries from postings intersected with each scope's active set, and
 // decodes only the documents a posting selected, once each. It maps symbol ids to handles and learns
-// each snapshot's defined symbols at most once per query.
+// each snapshot's defined symbols at most once per query. kinds is the database's kind registry, which
+// decides each symbol's category.
 type indexContext struct {
 	database *gorm.DB
 	scopes   []indexScope
@@ -66,12 +68,17 @@ type indexContext struct {
 	decoded  map[uuid.UUID]decodedDocument
 	handles  symbolHandles
 	defined  map[uuid.UUID]map[int64]bool
+	kinds    symbolhandle.Kinds
 }
 
 func newIndexContext(ctx context.Context, database *gorm.DB, scopes []moduleScope) (*indexContext, error) {
+	kinds, err := storage.LoadSymbolKinds(ctx, database)
+	if err != nil {
+		return nil, err
+	}
 	index := &indexContext{
 		database: database, scopes: make([]indexScope, 0, len(scopes)), decoded: map[uuid.UUID]decodedDocument{},
-		handles: newSymbolHandles(), defined: map[uuid.UUID]map[int64]bool{},
+		handles: newSymbolHandles(), defined: map[uuid.UUID]map[int64]bool{}, kinds: kinds,
 	}
 	roots := map[int32]int{}
 	for position, scope := range scopes {
@@ -194,7 +201,7 @@ func (index *indexContext) document(posting scopedPosting) (decodedDocument, err
 	if !found {
 		return decodedDocument{}, fmt.Errorf("document %s is not active in snapshot %s", posting.document, index.scopes[posting.scope].snapshot.ID)
 	}
-	content, err := storage.DecodeDocument(active.Document, active.Source)
+	content, err := storage.DecodeDocument(active.Document, active.Source, storage.WithKinds(index.kinds))
 	if err != nil {
 		return decodedDocument{}, err
 	}
