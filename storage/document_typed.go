@@ -3,20 +3,26 @@ package storage
 import (
 	"errors"
 	"fmt"
+
+	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-var (
-	occurrenceRoles     = map[string]bool{"definition": true, "reference": true, "call": true, "write": true, "type": true, "import": true}
-	declaredSymbolKinds = map[string]bool{"type": true, "func": true, "method": true, "field": true, "var": true, "const": true}
-)
+var occurrenceRoles = map[string]bool{"definition": true, "reference": true, "call": true, "write": true, "type": true, "import": true}
+
+// declarable reports whether a file can declare a symbol of kind: any registered kind except a
+// container, which a file belongs to, and a builtin, which the language predeclares.
+func declarable(kinds symbolhandle.Kinds, kind string) bool {
+	spec, err := kinds.Lookup(kind)
+	return err == nil && spec.Category != symbolhandle.CategoryContainer && spec.Code != symbolhandle.KindBuiltin
+}
 
 // validateTypedContent checks an indexed or partial document. Every declared symbol has a canonical
 // id, a shape hash, and interface ids it implements; a partial document may also keep a declaration
 // it could not prove with only its syntax facts and a null id. Every occurrence has a role, a symbol
 // or a note saying why it has none, and an enclosing symbol declared in the same document; a call
 // also carries its call locator.
-func validateTypedContent(content DocumentContent, partial bool) error {
-	keys, err := validateSymbolEntries(content.Symbols)
+func validateTypedContent(content DocumentContent, partial bool, kinds symbolhandle.Kinds) error {
+	keys, err := validateSymbolEntries(content.Symbols, kinds)
 	if err != nil {
 		return err
 	}
@@ -24,7 +30,7 @@ func validateTypedContent(content DocumentContent, partial bool) error {
 	for index, symbol := range content.Symbols {
 		subject := fmt.Sprintf("symbol %d (%s)", index, symbol.Key)
 		switch {
-		case !declaredSymbolKinds[symbol.Kind]:
+		case !declarable(kinds, symbol.Kind):
 			return fmt.Errorf("%s: a file cannot declare a %q symbol", subject, symbol.Kind)
 		case symbol.ID == nil && (!partial || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || len(symbol.Embeds) > 0):
 			return fmt.Errorf("%s: only a partial document keeps an unproven declaration, without shape_hash or implements", subject)

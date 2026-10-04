@@ -8,7 +8,8 @@ import (
 
 // Symbol is a global canonical symbol identity; typed extraction populates it. ID, the SHA-256 of the
 // canonical key, is the identity everywhere outside this database. Handle is the database-local
-// H64a surrogate (see storage/symbolhandle) that postings and deltas store instead.
+// H64b surrogate (see storage/symbolhandle) that postings and deltas store instead. Kind names a
+// builtin or registered kind in symbol_kinds.
 type Symbol struct {
 	ID              string  `gorm:"column:id;primaryKey"`
 	IdentityVersion int     `gorm:"column:identity_version"`
