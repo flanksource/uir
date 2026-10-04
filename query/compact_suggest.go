@@ -9,17 +9,15 @@ import (
 	"github.com/flanksource/uir/storage"
 )
 
-// SuggestSymbols returns active canonical symbols whose qualified spelling starts with a partial subject.
+// SuggestSymbols returns active canonical symbols whose qualified spelling starts with a partial
+// subject. The subject is literal text, such as the unquoted content of a quoted symbol, so it may
+// contain spaces and punctuation but no wildcard.
 func (pipeline *Pipeline) SuggestSymbols(ctx context.Context, prefix string, options ModuleScopeOptions) (ItemsWithWarnings[ModuleSymbol], error) {
 	if pipeline == nil || pipeline.database == nil {
 		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("UIR query database is required")
 	}
-	valid, err := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_./-]*$`, prefix)
-	if err != nil {
-		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("validate partial Go symbol %q: %w", prefix, err)
-	}
-	if !valid || strings.Contains(prefix, "..") {
-		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("invalid partial Go symbol %q", prefix)
+	if !partialSymbol.MatchString(prefix) || strings.Contains(prefix, "..") || len(prefix) > maximumSelectorPattern {
+		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("invalid partial symbol %q: expected literal text without a wildcard, leading whitespace, or an empty name part", prefix)
 	}
 	if options.Limit == 0 {
 		options.Limit = 20
@@ -58,6 +56,10 @@ func (pipeline *Pipeline) SuggestSymbols(ctx context.Context, prefix string, opt
 	}
 	return ItemsWithWarnings[ModuleSymbol]{Items: symbols, Warnings: selection.warnings}, nil
 }
+
+// partialSymbol is a partial symbol spelling: printable text that starts with no whitespace and has
+// no wildcard.
+var partialSymbol = regexp.MustCompile(`^[^\s*?[:cntrl:]][^*?[:cntrl:]]*$`)
 
 // symbolsWithPrefix loads the symbols whose qualified spelling, short spelling, or a member of it
 // starts with a partial subject, reading at most 10000 candidates by the search name of its last part.

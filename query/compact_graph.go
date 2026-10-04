@@ -20,13 +20,11 @@ type graphParent struct {
 	call ModuleMatch
 }
 
-func callable(symbol ModuleSymbol) bool { return symbol.Kind == "func" || symbol.Kind == "method" }
-
 func (index *compactIndex) transitiveCallers(ctx context.Context, targets []ModuleSymbol, depth int, filters []Filter, result *ModuleQueryResult) (compactValue, error) {
 	queue := make([]graphNode, 0, len(targets))
 	seen := map[string]int{}
 	for _, target := range targets {
-		if !callable(target) {
+		if !index.callable(target) {
 			return compactValue{}, fmt.Errorf("transitive callers require a function or method, got %s", target.Kind)
 		}
 		queue = append(queue, graphNode{symbol: target})
@@ -57,7 +55,7 @@ func (index *compactIndex) transitiveCallers(ctx context.Context, targets []Modu
 			return compactValue{}, err
 		}
 		for _, caller := range callers {
-			if !callable(caller) {
+			if !index.callable(caller) {
 				continue
 			}
 			if len(seen) == maxGraphSymbols {
@@ -105,7 +103,7 @@ func sortedKeys(values map[string]bool) []string {
 func (index *compactIndex) shortestPath(ctx context.Context, sources, targets []ModuleSymbol, depth int, result *ModuleQueryResult) (*CallPath, error) {
 	goal := map[string]bool{}
 	for _, target := range targets {
-		if callable(target) {
+		if index.callable(target) {
 			goal[target.ID] = true
 		}
 	}
@@ -116,7 +114,7 @@ func (index *compactIndex) shortestPath(ctx context.Context, sources, targets []
 	seen := map[string]bool{}
 	parents := map[string]graphParent{}
 	for _, source := range sources {
-		if callable(source) {
+		if index.callable(source) {
 			queue = append(queue, graphNode{symbol: source})
 			seen[source.ID] = true
 		}

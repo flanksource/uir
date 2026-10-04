@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
 )
 
@@ -23,31 +22,12 @@ type ModuleSymbol struct {
 	ParameterTypes storage.JSON `json:"parameter_types"`
 }
 
-func (symbol ModuleSymbol) identifier() uir.Identifier {
-	identifier := uir.Identifier{Module: symbol.ModuleKey, Package: symbol.PackagePath}
-	switch symbol.Kind {
-	case "module":
-		identifier.NodeType = uir.NodeTypeModule
-		identifier.Package = ""
-	case "package":
-		identifier.NodeType = uir.NodeTypePackage
-	case "type":
-		identifier.Type, identifier.NodeType = symbol.Name, uir.NodeTypeType
-	case "func":
-		identifier.Method, identifier.NodeType = symbol.Name, uir.NodeTypeMethod
-	case "method":
-		identifier.Type, identifier.Method, identifier.NodeType = symbol.Owner, symbol.Name, uir.NodeTypeMethod
-	case "field", "var", "const":
-		identifier.Type, identifier.Field, identifier.NodeType = symbol.Owner, symbol.Name, uir.NodeTypeField
-	default:
-		identifier.NodeType = uir.NodeTypePackage
-	}
-	return identifier
-}
-
 func (index *indexContext) moduleSymbols(ctx context.Context, rows []storage.Symbol) ([]ModuleSymbol, error) {
 	var ownerIDs []string
 	for _, row := range rows {
+		if err := index.register(ctx, row.Kind); err != nil {
+			return nil, fmt.Errorf("symbol %s: %w", row.ID, err)
+		}
 		if row.OwnerID != nil {
 			ownerIDs = append(ownerIDs, *row.OwnerID)
 		}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"gorm.io/gorm"
 )
 
@@ -20,9 +21,15 @@ func (index *compactIndex) resolveSelector(ctx context.Context, selector Selecto
 	if selector.Kind == "module" || selector.Kind == "package" {
 		return index.resolveTreeSelector(selector.Kind, selector.Pattern, glob)
 	}
-	var moduleGlob selectorGlob
+	var moduleGlob, ownerGlob selectorGlob
 	if selector.ModulePattern != "" {
 		moduleGlob, err = compileSelectorGlob(selector.ModulePattern)
+		if err != nil {
+			return compactValue{}, err
+		}
+	}
+	if selector.Owner != "" {
+		ownerGlob, err = compileSelectorGlob(selector.Owner)
 		if err != nil {
 			return compactValue{}, err
 		}
@@ -43,7 +50,7 @@ func (index *compactIndex) resolveSelector(ctx context.Context, selector Selecto
 			}
 			continue
 		}
-		key, inside, err := index.selectorKey(ctx, selector, moduleGlob, row)
+		key, inside, err := index.selectorKey(ctx, selector, moduleGlob, ownerGlob, row)
 		if err != nil {
 			return compactValue{}, err
 		}
@@ -63,19 +70,19 @@ func (index *compactIndex) resolveSelector(ctx context.Context, selector Selecto
 	return compactValue{symbols: symbols, matches: matches}, nil
 }
 
-// selectorFilter narrows a symbols query by a selector's kind and, for a plain name, by that name
-// through the search index.
-func selectorFilter(query *gorm.DB, selector Selector) (*gorm.DB, error) {
-	kinds := map[string][]string{"func": {"func", "method"}, "method": {"method"}, "field": {"field"}, "struct": {"type"}, "type": {"type"}, "var": {"var"}}
-	switch selector.Kind {
-	case "func", "method", "field", "struct", "type", "var":
-		query = query.Where("kind IN ?", kinds[selector.Kind])
-		if !strings.ContainsAny(selector.Pattern, "*?\\./") {
-			query = query.Where("search_name = ? AND name = ?", storage.SearchName(selector.Pattern), selector.Pattern)
-		}
-	case "pkg", "mod", "all", "path":
-	default:
-		return nil, fmt.Errorf("unknown selector kind %q", selector.Kind)
+// selectorFilter narrows a symbols query by the kinds a selector selects and, for a plain name, by
+// that name through the search index.
+func selectorFilter(query *gorm.DB, selector Selector, registry symbolhandle.Kinds) (*gorm.DB, error) {
+	kinds, err := selectorKinds(selector, registry)
+	if err != nil {
+		return nil, err
+	}
+	if !symbolSelectors[selector.Kind] {
+		return query, nil
+	}
+	query = query.Where("kind IN ?", kinds)
+	if !strings.ContainsAny(selector.Pattern, "*?\\./") {
+		query = query.Where("search_name = ? AND name = ?", storage.SearchName(selector.Pattern), selector.Pattern)
 	}
 	return query, nil
 }
@@ -85,7 +92,12 @@ func selectorFilter(query *gorm.DB, selector Selector) (*gorm.DB, error) {
 // own module's root, so dependencies, other roots, and symbols no selected snapshot defines are never
 // read or named.
 func (index *compactIndex) selectorCandidates(ctx context.Context, selector Selector, glob, moduleGlob selectorGlob) ([]storage.Symbol, error) {
-	filtered, err := selectorFilter(index.database.WithContext(ctx).Model(&storage.Symbol{}), selector)
+	if selector.Kind == "kind" {
+		if err := index.register(ctx, selector.SymbolKind); err != nil {
+			return nil, err
+		}
+	}
+	filtered, err := selectorFilter(index.database.WithContext(ctx).Model(&storage.Symbol{}), selector, index.kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -134,15 +146,27 @@ func (index *compactIndex) selectorCandidates(ctx context.Context, selector Sele
 
 // selectorKey is the spelling a selector's pattern is matched against: the package path, the module
 // key, the name, or the qualified name when the pattern has a package or owner, and with a module
-// pattern the package path relative to the module; false for a package outside its module.
-func (index *compactIndex) selectorKey(ctx context.Context, selector Selector, moduleGlob selectorGlob, row storage.Symbol) (string, bool, error) {
+// pattern the package path relative to the module; false for a package outside its module. An
+// Entity:Field reference matches the name, and is false for a symbol whose direct owner's name its
+// owner glob rejects.
+func (index *compactIndex) selectorKey(ctx context.Context, selector Selector, moduleGlob, ownerGlob selectorGlob, row storage.Symbol) (string, bool, error) {
+	if selector.Owner != "" {
+		if row.OwnerID == nil {
+			return "", false, nil
+		}
+		owner, found := index.rows[*row.OwnerID]
+		if !found {
+			return "", false, fmt.Errorf("owner %s of symbol %s was not prefetched", *row.OwnerID, row.ID)
+		}
+		return row.Name, ownerGlob.matches(owner.Name), nil
+	}
 	key := row.PackagePath
 	switch selector.Kind {
 	case "mod":
 		key = row.ModuleKey
 	case "all":
 		key = row.Name
-	case "func", "method", "field", "struct", "type", "var":
+	case "func", "method", "field", "struct", "type", "var", "kind":
 		key = row.Name
 		if strings.ContainsAny(selector.Pattern, "./") {
 			name, err := index.queryName(ctx, row)

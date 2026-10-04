@@ -113,7 +113,7 @@ func (index *compactIndex) evaluate(ctx context.Context, expression *Expr, resul
 		if len(symbols) == 0 {
 			return compactValue{}, &UnresolvedSymbolError{Symbol: expression.Symbol, Coverage: coverageSummary(result.Coverage)}
 		}
-		if len(symbols) > 1 && !strings.ContainsAny(expression.Symbol, "*?") {
+		if _, exact := globLiteral(expression.Symbol); len(symbols) > 1 && exact {
 			return compactValue{}, ambiguousSymbols{symbols: symbols}
 		}
 		matches, err := index.symbolRows(ctx, symbols)
@@ -340,7 +340,7 @@ func (index *compactIndex) symbolRows(ctx context.Context, symbols []ModuleSymbo
 			continue
 		}
 		if !defined[symbol.ID] {
-			rows = append(rows, ModuleMatch{Kind: "symbol", SymbolID: symbol.ID, Identifier: symbol.identifier()})
+			rows = append(rows, ModuleMatch{Kind: "symbol", SymbolID: symbol.ID, Identifier: index.identifier(symbol)})
 		}
 	}
 	sortMatches(rows)

@@ -21,10 +21,21 @@ func newCompactIndex(index *indexContext) *compactIndex {
 }
 
 func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]ModuleSymbol, error) {
-	wildcard := strings.ContainsAny(pattern, "*?")
+	literal, exact := globLiteral(pattern)
 	query := index.database.WithContext(ctx).Model(&storage.Symbol{})
-	lastDot, lastSlash := strings.LastIndex(pattern, "."), strings.LastIndex(pattern, "/")
-	if wildcard {
+	if exact {
+		lastDot, lastSlash := strings.LastIndex(literal, "."), strings.LastIndex(literal, "/")
+		switch {
+		case lastDot > lastSlash:
+			name := literal[lastDot+1:]
+			query = query.Where("search_name = ? AND name = ?", storage.SearchName(name), name)
+		case lastSlash >= 0:
+			query = query.Where("kind = ? AND package_path = ?", "package", literal)
+		default:
+			query = query.Where("search_name = ? AND name = ?", storage.SearchName(literal), literal)
+		}
+	} else if !strings.Contains(pattern, `\`) {
+		lastDot, lastSlash := strings.LastIndex(pattern, "."), strings.LastIndex(pattern, "/")
 		if lastDot > lastSlash && lastSlash >= 0 && !strings.ContainsAny(pattern[:lastDot], "*?") {
 			query = query.Where("package_path = ?", pattern[:lastDot])
 		}
@@ -34,19 +45,9 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 				query = query.Where("search_name LIKE ?", prefix+"%")
 			}
 		}
-	} else {
-		switch {
-		case lastDot > lastSlash:
-			name := pattern[lastDot+1:]
-			query = query.Where("search_name = ? AND name = ?", storage.SearchName(name), name)
-		case lastSlash >= 0:
-			query = query.Where("kind = ? AND package_path = ?", "package", pattern)
-		default:
-			query = query.Where("search_name = ? AND name = ?", storage.SearchName(pattern), pattern)
-		}
 	}
 	var glob selectorGlob
-	if wildcard {
+	if !exact {
 		var err error
 		glob, err = compileSelectorGlob(pattern)
 		if err != nil {
@@ -73,23 +74,26 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 	return index.activeSymbols(ctx, matched)
 }
 
+// symbolPatternMatches reports whether a bare symbol pattern selects a qualified name: an exact
+// pattern, its escapes removed, by its full path or a dotted suffix, and a glob by the glob.
 func symbolPatternMatches(pattern, qualified string, glob selectorGlob) bool {
-	legacyChildren := strings.HasSuffix(pattern, ".*") && strings.Count(pattern, "*") == 1 && !strings.Contains(pattern, "?")
+	literal, exact := globLiteral(pattern)
+	legacyChildren := strings.HasSuffix(pattern, ".*") && strings.Count(pattern, "*") == 1 && !strings.ContainsAny(pattern, `?\`)
 	if strings.Contains(pattern, "/") {
 		if legacyChildren {
 			return directChild(qualified, strings.TrimSuffix(pattern, ".*"))
 		}
-		if strings.ContainsAny(pattern, "*?") {
+		if !exact {
 			return glob.matches(qualified)
 		}
-		return qualified == pattern
+		return qualified == literal
 	}
 	short := qualified[strings.LastIndex(qualified, "/")+1:]
 	if legacyChildren {
 		prefix := strings.TrimSuffix(pattern, ".*")
 		return directChild(short, prefix) || directChildSuffix(short, prefix)
 	}
-	if strings.ContainsAny(pattern, "*?") {
+	if !exact {
 		for {
 			if glob.matches(short) {
 				return true
@@ -101,7 +105,7 @@ func symbolPatternMatches(pattern, qualified string, glob selectorGlob) bool {
 			short = short[dot+1:]
 		}
 	}
-	return short == pattern || strings.HasSuffix(short, "."+pattern)
+	return short == literal || strings.HasSuffix(short, "."+literal)
 }
 
 func directChild(name, prefix string) bool {
