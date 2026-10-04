@@ -76,9 +76,9 @@ var tallyAfter = map[string]*string{
 func countDecodes() *[]string {
 	decoded := &[]string{}
 	original := decodeDocument
-	decodeDocument = func(document storage.Document, source storage.SourceRevision) (storage.DocumentContent, error) {
+	decodeDocument = func(document storage.Document, source storage.SourceRevision, options ...storage.DecodeOption) (storage.DocumentContent, error) {
 		*decoded = append(*decoded, document.PathKey)
-		return original(document, source)
+		return original(document, source, options...)
 	}
 	DeferCleanup(func() { decodeDocument = original })
 	return decoded
