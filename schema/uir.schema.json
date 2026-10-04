@@ -126,6 +126,9 @@
           "$ref": "#/$defs/SourceCode"
         }
       },
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "ASTErrorType": {
@@ -348,8 +351,102 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "not": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "assignment:binary"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:binary:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:cast"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:cast:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:destructure"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:destructure:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:expression"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:expression:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:literal"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:literal:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:object"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:object:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:template"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:template:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:tuple"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:tuple:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:unary"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:unary:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:variable"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:variable:"
+              }
+            ]
+          },
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -453,8 +550,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:binary"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:binary:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -512,8 +619,29 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "control:block"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^control:block:"
+                }
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "doc"
+              ]
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -572,8 +700,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:break"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:break:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -628,8 +766,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:cast"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:cast:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -682,6 +830,9 @@
           ]
         }
       },
+      "required": [
+        "type"
+      ],
       "additionalProperties": false
     },
     "CommentType": {
@@ -738,8 +889,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:condition"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:condition:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -760,6 +921,10 @@
           "$ref": "#/$defs/FieldValidation"
         }
       },
+      "required": [
+        "condition",
+        "validation"
+      ],
       "additionalProperties": false
     },
     "ConditionalRecordValidation": {
@@ -773,6 +938,10 @@
           "$ref": "#/$defs/RecordValidation"
         }
       },
+      "required": [
+        "condition",
+        "validation"
+      ],
       "additionalProperties": false
     },
     "ConstDeclStmt": {
@@ -820,8 +989,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:const"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:const:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -829,6 +1008,9 @@
           "const": "decl:const"
         }
       },
+      "required": [
+        "field"
+      ],
       "additionalProperties": false
     },
     "ContinueStmt": {
@@ -873,8 +1055,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:continue"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:continue:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -904,6 +1096,9 @@
           "$ref": "#/$defs/DestructuringStmt"
         }
       },
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "DestructuringStmt": {
@@ -968,8 +1163,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:destructure"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:destructure:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -989,14 +1194,7 @@
       "properties": {
         "Method": {
           "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -1063,8 +1261,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "dispatch_call"
+            },
+            {
+              "type": "string",
+              "pattern": "^dispatch_call:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1125,8 +1333,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "doc"
+            },
+            {
+              "type": "string",
+              "pattern": "^doc:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1222,8 +1440,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call:api"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:api:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1342,8 +1570,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:expression"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:expression:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1572,8 +1810,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:loop:foreach"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:loop:foreach:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1637,8 +1885,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:loop:for"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:loop:for:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1696,8 +1954,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:func"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:func:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1705,6 +1973,9 @@
           "const": "decl:func"
         }
       },
+      "required": [
+        "function"
+      ],
       "additionalProperties": false
     },
     "GeneratorHint": {
@@ -1875,8 +2146,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:if"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:if:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1970,8 +2251,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:literal"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:literal:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -1989,14 +2280,7 @@
       "properties": {
         "Method": {
           "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -2060,8 +2344,46 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "not": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "call:api"
+              },
+              {
+                "type": "string",
+                "pattern": "^call:api:"
+              },
+              {
+                "type": "string",
+                "const": "call:read:record"
+              },
+              {
+                "type": "string",
+                "pattern": "^call:read:record:"
+              },
+              {
+                "type": "string",
+                "const": "call:write:record"
+              },
+              {
+                "type": "string",
+                "pattern": "^call:write:record:"
+              }
+            ]
+          },
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -2237,44 +2559,1049 @@
       "additionalProperties": false
     },
     "Node": {
-      "anyOf": [
+      "oneOf": [
         {
-          "$ref": "#/$defs/ModuleNode"
+          "$ref": "#/$defs/NodeModuleNode"
         },
         {
-          "$ref": "#/$defs/PackageNode"
+          "$ref": "#/$defs/NodePackageNode"
         },
         {
-          "$ref": "#/$defs/TypedNode"
+          "$ref": "#/$defs/NodeTypedNode"
         },
         {
-          "$ref": "#/$defs/MethodNode"
+          "$ref": "#/$defs/NodeMethodNode"
         },
         {
-          "$ref": "#/$defs/ASTRecord"
+          "$ref": "#/$defs/NodeASTRecord"
         },
         {
-          "$ref": "#/$defs/ASTEndpoint"
+          "$ref": "#/$defs/NodeASTEndpoint"
         },
         {
-          "$ref": "#/$defs/RecordField"
+          "$ref": "#/$defs/NodeRecordField"
         },
         {
-          "$ref": "#/$defs/RecordTable"
+          "$ref": "#/$defs/NodeRecordTable"
         },
         {
-          "$ref": "#/$defs/RecordColumn"
+          "$ref": "#/$defs/NodeRecordColumn"
         },
         {
-          "$ref": "#/$defs/RecordIndex"
+          "$ref": "#/$defs/NodeRecordIndex"
         },
         {
-          "$ref": "#/$defs/RecordForeignKey"
+          "$ref": "#/$defs/NodeRecordForeignKey"
         },
         {
-          "$ref": "#/$defs/NodeRef"
+          "$ref": "#/$defs/NodeNodeRef"
         }
       ]
+    },
+    "NodeASTEndpoint": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "endpointType": {
+          "$ref": "#/$defs/EndpointType"
+        },
+        "errors": {
+          "description": "Errors represents a list of errors that can be returned by an endpoint",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTError"
+          }
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "httpMethod": {
+          "description": "HTTP Method e.g. \"GET\", \"POST\" or \"PUT\". It is keyed \"httpMethod\" because \"method\" is Identifier.Method, the endpoint's name, which it used to shadow.",
+          "$ref": "#/$defs/EndpointPointMethod"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/ASTRecord"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "endpoint"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "output": {
+          "$ref": "#/$defs/ASTRecord"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeASTRecord": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extends": {
+          "description": "Extends a record by including all the fields and references from the referenced record When there are conflicts the final record takes precedence, followed by the first record in the extends list etc. This allows for reusing and composing records in a flexible way",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "record"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "recordType": {
+          "$ref": "#/$defs/RecordType"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordReference"
+          }
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "validation": {
+          "$ref": "#/$defs/RecordValidation"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeMethodNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTError"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "isAsync": {
+          "type": "boolean"
+        },
+        "isGenerator": {
+          "type": "boolean"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "method"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "returnType": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "returns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeParam"
+          }
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeModuleNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "module"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PackageNode"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeNodeRef": {
+      "description": "NodeRef is a leaf reference to a UIR node by its identifier. It names the node without holding it, so it has no children to walk — the referenced node is walked where it is declared — and no location or language, which its Identifier does not carry.",
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "ref"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodePackageNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTEndpoint"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "initFunctions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "package"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordTable"
+          }
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypedNode"
+          }
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeRecordColumn": {
+      "description": "RecordColumn is one column of a RecordTable. SQLType and FieldType both survive on purpose: FieldType is the portable mapping a TypeScript or JSON-schema emitter wants, SQLType is the dialect's own spelling that a CONVERT() or a DDL round-trip needs. Identifier.Field holds the column name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "autoIncrement": {
+          "type": "boolean"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "defaultValue": {
+          "$ref": "#/$defs/TypedValue"
+        },
+        "enum": {
+          "description": "Enum is the closed value set when the dialect declares one.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "fieldType": {
+          "description": "FieldType is the portable mapping of SQLType.",
+          "$ref": "#/$defs/RecordFieldType"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "label": {
+          "type": "string"
+        },
+        "maxLength": {
+          "description": "MaxLength is the character width; -1 means unbounded (\"max\"/text).",
+          "type": "integer"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "column"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "nullable": {
+          "type": "boolean"
+        },
+        "ordinal": {
+          "description": "Ordinal is the 1-based position in the table, as the catalogue reports it.",
+          "type": "integer"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "precision": {
+          "type": "integer"
+        },
+        "primaryKey": {
+          "type": "boolean"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "scale": {
+          "type": "integer"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "sqlType": {
+          "description": "SQLType is the dialect type verbatim, e.g. \"uniqueidentifier\", \"nvarchar\", \"datetime2\".",
+          "type": "string"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeRecordField": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "defaultValue": {
+          "$ref": "#/$defs/TypedValue"
+        },
+        "field": {
+          "type": "string"
+        },
+        "fieldType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordFieldType"
+            },
+            {
+              "type": "string",
+              "enum": [
+                ""
+              ]
+            }
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "label": {
+          "type": "string"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "record_field"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeRef": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "validation": {
+          "$ref": "#/$defs/FieldValidation"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        },
+        "writeOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fieldType",
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeRecordForeignKey": {
+      "description": "RecordForeignKey is a foreign-key constraint on a RecordTable, kept as structure rather than a formatted string so a consumer can follow it. Identifier.Field holds the constraint name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "columns": {
+          "description": "Columns and ReferencedColumns are positionally paired.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "foreign_key"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "onDelete": {
+          "type": "string"
+        },
+        "onUpdate": {
+          "type": "string"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "referencedColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "referencedSchema": {
+          "type": "string"
+        },
+        "referencedTable": {
+          "type": "string"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeRecordIndex": {
+      "description": "RecordIndex is an index on a RecordTable. Identifier.Field holds the index name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "clustered": {
+          "type": "boolean"
+        },
+        "columns": {
+          "description": "Columns are the key columns in index order — the order is what makes an index usable for a given predicate, so it is not sorted.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "condition": {
+          "description": "Condition is the filter predicate of a partial/filtered index.",
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "included": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "indexType": {
+          "description": "IndexType is the dialect's own kind, e.g. \"BTREE\", \"CLUSTERED\".",
+          "type": "string"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "index"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "primary": {
+          "type": "boolean"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
+    "NodeRecordTable": {
+      "description": "RecordTable is a database table or view. It exists because ASTRecord cannot carry what a relational schema actually knows. A generic record has fields; a table has columns with a dialect type, an ordinal position and a nullability, an ordered primary key, indexes, and foreign keys pointing at other tables. Squeezing that into RecordField meant dropping most of it — the raw SQL type collapsed into a portable one, the primary key merged with auto-increment into ReadOnly, and indexes smuggled through a Properties map — so every consumer that needed the real thing went back to the database catalogue itself. Identity follows ASTRecord: Identifier.Package is the schema, Identifier.Type is the table name.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordColumn"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "extends": {
+          "description": "Triggers and other rules defined against the table.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ASTRecord"
+          }
+        },
+        "field": {
+          "type": "string"
+        },
+        "foreignKeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordForeignKey"
+          }
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordIndex"
+          }
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "table"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "primaryKey": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "recordType": {
+          "description": "RecordTypeTable or RecordTypeView.",
+          "$ref": "#/$defs/RecordType"
+        },
+        "rowCount": {
+          "description": "RowCount is the catalogue's estimate, nil when it was not asked for.",
+          "type": "integer"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
     },
     "NodeRef": {
       "description": "NodeRef is a leaf reference to a UIR node by its identifier. It names the node without holding it, so it has no children to walk — the referenced node is walked where it is declared — and no location or language, which its Identifier does not carry.",
@@ -2347,6 +3674,115 @@
         "statement"
       ]
     },
+    "NodeTypedNode": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "constructor": {
+          "$ref": "#/$defs/MethodNode"
+        },
+        "destructor": {
+          "$ref": "#/$defs/MethodNode"
+        },
+        "extends": {
+          "$ref": "#/$defs/TypeReference"
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "implements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeReference"
+          }
+        },
+        "isAbstract": {
+          "type": "boolean"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "node_kind": {
+          "description": "The kind uir's registry stamps under node_kind so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "class"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "sourceCode": {
+          "$ref": "#/$defs/SourceCode"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        },
+        "typeParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypeParam"
+          }
+        },
+        "types": {
+          "description": "Defines any inner types or classes",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypedNode"
+          }
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "required": [
+        "node_kind"
+      ],
+      "additionalProperties": false
+    },
     "ObjectLiteralEntry": {
       "description": "ObjectLiteralEntry is one key/value pair of an ObjectLiteralStmt.",
       "type": "object",
@@ -2409,8 +3845,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:object"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:object:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -2533,6 +3979,10 @@
           "type": "string"
         }
       },
+      "required": [
+        "path",
+        "content"
+      ],
       "additionalProperties": false
     },
     "RawStmt": {
@@ -2586,8 +4036,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "raw"
+            },
+            {
+              "type": "string",
+              "pattern": "^raw:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -2595,6 +4055,9 @@
           "const": "raw"
         }
       },
+      "required": [
+        "source"
+      ],
       "additionalProperties": false
     },
     "RecordColumn": {
@@ -2797,6 +4260,9 @@
           "type": "boolean"
         }
       },
+      "required": [
+        "fieldType"
+      ],
       "additionalProperties": false
     },
     "RecordFieldType": {
@@ -3010,14 +4476,7 @@
       "properties": {
         "Record": {
           "description": "Record is encoded under the \"Record\" key by the read/write codecs.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -3080,8 +4539,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call:read:record"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:read:record:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -3089,6 +4558,9 @@
           "const": "call:read:record"
         }
       },
+      "required": [
+        "expression"
+      ],
       "additionalProperties": false
     },
     "RecordReference": {
@@ -3104,6 +4576,9 @@
           "$ref": "#/$defs/RecordReferenceType"
         }
       },
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "RecordReferenceType": {
@@ -3305,14 +4780,7 @@
       "properties": {
         "Record": {
           "description": "Record is encoded under the \"Record\" key by the read/write codecs.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -3375,8 +4843,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call:write:record"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:write:record:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -3384,6 +4862,9 @@
           "const": "call:write:record"
         }
       },
+      "required": [
+        "expression"
+      ],
       "additionalProperties": false
     },
     "ReturnStmt": {
@@ -3428,8 +4909,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:return"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:return:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -3480,8 +4971,18 @@
           "type": "string"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "ref:var"
+            },
+            {
+              "type": "string",
+              "pattern": "^ref:var:"
+            }
+          ]
         },
         "statement_type": {
           "description": "The kind uir's registry stamps under statement_type so a polymorphic slot can be decoded.",
@@ -3493,6 +4994,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "SourceCode": {
@@ -3524,116 +5028,2674 @@
       "additionalProperties": false
     },
     "Statement": {
-      "anyOf": [
+      "oneOf": [
         {
-          "$ref": "#/$defs/AssignmentStmt"
+          "$ref": "#/$defs/StatementAssignmentStmt"
         },
         {
-          "$ref": "#/$defs/BinaryStmt"
+          "$ref": "#/$defs/StatementBinaryStmt"
         },
         {
-          "$ref": "#/$defs/BlockStmt"
+          "$ref": "#/$defs/StatementBlockStmt"
         },
         {
-          "$ref": "#/$defs/BreakStmt"
+          "$ref": "#/$defs/StatementBreakStmt"
         },
         {
-          "$ref": "#/$defs/CastStmt"
+          "$ref": "#/$defs/StatementCastStmt"
         },
         {
-          "$ref": "#/$defs/ConditionStmt"
+          "$ref": "#/$defs/StatementConditionStmt"
         },
         {
-          "$ref": "#/$defs/ConstDeclStmt"
+          "$ref": "#/$defs/StatementConstDeclStmt"
         },
         {
-          "$ref": "#/$defs/ContinueStmt"
+          "$ref": "#/$defs/StatementContinueStmt"
         },
         {
-          "$ref": "#/$defs/EndpointCallStmt"
+          "$ref": "#/$defs/StatementEndpointCallStmt"
         },
         {
-          "$ref": "#/$defs/ExprStmt"
+          "$ref": "#/$defs/StatementExprStmt"
         },
         {
-          "$ref": "#/$defs/ForStmt"
+          "$ref": "#/$defs/StatementForStmt"
         },
         {
-          "$ref": "#/$defs/ForEachStmt"
+          "$ref": "#/$defs/StatementForEachStmt"
         },
         {
-          "$ref": "#/$defs/FunctionDeclStmt"
+          "$ref": "#/$defs/StatementFunctionDeclStmt"
         },
         {
-          "$ref": "#/$defs/IfStmt"
+          "$ref": "#/$defs/StatementIfStmt"
         },
         {
-          "$ref": "#/$defs/LiteralStmt"
+          "$ref": "#/$defs/StatementLiteralStmt"
         },
         {
-          "$ref": "#/$defs/MethodCallStmt"
+          "$ref": "#/$defs/StatementMethodCallStmt"
         },
         {
-          "$ref": "#/$defs/DispatchCallStmt"
+          "$ref": "#/$defs/StatementDispatchCallStmt"
         },
         {
-          "$ref": "#/$defs/RecordReadStmt"
+          "$ref": "#/$defs/StatementRecordReadStmt"
         },
         {
-          "$ref": "#/$defs/RecordWriteStmt"
+          "$ref": "#/$defs/StatementRecordWriteStmt"
         },
         {
-          "$ref": "#/$defs/ReturnStmt"
+          "$ref": "#/$defs/StatementReturnStmt"
         },
         {
-          "$ref": "#/$defs/SwitchStmt"
+          "$ref": "#/$defs/StatementSwitchStmt"
         },
         {
-          "$ref": "#/$defs/ThrowStmt"
+          "$ref": "#/$defs/StatementThrowStmt"
         },
         {
-          "$ref": "#/$defs/TryStmt"
+          "$ref": "#/$defs/StatementTryStmt"
         },
         {
-          "$ref": "#/$defs/TupleStmt"
+          "$ref": "#/$defs/StatementTupleStmt"
         },
         {
-          "$ref": "#/$defs/ObjectLiteralStmt"
+          "$ref": "#/$defs/StatementObjectLiteralStmt"
         },
         {
-          "$ref": "#/$defs/TypeDeclStmt"
+          "$ref": "#/$defs/StatementTypeDeclStmt"
         },
         {
-          "$ref": "#/$defs/UnaryStmt"
+          "$ref": "#/$defs/StatementUnaryStmt"
         },
         {
-          "$ref": "#/$defs/VariableDeclStmt"
+          "$ref": "#/$defs/StatementVariableDeclStmt"
         },
         {
-          "$ref": "#/$defs/VariableStmt"
+          "$ref": "#/$defs/StatementVariableStmt"
         },
         {
-          "$ref": "#/$defs/WhileStmt"
+          "$ref": "#/$defs/StatementWhileStmt"
         },
         {
-          "$ref": "#/$defs/DocStmt"
+          "$ref": "#/$defs/StatementDocStmt"
         },
         {
-          "$ref": "#/$defs/TestStmt"
+          "$ref": "#/$defs/StatementTestStmt"
         },
         {
-          "$ref": "#/$defs/RawStmt"
+          "$ref": "#/$defs/StatementRawStmt"
         },
         {
-          "$ref": "#/$defs/DestructuringStmt"
+          "$ref": "#/$defs/StatementDestructuringStmt"
         },
         {
-          "$ref": "#/$defs/TemplateLiteralStmt"
+          "$ref": "#/$defs/StatementTemplateLiteralStmt"
         },
         {
-          "$ref": "#/$defs/ScopedVariableRef"
+          "$ref": "#/$defs/StatementScopedVariableRef"
         }
       ]
+    },
+    "StatementAssignmentStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "isDeclaration": {
+          "description": "IsDeclaration marks this assignment as the first introduction of the binding in its scope. Language emitters render it as a declaration (`let X = expr;` in TypeScript, `var X := expr` in Go-ish, etc.) instead of a plain assignment. Op stays as AssignmentOpAssign.",
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "op": {
+          "$ref": "#/$defs/AssignmentOp"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "not": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "assignment:binary"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:binary:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:cast"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:cast:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:destructure"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:destructure:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:expression"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:expression:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:literal"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:literal:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:object"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:object:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:template"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:template:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:tuple"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:tuple:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:unary"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:unary:"
+              },
+              {
+                "type": "string",
+                "const": "assignment:variable"
+              },
+              {
+                "type": "string",
+                "pattern": "^assignment:variable:"
+              }
+            ]
+          },
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment"
+        },
+        "target": {
+          "$ref": "#/$defs/ScopedVariableRef"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementBinaryStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "left": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "op": {
+          "$ref": "#/$defs/BinaryOp"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "right": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:binary"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:binary:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:binary"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementBlockStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Statement"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "control:block"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^control:block:"
+                }
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "doc"
+              ]
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:block"
+        },
+        "variables": {
+          "description": "Defines the variable declared in the block's scope",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementBreakStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:break"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:break:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:break"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementCastStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expr": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:cast"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:cast:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:cast"
+        },
+        "targetType": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementConditionStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expr": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:condition"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:condition:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:condition"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementConstDeclStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "field": {
+          "$ref": "#/$defs/RecordField"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:const"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:const:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:const"
+        }
+      },
+      "required": [
+        "field",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementContinueStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:continue"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:continue:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:continue"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementDestructuringStmt": {
+      "description": "DestructuringStmt represents destructuring assignment patterns e.g. const {a, b} = obj; const [x, y] = arr; const {a, ...rest} = obj",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "bindings": {
+          "description": "The destructured bindings (name → alias/default pairs)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DestructureBinding"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "declare": {
+          "description": "Declare selects the binding form. \"\" (the default) declares with `const`; DestructureDeclareLet declares a mutable binding; and DestructureDeclareNone assigns onto bindings that already exist in the enclosing scope, which is the only form that can target a name another statement also writes.",
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "isArray": {
+          "description": "Whether this is an object ({}) or array ([]) destructuring",
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "rest": {
+          "description": "The rest element (...rest)",
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:destructure"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:destructure:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:destructure"
+        },
+        "value": {
+          "description": "The source expression being destructured",
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementDispatchCallStmt": {
+      "description": "DispatchCallStmt is a call whose target is chosen at run time among Candidates: an interface method with several implementers, a rule name several scopes define. Method is the declared target.",
+      "type": "object",
+      "properties": {
+        "Method": {
+          "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
+          "$ref": "#/$defs/Node"
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "candidates": {
+          "description": "Candidates are the implementations that may run, encoded as nodes by the statement's codec.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Node"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "receiver": {
+          "description": "nil if function call",
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "dispatch_call"
+            },
+            {
+              "type": "string",
+              "pattern": "^dispatch_call:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "dispatch_call"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementDocStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DocStmt"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "doc_type": {
+          "$ref": "#/$defs/DocType"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "doc"
+            },
+            {
+              "type": "string",
+              "pattern": "^doc:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "doc"
+        },
+        "style": {
+          "type": "string"
+        },
+        "text": {
+          "description": "Content is the documentation text. It is keyed \"text\" because \"content\" is the statement's own source (statementBase.Content), which it used to shadow.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementEndpointCallStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/Node"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call:api"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:api:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call:api"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementExprStmt": {
+      "description": "ExprStmt represents a value e.g. a literal, variable reference, result of a method call, etc.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "binary": {
+          "$ref": "#/$defs/BinaryStmt"
+        },
+        "cast": {
+          "$ref": "#/$defs/CastStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "dispatch_call": {
+          "$ref": "#/$defs/DispatchCallStmt"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "endpoint_call": {
+          "$ref": "#/$defs/EndpointCallStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "literal": {
+          "$ref": "#/$defs/LiteralStmt"
+        },
+        "method_call": {
+          "$ref": "#/$defs/MethodCallStmt"
+        },
+        "object_literal": {
+          "$ref": "#/$defs/ObjectLiteralStmt"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "record_read": {
+          "$ref": "#/$defs/RecordReadStmt"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:expression"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:expression:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:expression"
+        },
+        "tuple": {
+          "$ref": "#/$defs/TupleStmt"
+        },
+        "unary": {
+          "$ref": "#/$defs/UnaryStmt"
+        },
+        "variable": {
+          "$ref": "#/$defs/ScopedVariableRef"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementForEachStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "iterable": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:loop:foreach"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:loop:foreach:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:loop:foreach"
+        },
+        "variable": {
+          "$ref": "#/$defs/AssignmentStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementForStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "cond": {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "init": {
+          "$ref": "#/$defs/AssignmentStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:loop:for"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:loop:for:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:loop:for"
+        },
+        "update": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementFunctionDeclStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "function": {
+          "$ref": "#/$defs/MethodNode"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:func"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:func:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:func"
+        }
+      },
+      "required": [
+        "function",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementIfStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "condition": {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        "content": {
+          "type": "string"
+        },
+        "else": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:if"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:if:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:if"
+        },
+        "then": {
+          "$ref": "#/$defs/BlockStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementLiteralStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "fieldType": {
+          "$ref": "#/$defs/RecordFieldType"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:literal"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:literal:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:literal"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementMethodCallStmt": {
+      "type": "object",
+      "properties": {
+        "Method": {
+          "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
+          "$ref": "#/$defs/Node"
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "is_constructor": {
+          "description": "IsConstructor signals the language emitter that this call should be rendered as a constructor invocation (e.g. `new X(...)` in TS). When false (default), the call is a free function or method invocation. Language emitters that lack a `new` concept ignore this flag.",
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "receiver": {
+          "description": "nil if function call",
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "not": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "call:api"
+              },
+              {
+                "type": "string",
+                "pattern": "^call:api:"
+              },
+              {
+                "type": "string",
+                "const": "call:read:record"
+              },
+              {
+                "type": "string",
+                "pattern": "^call:read:record:"
+              },
+              {
+                "type": "string",
+                "const": "call:write:record"
+              },
+              {
+                "type": "string",
+                "pattern": "^call:write:record:"
+              }
+            ]
+          },
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementObjectLiteralStmt": {
+      "description": "ObjectLiteralStmt is an inline object literal expression, e.g. the TS `{ \"service.id\": ServiceID, Country: Country }`. Entries preserve insertion order; keys are quoted by the target emitter only when they are not bare identifiers. Distinct from TupleStmt (array literal) and from a sanitized variable reference — see ExprStmt.ObjectLiteral.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectLiteralEntry"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:object"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:object:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:object"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementRawStmt": {
+      "description": "RawStmt preserves unparseable source code verbatim for lossless round-tripping. Use this when the UIR type system cannot represent a language-specific construct.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "source": {
+          "description": "The raw source code text",
+          "type": "string"
+        },
+        "source_language": {
+          "description": "The language this raw source is from. It is keyed \"source_language\" because \"language\" is the statement's own (statementBase.Language), which it used to shadow.",
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "raw"
+            },
+            {
+              "type": "string",
+              "pattern": "^raw:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "raw"
+        }
+      },
+      "required": [
+        "source",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementRecordReadStmt": {
+      "description": "RecordReadStmt and RecordWriteStmt nest their Expression under \"expression\": flattened, its SourceCode shadowed the statement's own location and source.",
+      "type": "object",
+      "properties": {
+        "Record": {
+          "description": "Record is encoded under the \"Record\" key by the read/write codecs.",
+          "$ref": "#/$defs/Node"
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "recordType": {
+          "description": "RecordType is the kind of record read or written (table, view, ...), which a Record held as a bare NodeRef cannot say.",
+          "$ref": "#/$defs/RecordType"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call:read:record"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:read:record:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call:read:record"
+        }
+      },
+      "required": [
+        "expression",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementRecordWriteStmt": {
+      "type": "object",
+      "properties": {
+        "Record": {
+          "description": "Record is encoded under the \"Record\" key by the read/write codecs.",
+          "$ref": "#/$defs/Node"
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/ExprStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "recordType": {
+          "description": "RecordType is the kind of record read or written (table, view, ...), which a Record held as a bare NodeRef cannot say.",
+          "$ref": "#/$defs/RecordType"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "call:write:record"
+            },
+            {
+              "type": "string",
+              "pattern": "^call:write:record:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "call:write:record"
+        }
+      },
+      "required": [
+        "expression",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementReturnStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:return"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:return:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:return"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementScopedVariableRef": {
+      "type": "object",
+      "properties": {
+        "defaultValue": {
+          "description": "Optional default value if the variable is null in the block",
+          "$ref": "#/$defs/TypedValue"
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "description": "The method  the node belongs to",
+          "type": "string"
+        },
+        "module": {
+          "description": "The module, namespace, database server, API base url the node belongs to",
+          "type": "string"
+        },
+        "name": {
+          "description": "The name or path of a variable in the current scope",
+          "type": "string"
+        },
+        "node_type": {
+          "$ref": "#/$defs/NodeType"
+        },
+        "package": {
+          "description": "The package or database scheme the node belongs to",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Signature is a way of distinguishing nodes at the Method/Field level and below It is not guaranteed to be unique across different methods/types/packages/modules e.g. For overloaded methods it will be the parameter types and return type that distinguish them for statements within a method it would be the line number and column number",
+          "type": "string"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "ref:var"
+            },
+            {
+              "type": "string",
+              "pattern": "^ref:var:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "The kind uir's registry stamps under statement_type so a polymorphic slot can be decoded.",
+          "type": "string",
+          "const": "ref:var"
+        },
+        "type": {
+          "description": "The type, class, table, API group the node belongs to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementSwitchStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "body": {
+                "$ref": "#/$defs/BlockStmt"
+              },
+              "condition": {
+                "$ref": "#/$defs/ConditionStmt"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:switch"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:switch:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:switch"
+        },
+        "value": {
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementTemplateLiteralStmt": {
+      "description": "TemplateLiteralStmt represents template literals with embedded expressions e.g. `Hello ${name}, you have ${count} items`",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "expressions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExprStmt"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:template"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:template:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:template"
+        },
+        "strings": {
+          "description": "Alternating string parts and expression parts Strings[0] + Expressions[0] + Strings[1] + Expressions[1] + ... + Strings[n]",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tag": {
+          "description": "Tag function for tagged templates (e.g. html`...`)",
+          "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "required": [
+        "strings",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementTestStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Statement"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "test"
+            },
+            {
+              "type": "string",
+              "pattern": "^test:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "test"
+        },
+        "variables": {
+          "description": "Defines the variable declared in the block's scope",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordField"
+          }
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementThrowStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "exception": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:throw"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:throw:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:throw"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementTryStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "catch": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:try"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:try:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:try"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementTupleStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExprStmt"
+          }
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:tuple"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:tuple:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:tuple"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
     },
     "StatementType": {
       "type": "string",
@@ -3701,6 +7763,359 @@
         "dispatch_call"
       ]
     },
+    "StatementTypeDeclStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:type"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:type:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:type"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementUnaryStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "op": {
+          "$ref": "#/$defs/UnaryOp"
+        },
+        "operand": {
+          "$ref": "#/$defs/ExprStmt"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:unary"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:unary:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:unary"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementVariableDeclStmt": {
+      "description": "The declaration statements nest their declared node under its own key: the statement and the node each carry Metadata (and the node its own Identifier), and flattened into one object the node's copy was shadowed and lost.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "field": {
+          "$ref": "#/$defs/RecordField"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:var"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:var:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "decl:var"
+        }
+      },
+      "required": [
+        "field",
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementVariableStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:variable"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:variable:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "assignment:variable"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatementWhileStmt": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Annotation"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/BlockStmt"
+        },
+        "column": {
+          "type": "integer"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Comment"
+          }
+        },
+        "condition": {
+          "$ref": "#/$defs/ConditionStmt"
+        },
+        "content": {
+          "type": "string"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "path": {
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "statement_refinement": {
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:loop:while"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:loop:while:"
+            }
+          ]
+        },
+        "statement_type": {
+          "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
+          "type": "string",
+          "const": "control:loop:while"
+        }
+      },
+      "required": [
+        "statement_type"
+      ],
+      "additionalProperties": false
+    },
     "SwitchStmt": {
       "type": "object",
       "properties": {
@@ -3758,8 +8173,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:switch"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:switch:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -3821,8 +8246,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:template"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:template:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -3848,6 +8283,9 @@
           "$ref": "#/$defs/ExprStmt"
         }
       },
+      "required": [
+        "strings"
+      ],
       "additionalProperties": false
     },
     "TestStmt": {
@@ -3901,8 +8339,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "test"
+            },
+            {
+              "type": "string",
+              "pattern": "^test:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -3964,8 +8412,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:throw"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:throw:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4023,8 +8481,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:try"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:try:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4082,8 +8550,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:tuple"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:tuple:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4138,8 +8616,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:type"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:type:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4163,6 +8651,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "TypeReference": {
@@ -4520,8 +9011,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:unary"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:unary:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4578,6 +9079,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "ValidationRuleOptions": {
@@ -4683,8 +9187,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "decl:var"
+            },
+            {
+              "type": "string",
+              "pattern": "^decl:var:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4692,6 +9206,9 @@
           "const": "decl:var"
         }
       },
+      "required": [
+        "field"
+      ],
       "additionalProperties": false
     },
     "VariableStmt": {
@@ -4739,8 +9256,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "assignment:variable"
+            },
+            {
+              "type": "string",
+              "pattern": "^assignment:variable:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
@@ -4809,8 +9336,18 @@
           "type": "integer"
         },
         "statement_refinement": {
-          "description": "The statement's type when it is refined past the kind under statement_type — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.",
-          "type": "string"
+          "description": "The statement's type when it is refined past the kind under statement_type, restricted to refinements its registry accepts.",
+          "type": "string",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "control:loop:while"
+            },
+            {
+              "type": "string",
+              "pattern": "^control:loop:while:"
+            }
+          ]
         },
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
