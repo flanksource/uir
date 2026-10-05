@@ -20,7 +20,7 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl migrations/11_history_prunes.hcl
 var migrations embed.FS
 
 // UirDB opens the database, discards a pre-handle or H64a index, applies the schema, seeds the builtin
