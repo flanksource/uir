@@ -165,7 +165,7 @@ var _ = Describe("call site guards", func() {
 			for _, span := range []storage.ByteSpan{ident, expression} {
 				site, err := file.siteAt(span)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(site.Call).To(Equal(call), "call of %s at bytes %v", callee, span)
+				Expect(site.Text).To(Equal(call), "call of %s at bytes %v", callee, span)
 				Expect(append([]string{}, guardTexts(site.Guards)...)).To(Equal(append([]string{}, guards...)), "guards of %s at bytes %v", callee, span)
 			}
 		},
@@ -213,6 +213,13 @@ var _ = Describe("call site guards", func() {
 		Entry("a call in another call's argument, which is its own call", "inArgument", "inArgument(n)"),
 		Entry("a call written over several lines, kept as written", "spread", "spread(\n\t\ta,\n\t\tb,\n\t)"),
 	)
+
+	It("reads a read or write as the identifier it names and the conditions that must hold to reach it", func() {
+		argument := strings.Index(guardSource, "inForPost(i)") + len("inForPost(")
+		site, err := file.accessAt(storage.ByteSpan{argument, argument + 1})
+		Expect(err).ToNot(HaveOccurred())
+		Expect([]any{site.Text, guardTexts(site.Guards)}).To(Equal([]any{"i", []string{"i < n"}}))
+	})
 
 	It("rejects a span that lies outside the source", func() {
 		_, err := file.siteAt(storage.ByteSpan{len(guardSource), len(guardSource) + 4})

@@ -28,11 +28,12 @@ func (pipeline *Pipeline) SuggestSelectors(ctx context.Context, prefix string, o
 	if options.Location != "" && options.SnapshotID != "" {
 		return ItemsWithWarnings[string]{}, fmt.Errorf("location and snapshot selectors are mutually exclusive")
 	}
-	selection, err := pipeline.moduleScopes(ctx, options, false)
+	session, _ := pipeline.session()
+	selection, err := session.moduleScopes(ctx, options, false)
 	if err != nil {
 		return ItemsWithWarnings[string]{}, err
 	}
-	choices, err := pipeline.selectorChoices(ctx, prefix, parts, selection.scopes)
+	choices, err := session.selectorChoices(ctx, prefix, parts, selection.scopes)
 	if err != nil {
 		return ItemsWithWarnings[string]{}, err
 	}
@@ -82,7 +83,7 @@ func (pipeline *Pipeline) selectorChoices(ctx context.Context, prefix string, pa
 		choices := map[string]bool{}
 		for _, scope := range scopes {
 			if literal && strings.HasPrefix(scope.root.RootKey, value) {
-				choices[kind+":"+quoteSelectorValue(scope.root.RootKey)] = true
+				choices[kind+":"+QuoteSelectorValue(scope.root.RootKey)] = true
 			}
 		}
 		return choices, nil
@@ -93,7 +94,7 @@ func (pipeline *Pipeline) selectorChoices(ctx context.Context, prefix string, pa
 			return nil, fmt.Errorf("invalid selector prefix %q: %s takes one value", prefix, kind)
 		}
 		return pipeline.suggestSymbols(ctx, Selector{Kind: kind, Pattern: parts[1].text}, scopes, func(symbol ModuleSymbol) string {
-			return kind + ":" + quoteSelectorValue(symbol.QueryName)
+			return kind + ":" + QuoteSelectorValue(symbol.QueryName)
 		})
 	case "kind":
 		return pipeline.suggestKinds(ctx, prefix, parts[1:], scopes)
@@ -106,7 +107,7 @@ func (pipeline *Pipeline) selectorChoices(ctx context.Context, prefix string, pa
 		owner = `"` + owner + `"`
 	}
 	return pipeline.suggestSymbols(ctx, Selector{Kind: "field", Owner: parts[0].text, Pattern: parts[1].text}, scopes, func(symbol ModuleSymbol) string {
-		return owner + ":" + quoteSelectorValue(symbol.Name)
+		return owner + ":" + QuoteSelectorValue(symbol.Name)
 	})
 }
 
@@ -140,13 +141,13 @@ func (pipeline *Pipeline) suggestPackages(ctx context.Context, kind string, valu
 		for _, pkg := range packages {
 			if !scoped {
 				if strings.HasPrefix(pkg.PackagePath, pattern) {
-					choices[kind+":"+quoteSelectorValue(pkg.PackagePath)] = true
+					choices[kind+":"+QuoteSelectorValue(pkg.PackagePath)] = true
 				}
 				continue
 			}
 			relative, inside := relativePackage(pkg.PackagePath, scope.root.RootKey)
 			if inside && strings.HasPrefix(relative, pattern) {
-				choices[kind+":"+quoteSelectorValue(scope.root.RootKey)+":"+quoteSelectorValue(relative)] = true
+				choices[kind+":"+QuoteSelectorValue(scope.root.RootKey)+":"+QuoteSelectorValue(relative)] = true
 			}
 		}
 	}
@@ -161,7 +162,7 @@ func (pipeline *Pipeline) suggestSymbols(ctx context.Context, selector Selector,
 	if !literal {
 		return choices, nil
 	}
-	base, err := newIndexContext(ctx, pipeline.database, scopes)
+	base, err := newIndexContext(ctx, pipeline, scopes)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,7 @@ func (pipeline *Pipeline) suggestKinds(ctx context.Context, prefix string, value
 		return nil, fmt.Errorf("invalid selector prefix %q: expected kind:<kind>[:<name>]", prefix)
 	case len(values) == 2:
 		return pipeline.suggestSymbols(ctx, Selector{Kind: "kind", SymbolKind: name, Pattern: values[1].text}, scopes, func(symbol ModuleSymbol) string {
-			return "kind:" + name + ":" + quoteSelectorValue(symbol.QueryName)
+			return "kind:" + name + ":" + QuoteSelectorValue(symbol.QueryName)
 		})
 	}
 	choices := map[string]bool{}

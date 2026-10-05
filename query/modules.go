@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -23,30 +24,33 @@ type ModuleScopeOptions struct {
 }
 
 type ModuleMatch struct {
-	Kind           string         `json:"kind"`
-	NodeKind       string         `json:"node_kind,omitempty"`
-	RootKey        string         `json:"root_key"`
-	Location       string         `json:"location"`
-	SnapshotID     string         `json:"snapshot_id"`
-	Path           string         `json:"path"`
-	PackagePath    string         `json:"package_path,omitempty"`
-	Line           *int           `json:"line,omitempty"`
-	Column         *int           `json:"column,omitempty"`
-	Identifier     uir.Identifier `json:"identifier"`
-	EndLine        *int           `json:"end_line,omitempty"`
-	EndColumn      *int           `json:"end_column,omitempty"`
-	Role           string         `json:"role,omitempty"`
-	Relation       string         `json:"relation,omitempty"`
-	SourceID       string         `json:"source_id,omitempty"`
-	SourceName     string         `json:"source_name,omitempty"`
-	SymbolID       string         `json:"symbol_id,omitempty"`
-	EnclosingID    string         `json:"enclosing_id,omitempty"`
-	EnclosingKey   string         `json:"enclosing_key,omitempty"`
-	Coverage       string         `json:"coverage,omitempty"`
-	Dispatch       bool           `json:"dispatch,omitempty"`
-	Depth          int            `json:"depth,omitempty"`
-	Declaration    string         `json:"-"`
-	DefinitionLine *int           `json:"-"`
+	Kind         string         `json:"kind"`
+	NodeKind     string         `json:"node_kind,omitempty"`
+	RootKey      string         `json:"root_key"`
+	Location     string         `json:"location"`
+	SnapshotID   string         `json:"snapshot_id"`
+	Path         string         `json:"path"`
+	PackagePath  string         `json:"package_path,omitempty"`
+	Line         *int           `json:"line,omitempty"`
+	Column       *int           `json:"column,omitempty"`
+	Identifier   uir.Identifier `json:"identifier"`
+	EndLine      *int           `json:"end_line,omitempty"`
+	EndColumn    *int           `json:"end_column,omitempty"`
+	Role         string         `json:"role,omitempty"`
+	Relation     string         `json:"relation,omitempty"`
+	SourceID     string         `json:"source_id,omitempty"`
+	SourceName   string         `json:"source_name,omitempty"`
+	SymbolID     string         `json:"symbol_id,omitempty"`
+	EnclosingID  string         `json:"enclosing_id,omitempty"`
+	EnclosingKey string         `json:"enclosing_key,omitempty"`
+	Coverage     string         `json:"coverage,omitempty"`
+	Dispatch     bool           `json:"dispatch,omitempty"`
+	Depth        int            `json:"depth,omitempty"`
+	// Payload is the producer's payload on a declaration row's symbol (storage.DocumentSymbol.Payload),
+	// as stored; occurrence rows and declarations without one carry none.
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Declaration    string          `json:"-"`
+	DefinitionLine *int            `json:"-"`
 	// span and text locate an occurrence row in its source and keep the call as the index recorded
 	// it; the call graph derives a site's guards and label from them.
 	span storage.ByteSpan
@@ -100,44 +104,63 @@ func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options
 	if options.Location != "" && options.SnapshotID != "" {
 		return ModuleQueryResult{}, errors.New("location and snapshot selectors are mutually exclusive")
 	}
-	selection, err := pipeline.moduleScopes(ctx, options, false)
+	session, trace := pipeline.session()
+	clock := newStageClock()
+	selection, err := session.moduleScopes(ctx, options, false)
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	coverage, err := pipeline.scopeCoverage(ctx, selection.scopes)
+	clock.lap("scope")
+	coverage, err := session.scopeCoverage(ctx, selection.scopes)
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	coverageStatus := coverageStage(coverage)
-	if len(selection.warnings) > 0 {
-		coverageStatus.Value = fmt.Sprintf("incomplete: %d registered checkout without an indexed head", len(selection.warnings))
-		if len(selection.warnings) > 1 {
-			coverageStatus.Value = fmt.Sprintf("incomplete: %d registered checkouts without indexed heads", len(selection.warnings))
-		}
-		if len(coverage) > 0 {
-			coverageStatus.Value += "; " + coverageSummary(coverage)
-		}
-	}
+	clock.lap("coverage")
 	result := ModuleQueryResult{Operation: expressionOperation(expression), Matches: []ModuleMatch{}, Coverage: coverage, Warnings: selection.warnings, Stages: []ResolutionStage{
-		{Name: "parse", Value: string(expressionOperation(expression))}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, coverageStatus,
+		{Name: "parse", Value: string(expressionOperation(expression))}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))},
+		selectionCoverageStage(selection, coverage),
 	}}
-	if len(selection.scopes) == 0 {
-		result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: "0 rows"})
-		return result, nil
-	}
-	if err := pipeline.runCompact(ctx, expression, selection.scopes, &result); err != nil {
-		var unresolved *UnresolvedSymbolError
-		if len(selection.warnings) > 0 && errors.As(err, &unresolved) {
-			result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: "0 rows"})
-			return result, nil
-		}
+	if err := session.execute(ctx, expression, selection, &result, clock); err != nil {
 		return ModuleQueryResult{}, err
 	}
 	if len(result.Matches) > options.Limit {
 		result.Matches = result.Matches[:options.Limit]
 	}
 	result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: fmt.Sprintf("%d rows", result.Total)})
+	result.Stages = append(result.Stages, clock.stages(trace)...)
 	return result, nil
+}
+
+// execute evaluates the expression over the selected scopes into result. With nothing to evaluate, or
+// a symbol no scope resolves while registered checkouts lack a head, the result has no rows.
+func (pipeline *Pipeline) execute(ctx context.Context, expression *Expr, selection moduleScopeSelection, result *ModuleQueryResult, clock *stageClock) error {
+	if len(selection.scopes) == 0 {
+		return nil
+	}
+	err := pipeline.runCompact(ctx, expression, selection.scopes, result, clock)
+	var unresolved *UnresolvedSymbolError
+	if len(selection.warnings) > 0 && errors.As(err, &unresolved) {
+		result.Total = 0
+		return nil
+	}
+	return err
+}
+
+// selectionCoverageStage is the coverage stage, which counts the registered checkouts without an
+// indexed head first.
+func selectionCoverageStage(selection moduleScopeSelection, coverage []ModuleCoverage) ResolutionStage {
+	stage := coverageStage(coverage)
+	if len(selection.warnings) == 0 {
+		return stage
+	}
+	stage.Value = fmt.Sprintf("incomplete: %d registered checkout without an indexed head", len(selection.warnings))
+	if len(selection.warnings) > 1 {
+		stage.Value = fmt.Sprintf("incomplete: %d registered checkouts without indexed heads", len(selection.warnings))
+	}
+	if len(coverage) > 0 {
+		stage.Value += "; " + coverageSummary(coverage)
+	}
+	return stage
 }
 
 func canonicalLocation(path string) (string, error) {

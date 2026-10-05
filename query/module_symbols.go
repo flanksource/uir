@@ -23,20 +23,28 @@ type ModuleSymbol struct {
 }
 
 func (index *indexContext) moduleSymbols(ctx context.Context, rows []storage.Symbol) ([]ModuleSymbol, error) {
+	owners := map[string]string{}
 	var ownerIDs []string
 	for _, row := range rows {
 		if err := index.register(ctx, row.Kind); err != nil {
 			return nil, fmt.Errorf("symbol %s: %w", row.ID, err)
 		}
-		if row.OwnerID != nil {
+		if row.OwnerID == nil {
+			continue
+		}
+		if owner, kept := index.symbols.row(*row.OwnerID); kept {
+			owners[owner.ID] = owner.Name
+		} else {
 			ownerIDs = append(ownerIDs, *row.OwnerID)
 		}
 	}
-	owners := map[string]string{}
 	for start := 0; start < len(ownerIDs); start += lookupBatch {
 		var found []storage.Symbol
-		if err := index.database.WithContext(ctx).Select("id", "name").Where("id IN ?", ownerIDs[start:min(start+lookupBatch, len(ownerIDs))]).Find(&found).Error; err != nil {
+		if err := index.database.WithContext(ctx).Where("id IN ?", ownerIDs[start:min(start+lookupBatch, len(ownerIDs))]).Find(&found).Error; err != nil {
 			return nil, fmt.Errorf("load symbol owners: %w", err)
+		}
+		if err := index.remember(found); err != nil {
+			return nil, err
 		}
 		for _, owner := range found {
 			owners[owner.ID] = owner.Name
