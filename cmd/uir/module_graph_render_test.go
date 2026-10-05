@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/flanksource/uir"
@@ -57,6 +58,36 @@ var _ = Describe("module call graph rendering", func() {
 			"╰── callees",
 			"    ╰── ƒ charge [order.Rush] orders.go:31 ↩ expanded elsewhere",
 		}))
+	})
+
+	It("draws the readers of a Go field when the access names reads, and refuses its graph under calls alone", func(ctx SpecContext) {
+		database := indexOrders(ctx)
+		_, err := graphModules(ctx, database, moduleGraphOptions{Selector: "orders.Order.Total", Direction: "callers", Depth: 1})
+		Expect(err).To(MatchError(ContainSubstring("the graph of field example.org/orders.Order.Total needs read or write access, access call follows neither")),
+			"calls alone reach no field")
+
+		reads, err := graphModules(ctx, database, moduleGraphOptions{Selector: "orders.Order.Total", Direction: "callers", Depth: 1, Access: []string{"read,write"}})
+		Expect(err).ToNot(HaveOccurred())
+		readers := map[string]uir.RelationshipType{}
+		for _, edge := range reads.Edges {
+			for _, node := range reads.Nodes {
+				if node.ID == edge.From {
+					readers[node.Label] = edge.Type
+				}
+			}
+		}
+		Expect(readers).To(Equal(map[string]uir.RelationshipType{"Submit": uir.RelationshipTypeRead, "charge": uir.RelationshipTypeRead}))
+		Expect(graphLines(reads)).To(Equal([]string{
+			fmt.Sprintf("𝑣 Order.Total example.org/orders orders.go:%d", ordersLine("Total int")),
+			"╰── callers",
+			fmt.Sprintf("    ├── → reads ƒ Submit orders.go:%d Total", ordersLine("if order.Total > 0")),
+			fmt.Sprintf("    ╰── → reads ƒ charge ×2 [order.Rush] orders.go:%d Total", ordersLine("charge(Order{Total: order.Total})")),
+		}), "a read site is the field's name under the guards that reach it")
+	})
+
+	It("refuses an access that is not call, read or write", func(ctx SpecContext) {
+		_, err := graphModules(ctx, indexOrders(ctx), moduleGraphOptions{Selector: "orders.Submit", Access: []string{"import"}})
+		Expect(err).To(MatchError(ContainSubstring(`access "import" is not one of call, read, write`)))
 	})
 
 	It("lists the candidates of an ambiguous selector with the id that selects each", func(ctx SpecContext) {

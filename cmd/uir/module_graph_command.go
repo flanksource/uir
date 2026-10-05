@@ -22,6 +22,7 @@ type moduleGraphOptions struct {
 	Depth      int      `flag:"depth"`
 	Limit      int      `flag:"limit"`
 	Exclude    []string `flag:"exclude"`
+	Access     []string `flag:"access" help:"Edge types to follow: call (calls and dispatches), read, write (repeatable or comma separated; default call)"`
 	RootKey    string   `flag:"root" help:"Module path to query"`
 	Location   string   `flag:"location" help:"Registered checkout path"`
 	SnapshotID string   `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
@@ -43,8 +44,8 @@ func registerModuleGraphCommand(root *cobra.Command) {
 		return graphModules(ctx, database, options)
 	})
 	// Use names no argument: the API generator would publish a second selector parameter beside the flag.
-	command.Short = "Draw the callers and callees of one function or method"
-	command.Example = "  uir graph example.org/service/orders.Submit --direction callers --depth 3\n  uir graph example.org/service/orders.Submit --exclude external\n  uir graph --symbol <id> --exclude none --format json"
+	command.Short = "Draw the callers and callees of one function or method, or the readers and writers of a data symbol"
+	command.Example = "  uir graph example.org/service/orders.Submit --direction callers --depth 3\n  uir graph example.org/service/orders.Submit --exclude external\n  uir graph example.org/service/orders.Order.Total --direction callers --access read,write\n  uir graph --symbol <id> --exclude none --format json"
 	command.Args = cobra.MaximumNArgs(1)
 	command.Flags().Lookup("depth").Usage = fmt.Sprintf("Calls away from the root, from 1 through %d (default %d)", graph.MaxDepth, graph.DefaultDepth)
 	command.Flags().Lookup("limit").Usage = fmt.Sprintf("Maximum nodes from 1 through %d (default %d)", graph.MaxLimit, graph.DefaultLimit)
@@ -56,12 +57,16 @@ func registerModuleGraphCommand(root *cobra.Command) {
 }
 
 func graphModules(ctx context.Context, database *gorm.DB, options moduleGraphOptions) (moduleGraphResult, error) {
+	access, err := graph.ParseAccess(options.Access)
+	if err != nil {
+		return moduleGraphResult{}, entity.NewStatusError(http.StatusBadRequest, "invalid_query", err.Error())
+	}
 	pipeline, err := query.NewPipeline(database)
 	if err != nil {
 		return moduleGraphResult{}, err
 	}
 	result, err := pipeline.Graph(ctx, query.GraphOptions{
-		Selector: options.Selector, Symbol: options.Symbol,
+		Selector: options.Selector, Symbol: options.Symbol, Access: access,
 		Direction: graph.Direction(options.Direction), Depth: options.Depth, Limit: options.Limit, Exclude: options.Exclude,
 		Scope: query.ModuleScopeOptions{RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID},
 	})
