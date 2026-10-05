@@ -222,7 +222,7 @@ var _ = Describe("module call graph", func() {
 			Expect(parameter.In).To(Equal("query"), parameter.Name)
 			names = append(names, parameter.Name)
 		}
-		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot"))
+		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "access", "root", "location", "snapshot"))
 	})
 
 	It("takes the selector as the first argument in place of the flag", func(ctx SpecContext) {

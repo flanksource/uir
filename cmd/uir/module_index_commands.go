@@ -48,6 +48,7 @@ func registerModuleIndexCommands(root *cobra.Command) {
 	registerAddCommand(root)
 	registerReindexCommand(root)
 	registerImportCommand(root)
+	registerPruneCommand(root)
 }
 
 func registerAddCommand(root *cobra.Command) {
