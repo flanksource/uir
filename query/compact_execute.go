@@ -65,13 +65,15 @@ func expressionOperation(expression *Expr) Operation {
 	return ""
 }
 
-func (pipeline *Pipeline) runCompact(ctx context.Context, expression *Expr, scopes []moduleScope, result *ModuleQueryResult) error {
-	base, err := newIndexContext(ctx, pipeline.database, scopes)
+func (pipeline *Pipeline) runCompact(ctx context.Context, expression *Expr, scopes []moduleScope, result *ModuleQueryResult, clock *stageClock) error {
+	base, err := newIndexContext(ctx, pipeline, scopes)
 	if err != nil {
 		return err
 	}
+	clock.lap("index")
 	index := newCompactIndex(base)
 	value, err := index.evaluate(ctx, expression, result)
+	clock.lap("evaluate")
 	var ambiguous ambiguousSymbols
 	if errors.As(err, &ambiguous) {
 		result.Symbols = ambiguous.symbols
@@ -87,6 +89,9 @@ func (pipeline *Pipeline) runCompact(ctx context.Context, expression *Expr, scop
 		return err
 	}
 	result.Symbols, result.Matches, result.Declarations, result.Path = value.symbols, value.matches, value.declarations, value.path
+	if result.Matches == nil {
+		result.Matches = []ModuleMatch{}
+	}
 	if len(value.targets) > 0 {
 		result.Symbols = value.targets
 	}
@@ -223,7 +228,50 @@ func pathMatchesSymbol(glob selectorGlob, pattern string, symbol ModuleSymbol) b
 	return false
 }
 
+// scopedIntersection evaluates the intersection of a symbol selector with a scope predicate by
+// resolving the selector within the scope alone. A symbol selector, like a scope selector, matches
+// only symbols defined in their own module's root, at their declarations there, so the scope's side
+// would hold every symbol the selector keeps, in at least the same scopes: the intersection is the
+// selector's symbols the scope admits, at the selector's declarations. It reports false when the
+// expression is not such an intersection.
+func (index *compactIndex) scopedIntersection(ctx context.Context, expression *Expr) (compactValue, bool, error) {
+	for _, operands := range [][2]*Expr{{expression.Left, expression.Right}, {expression.Right, expression.Left}} {
+		value, scoped, err := index.scopedSelector(ctx, operands[0], operands[1])
+		if err != nil {
+			return compactValue{}, true, err
+		}
+		if scoped {
+			sortMatches(value.matches)
+			return value, true, nil
+		}
+	}
+	return compactValue{}, false, nil
+}
+
+// ownRootSelectors are the selectors whose candidates are the symbols defined in their own module's
+// root, which a scope predicate can narrow.
+var ownRootSelectors = map[string]bool{"func": true, "method": true, "field": true, "struct": true, "type": true, "var": true, "kind": true, "all": true, "path": true}
+
+// scopedSelector resolves selector within scope when selector is a symbol selector and scope a scope
+// predicate, and reports whether it did.
+func (index *compactIndex) scopedSelector(ctx context.Context, selector, scope *Expr) (compactValue, bool, error) {
+	if selector.Kind != ExprSelector || !ownRootSelectors[selector.Selector.Kind] {
+		return compactValue{}, false, nil
+	}
+	predicate, scoped, err := compileScopePredicate(scope)
+	if !scoped || err != nil {
+		return compactValue{}, false, err
+	}
+	value, err := index.resolveSelectorWithin(ctx, *selector.Selector, &predicate)
+	return value, true, err
+}
+
 func (index *compactIndex) evaluateSet(ctx context.Context, expression *Expr, result *ModuleQueryResult) (compactValue, error) {
+	if expression.Kind == ExprIntersection {
+		if value, scoped, err := index.scopedIntersection(ctx, expression); scoped {
+			return value, err
+		}
+	}
 	left, err := index.evaluate(ctx, expression.Left, result)
 	if err != nil {
 		return compactValue{}, err
@@ -249,6 +297,31 @@ func (index *compactIndex) evaluateSet(ctx context.Context, expression *Expr, re
 			byID[symbol.ID] = symbol
 		}
 	}
+	selectedScopes := setScopes(expression, left, right, byID)
+	symbols := make([]ModuleSymbol, 0, len(byID))
+	for _, symbol := range byID {
+		symbols = append(symbols, symbol)
+	}
+	slices.SortFunc(symbols, func(a, b ModuleSymbol) int { return strings.Compare(a.QueryName, b.QueryName) })
+	var matches []ModuleMatch
+	if expression.Kind == ExprUnion && (expression.Left.Kind == ExprRelation || expression.Right.Kind == ExprRelation) {
+		matches = append(matches, left.matches...)
+		matches = append(matches, right.matches...)
+		sortMatches(matches)
+	} else {
+		matches, err = index.symbolRows(ctx, symbols)
+	}
+	matches = slices.DeleteFunc(matches, func(match ModuleMatch) bool {
+		return len(selectedScopes[match.SymbolID]) > 0 && match.SnapshotID != "" && !selectedScopes[match.SymbolID][matchScope(match)]
+	})
+	return compactValue{symbols: symbols, matches: matches}, err
+}
+
+// setScopes is, for each symbol of a set, the scopes its rows are kept in: those of either operand for
+// a union, and for an intersection those both operands select it in, or either one's when only one
+// operand places it. An intersection whose operands place a symbol in disjoint scopes drops it from
+// byID.
+func setScopes(expression *Expr, left, right compactValue, byID map[string]ModuleSymbol) map[string]map[string]bool {
 	leftScopes, rightScopes := valueScopes(left, expression.Left), valueScopes(right, expression.Right)
 	selectedScopes := map[string]map[string]bool{}
 	for id := range byID {
@@ -267,23 +340,7 @@ func (index *compactIndex) evaluateSet(ctx context.Context, expression *Expr, re
 			delete(byID, id)
 		}
 	}
-	symbols := make([]ModuleSymbol, 0, len(byID))
-	for _, symbol := range byID {
-		symbols = append(symbols, symbol)
-	}
-	slices.SortFunc(symbols, func(a, b ModuleSymbol) int { return strings.Compare(a.QueryName, b.QueryName) })
-	var matches []ModuleMatch
-	if expression.Kind == ExprUnion && (expression.Left.Kind == ExprRelation || expression.Right.Kind == ExprRelation) {
-		matches = append(matches, left.matches...)
-		matches = append(matches, right.matches...)
-		sortMatches(matches)
-	} else {
-		matches, err = index.symbolRows(ctx, symbols)
-	}
-	matches = slices.DeleteFunc(matches, func(match ModuleMatch) bool {
-		return len(selectedScopes[match.SymbolID]) > 0 && match.SnapshotID != "" && !selectedScopes[match.SymbolID][matchScope(match)]
-	})
-	return compactValue{symbols: symbols, matches: matches}, err
+	return selectedScopes
 }
 
 func valueScopes(value compactValue, expression *Expr) map[string]map[string]bool {

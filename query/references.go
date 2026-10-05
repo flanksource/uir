@@ -46,19 +46,20 @@ func (pipeline *Pipeline) FindReferences(ctx context.Context, request ReferenceR
 	if len(request.SnapshotIDs) == 0 || len(request.Symbols) == 0 {
 		return nil, fmt.Errorf("reference search requires snapshots and symbols")
 	}
+	session, _ := pipeline.session()
 	var scopes []moduleScope
 	for _, id := range request.SnapshotIDs {
-		selected, err := pipeline.moduleScopes(ctx, ModuleScopeOptions{SnapshotID: id}, false)
+		selected, err := session.moduleScopes(ctx, ModuleScopeOptions{SnapshotID: id}, false)
 		if err != nil {
 			return nil, err
 		}
 		scopes = append(scopes, selected.scopes...)
 	}
-	index, err := newIndexContext(ctx, pipeline.database, scopes)
+	index, err := newIndexContext(ctx, session, scopes)
 	if err != nil {
 		return nil, err
 	}
-	ids, err := pipeline.referenceSymbolIDs(ctx, request.Symbols)
+	ids, err := session.referenceSymbolIDs(ctx, request.Symbols)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (pipeline *Pipeline) FindReferences(ctx context.Context, request ReferenceR
 	if err != nil {
 		return nil, err
 	}
-	return index.referenceLocations(postings)
+	return index.referenceLocations(ctx, postings)
 }
 
 func (pipeline *Pipeline) referenceSymbolIDs(ctx context.Context, selectors []SymbolSelector) ([]string, error) {
@@ -105,10 +106,13 @@ func (pipeline *Pipeline) referenceSymbolIDs(ctx context.Context, selectors []Sy
 	return selected, nil
 }
 
-func (index *indexContext) referenceLocations(postings []scopedPosting) ([]ReferenceLocation, error) {
+func (index *indexContext) referenceLocations(ctx context.Context, postings []scopedPosting) ([]ReferenceLocation, error) {
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, err
+	}
 	byPosition := map[string]ReferenceLocation{}
 	for _, posting := range postings {
-		document, err := index.document(posting)
+		document, err := index.document(ctx, posting)
 		if err != nil {
 			return nil, err
 		}

@@ -13,14 +13,18 @@ func ParseStructured(input string, options StructuredOptions) (*Expr, error) {
 	var base *Expr
 	if input != "" {
 		parsed, err := Parse(input)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		base = parsed.Expr
 	}
 	if base == nil && len(options.Kinds)+len(options.Include)+len(options.Exclude)+len(options.Relations) == 0 {
 		return nil, &InvalidQueryError{Message: "query expression or structured flag is required", Hint: "Enter an expression or select a node kind or relation."}
 	}
 	expression, err := Compose(base, options)
-	if err != nil { return nil, &InvalidQueryError{Message: err.Error(), Hint: "Check the structured query flags.", Cause: err} }
+	if err != nil {
+		return nil, &InvalidQueryError{Message: err.Error(), Hint: "Check the structured query flags.", Cause: err}
+	}
 	return expression, nil
 }
 

@@ -133,9 +133,26 @@ func splitSelector(value string, partial bool) ([]selectorPart, error) {
 	return append(parts, selectorPart{text: part.String(), quoted: opened}), nil
 }
 
-// quoteSelectorValue spells a literal name as a selector value that matches exactly it: unchanged
-// when it has only unquoted selector characters, and otherwise quoted with \, ", *, and ? escaped.
-func quoteSelectorValue(literal string) string {
+// QuoteSelectorValue spells a literal as one value of a typed selector, such as the name in
+// kind:acme.screen:<value> or the path in pkg:<value>, matching exactly that literal:
+//
+//   - A literal made only of letters, digits and _ . / @ # $ ! - is returned unchanged.
+//   - Any other literal, one with a space, a colon, a quote, a parenthesis or a glob character, is
+//     wrapped in double quotes with \, ", * and ? escaped by a backslash. Inside the quotes a colon
+//     does not split the selector, and an escaped * or ? matches itself rather than globbing.
+//   - / is never escaped: in every selector value it separates path segments, which a pattern matches
+//     one by one, so a quoted module key or package path with spaces, such as
+//     "Acme/Digital Funeral/rules", still matches segment by segment, and appending /... before
+//     quoting still selects the path and everything below it.
+//
+// A symbol selector (func:, method:, field:, struct:, type:, var:, kind:) matches its value against a
+// spelling chosen by the characters the value holds, as compact_selector.go's selectorKey reads it:
+// a value without . or / against the symbol's own name; one with . but no / against its name within
+// its package, Owner.Name for a member; and one with / against its whole query name, package path
+// included, such as Acme/Ins/screens.PolicyScreen. A symbol whose own name holds a / is therefore
+// selected by quoting its query name, never its bare name. An Entity:Field reference quotes the
+// entity's name and the field's name separately and matches each against those names alone.
+func QuoteSelectorValue(literal string) string {
 	if plainSelectorValue.MatchString(literal) {
 		return literal
 	}
