@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -32,11 +33,12 @@ func parseGuardFile(path string, src []byte) (*guardFile, error) {
 	return &guardFile{fset: fset, tokens: fset.File(syntax.FileStart), syntax: syntax, src: src}, nil
 }
 
-// siteContext is what the source says about one call site: the call as written and its guards.
+// siteContext is what the source says about one site: its text as written and its guards.
 type siteContext struct {
 	Guards []uir.ConditionStmt
-	// Call is the source text of the whole call, arguments included, exactly as written.
-	Call string
+	// Text is the source text of the whole call, arguments included, or of the identifier a read or
+	// write names, exactly as written.
+	Text string
 }
 
 // siteAt reads the call site whose callee is at span, which is the callee's identifier or its whole
@@ -46,11 +48,11 @@ type siteContext struct {
 // clause. A condition, init, switch tag, or case list is not guarded by its own statement. Guards
 // outside a function literal still apply inside it.
 func (file *guardFile) siteAt(span storage.ByteSpan) (siteContext, error) {
-	if span[0] < 0 || span[1] < span[0] || span[1] > file.tokens.Size() {
-		return siteContext{}, fmt.Errorf("bytes %v lie outside the %d bytes of %q", span, file.tokens.Size(), file.tokens.Name())
+	path, err := file.pathAt(span)
+	if err != nil {
+		return siteContext{}, err
 	}
 	start, end := file.tokens.Pos(span[0]), file.tokens.Pos(span[1])
-	path, _ := astutil.PathEnclosingInterval(file.syntax, start, end)
 	callAt := slices.IndexFunc(path, func(node ast.Node) bool {
 		call, isCall := node.(*ast.CallExpr)
 		return isCall && call.Fun.Pos() <= start && end <= call.Fun.End()
@@ -58,13 +60,38 @@ func (file *guardFile) siteAt(span storage.ByteSpan) (siteContext, error) {
 	if callAt < 0 {
 		return siteContext{}, fmt.Errorf("no call in %q has its callee at bytes %v (line %d)", file.tokens.Name(), span, file.tokens.Line(start))
 	}
-	site := siteContext{Call: string(file.src[file.tokens.Offset(path[callAt].Pos()):file.tokens.Offset(path[callAt].End())])}
+	text := string(file.src[file.tokens.Offset(path[callAt].Pos()):file.tokens.Offset(path[callAt].End())])
+	return siteContext{Text: text, Guards: file.guards(path)}, nil
+}
+
+// accessAt reads the site of a read or write of the identifier at span: the identifier as written
+// and the guards that must hold to reach it, as siteAt reads them for a call.
+func (file *guardFile) accessAt(span storage.ByteSpan) (siteContext, error) {
+	path, err := file.pathAt(span)
+	if err != nil {
+		return siteContext{}, err
+	}
+	return siteContext{Text: string(file.src[span[0]:span[1]]), Guards: file.guards(path)}, nil
+}
+
+// pathAt is the syntax enclosing span, innermost first.
+func (file *guardFile) pathAt(span storage.ByteSpan) ([]ast.Node, error) {
+	if span[0] < 0 || span[1] < span[0] || span[1] > file.tokens.Size() {
+		return nil, fmt.Errorf("bytes %v lie outside the %d bytes of %q", span, file.tokens.Size(), file.tokens.Name())
+	}
+	path, _ := astutil.PathEnclosingInterval(file.syntax, file.tokens.Pos(span[0]), file.tokens.Pos(span[1]))
+	return path, nil
+}
+
+// guards are the conditions entering each node of path requires, outermost first.
+func (file *guardFile) guards(path []ast.Node) []uir.ConditionStmt {
+	var guards []uir.ConditionStmt
 	for position := len(path) - 1; position > 0; position-- {
 		if guard, guarded := file.guardEntering(path, position); guarded {
-			site.Guards = append(site.Guards, uir.NewCondition(guard))
+			guards = append(guards, uir.NewCondition(guard))
 		}
 	}
-	return site, nil
+	return guards
 }
 
 // guardEntering is what must hold to step from path[position] into its child path[position-1].
@@ -222,18 +249,33 @@ func newGuardReader(database *gorm.DB, sources *scopeSources) *guardReader {
 	return &guardReader{database: database, sources: sources, files: map[guardFileKey]*guardFile{}, unreadable: map[string]error{}}
 }
 
-// site reads the call site of one call occurrence row. It reports false when the row's file is
-// unreadable.
+// errNoGoSyntax is why the guard reader does not parse a source an external producer published: it
+// is not Go, and its sites keep the text the producer recorded.
+var errNoGoSyntax = errors.New("a source an external producer published holds no Go syntax")
+
+// site reads the call site of one call occurrence row.
 func (reader *guardReader) site(ctx context.Context, match ModuleMatch) (siteContext, bool, error) {
+	return reader.read(ctx, match, (*guardFile).siteAt)
+}
+
+// access reads the site of one read or write occurrence row.
+func (reader *guardReader) access(ctx context.Context, match ModuleMatch) (siteContext, bool, error) {
+	return reader.read(ctx, match, (*guardFile).accessAt)
+}
+
+// read reads one row's site with at. It reports false when the row's file is unreadable or is an
+// external producer's.
+func (reader *guardReader) read(ctx context.Context, match ModuleMatch, at func(*guardFile, storage.ByteSpan) (siteContext, error)) (siteContext, bool, error) {
 	file, err := reader.file(ctx, guardFileKey{snapshot: match.SnapshotID, path: match.Path})
 	if err != nil || file == nil {
 		return siteContext{}, false, err
 	}
-	site, err := file.siteAt(match.span)
+	site, err := at(file, match.span)
 	return site, err == nil, err
 }
 
-// file is the parsed source at key, or nil when it is unreadable. The only error is the context's.
+// file is the parsed source at key, or nil when it is unreadable or an external producer's. The only
+// error is the context's.
 func (reader *guardReader) file(ctx context.Context, key guardFileKey) (*guardFile, error) {
 	if file, parsed := reader.files[key]; parsed {
 		return file, nil
@@ -243,7 +285,7 @@ func (reader *guardReader) file(ctx context.Context, key guardFileKey) (*guardFi
 		return nil, ctxErr
 	}
 	if err != nil {
-		if _, reported := reader.unreadable[key.path]; !reported {
+		if _, reported := reader.unreadable[key.path]; !reported && !errors.Is(err, errNoGoSyntax) {
 			reader.unreadable[key.path] = err
 		}
 		file = nil
@@ -256,6 +298,9 @@ func (reader *guardReader) parse(ctx context.Context, key guardFileKey) (*guardF
 	scope, document, err := reader.sources.document(key.snapshot, key.path)
 	if err != nil {
 		return nil, err
+	}
+	if scope.location.Kind == storage.LocationExternal {
+		return nil, errNoGoSyntax
 	}
 	content, _, err := readVerifiedSource(ctx, reader.database, scope, verifiedSource{path: key.path, hash: document.Source.ContentHash, snapshot: key.snapshot})
 	if err != nil {

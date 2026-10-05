@@ -235,6 +235,11 @@ var _ = Describe("the call graph of indexed modules", func() {
 			Entry("a relation in place of a selector", query.GraphOptions{Selector: process + " <"}, "must select symbols"),
 			Entry("a selector that is not a query", query.GraphOptions{Selector: "func:Process &"}, "parse error"),
 			Entry("a type", query.GraphOptions{Selector: flowModule + ".Order"}, "matched no function or method"),
+			Entry("a field under the default call access", query.GraphOptions{Selector: "field:Order.Total"},
+				"the graph of field "+flowModule+".Order.Total needs read or write access, access call follows neither"),
+			Entry("a field under call access", query.GraphOptions{Selector: "field:Order.Total", Access: []uir.RelationshipType{uir.RelationshipTypeCall}},
+				"needs read or write access"),
+			Entry("an access that is not call, read or write", query.GraphOptions{Selector: process, Access: []uir.RelationshipType{uir.RelationshipTypeImport}}, `access "import" is not one of call, read, write`),
 			Entry("an unindexed symbol name", query.GraphOptions{Selector: flowModule + ".Missing"}, "matched no indexed symbols"),
 			Entry("an unknown symbol id", query.GraphOptions{Symbol: "0123456789abcdef"}, "matched no indexed symbols"),
 		)

@@ -21,6 +21,16 @@ const (
 	packageScopePrefix = "package:"
 )
 
+// The properties a symbol's graph node carries, for an adapter to map nodes onto its own entities.
+const (
+	// GraphPropertySymbolKind is the symbol's kind, as symbols.kind stores it: func, field, table,
+	// or a producer's custom kind such as acme.rule.
+	GraphPropertySymbolKind = "symbol_kind"
+	// GraphPropertyIdentifierID is the id a producer stored on the identifier of the symbol's
+	// declaration (uir.Identifier.Id), when it stored one.
+	GraphPropertyIdentifierID = "identifier_id"
+)
+
 // scopeSources finds, for a path of a selected snapshot, its scope and active document.
 type scopeSources struct {
 	index     *indexContext
@@ -65,14 +75,17 @@ func (sources *scopeSources) document(snapshotID, path string) (moduleScope, sto
 	return sources.index.scopes[position].moduleScope, document, nil
 }
 
-// indexGraphSource serves the call graph of the selected snapshots from the symbol index. A node is
-// a canonical symbol, an edge the call occurrences between two of them, and a dispatch edge a call
-// of an interface method reaching an implementation. guards reads each site's call and guards from
-// source; a site in an unreadable file keeps the callee text the index recorded and has no guards.
+// indexGraphSource serves the graph of the selected snapshots from the symbol index, for Go and for
+// external producers alike. A node is a canonical symbol, an edge the call, read or write occurrences
+// between two of them, and a dispatch edge a call of an interface method reaching an implementation.
+// guards reads each Go site's text and guards from source; a site in an unreadable file or in an
+// external producer's source keeps the text the index recorded and has no guards. access are the
+// edge types the graph follows: the source reads no data access it would not draw.
 type indexGraphSource struct {
 	index   *compactIndex
 	sources *scopeSources
 	guards  *guardReader
+	access  []uir.RelationshipType
 	symbols map[string]ModuleSymbol
 	nodes   map[string]graph.Node
 	stages  []ResolutionStage
@@ -82,9 +95,9 @@ type indexGraphSource struct {
 	packages map[string]graphPackageFacts
 }
 
-func newIndexGraphSource(index *compactIndex, sources *scopeSources, guards *guardReader) *indexGraphSource {
+func newIndexGraphSource(index *compactIndex, sources *scopeSources, guards *guardReader, access []uir.RelationshipType) *indexGraphSource {
 	return &indexGraphSource{
-		index: index, sources: sources, guards: guards, symbols: map[string]ModuleSymbol{}, nodes: map[string]graph.Node{},
+		index: index, sources: sources, guards: guards, access: access, symbols: map[string]ModuleSymbol{}, nodes: map[string]graph.Node{},
 		declared: scopePackages(index.indexContext), packages: map[string]graphPackageFacts{},
 	}
 }
@@ -117,7 +130,8 @@ func (source *indexGraphSource) Describe(ctx context.Context, id string) (graph.
 
 // Out are the calls the symbol's declarations make: a call step to each resolved target, a dispatch
 // step to each implementation of an interface method it calls, and a call step to an unresolved
-// node for each call the index could not resolve.
+// node for each call the index could not resolve; then a read or write step to each symbol they read
+// or write, when the access follows reads or writes.
 func (source *indexGraphSource) Out(ctx context.Context, id string) ([]graph.Step, error) {
 	if strings.HasPrefix(id, packageScopePrefix) {
 		return nil, nil
@@ -155,19 +169,27 @@ func (source *indexGraphSource) Out(ctx context.Context, id string) ([]graph.Ste
 			return nil, err
 		}
 	}
-	return steps, nil
+	return source.accesses(ctx, symbol, steps)
 }
 
-// In are the calls of a function or method, as `symbol <` lists them: a call step from each
-// enclosing declaration, and a dispatch step where the caller reaches the symbol through an
-// interface method its receiver implements. Nothing calls a symbol of another kind.
+// In are the calls of a callable, as `symbol <` lists them: a call step from each enclosing
+// declaration, and a dispatch step where the caller reaches the symbol through an interface method
+// its receiver implements. A data symbol's are its reads and writes (users), and a type's also the
+// calls of it, such as the includes of a producer's screen (includes). Nothing calls, reads or writes
+// a symbol of another kind.
 func (source *indexGraphSource) In(ctx context.Context, id string) ([]graph.Step, error) {
 	if strings.HasPrefix(id, packageScopePrefix) {
 		return nil, nil
 	}
 	symbol, err := source.symbol(ctx, id)
-	if err != nil || !source.index.callable(symbol) {
+	switch {
+	case err != nil:
 		return nil, err
+	case source.index.callable(symbol):
+	case source.index.dataSymbol(symbol):
+		return source.dataUsers(ctx, symbol)
+	default:
+		return nil, nil
 	}
 	noted := &ModuleQueryResult{}
 	rows, err := source.index.relationRows(ctx, symbol, "<", noted)
@@ -175,27 +197,33 @@ func (source *indexGraphSource) In(ctx context.Context, id string) ([]graph.Step
 		return nil, err
 	}
 	source.note(noted.Stages)
+	return source.enclosingSteps(ctx, rows, source.step)
+}
+
+// enclosingSteps appends, with stepOf, the step from the declaration enclosing each occurrence row,
+// or from its package's scope for a row outside any declaration.
+func (source *indexGraphSource) enclosingSteps(ctx context.Context, rows []ModuleMatch, stepOf func(context.Context, []graph.Step, graph.Node, ModuleMatch) ([]graph.Step, error)) ([]graph.Step, error) {
 	enclosing := map[string]bool{}
 	for _, row := range rows {
 		if row.EnclosingID != "" {
 			enclosing[row.EnclosingID] = true
 		}
 	}
-	callers, err := source.index.symbolsByID(ctx, sortedKeys(enclosing))
+	users, err := source.index.symbolsByID(ctx, sortedKeys(enclosing))
 	if err != nil {
 		return nil, err
 	}
-	if err := source.remember(ctx, callers); err != nil {
+	if err := source.remember(ctx, users); err != nil {
 		return nil, err
 	}
 	steps := make([]graph.Step, 0, len(rows))
 	for _, row := range rows {
-		caller, declared := source.nodes[row.EnclosingID]
+		user, declared := source.nodes[row.EnclosingID]
 		if !declared {
-			caller = packageScopeNode(row)
+			user = packageScopeNode(row)
 			source.notePackage(row.PackagePath, row.RootKey, false)
 		}
-		if steps, err = source.step(ctx, steps, caller, row); err != nil {
+		if steps, err = stepOf(ctx, steps, user, row); err != nil {
 			return nil, err
 		}
 	}
@@ -203,24 +231,21 @@ func (source *indexGraphSource) In(ctx context.Context, id string) ([]graph.Step
 }
 
 // step appends the step to a neighbour over one call occurrence row. The site's text is the whole call
-// as written, or the callee as the index recorded it when the file is unreadable.
+// as written, or the callee as the index recorded it when the file is unreadable or not Go.
 func (source *indexGraphSource) step(ctx context.Context, steps []graph.Step, neighbour graph.Node, call ModuleMatch) ([]graph.Step, error) {
-	site := graph.Site{Path: call.Path, Text: call.text}
-	if call.Line != nil && call.Column != nil {
-		site.Line, site.Column = *call.Line, *call.Column
-	}
 	read, readable, err := source.guards.site(ctx, call)
 	if err != nil {
-		return nil, fmt.Errorf("call site of %s at %s:%d: %w", call.text, call.Path, site.Line, err)
-	}
-	if readable {
-		site.Text, site.Guards = read.Call, guardTexts(read.Guards)
+		line := 0
+		if call.Line != nil {
+			line = *call.Line
+		}
+		return nil, fmt.Errorf("call site of %s at %s:%d: %w", call.text, call.Path, line, err)
 	}
 	kind := uir.RelationshipTypeCall
 	if call.Dispatch {
 		kind = uir.RelationshipTypeDispatch
 	}
-	return append(steps, graph.Step{Node: neighbour, Edge: graph.Edge{Type: kind, Sites: []graph.Site{site}}}), nil
+	return appendStep(steps, neighbour, call, kind, read, readable), nil
 }
 
 func (source *indexGraphSource) symbol(ctx context.Context, id string) (ModuleSymbol, error) {
@@ -256,7 +281,7 @@ func (source *indexGraphSource) remember(ctx context.Context, symbols []ModuleSy
 		declared[declaration.SymbolID] = append(declared[declaration.SymbolID], declaration)
 	}
 	for _, id := range ids {
-		node, err := source.node(source.symbols[id], declared[id])
+		node, err := source.node(ctx, source.symbols[id], declared[id])
 		if err != nil {
 			return err
 		}
@@ -265,14 +290,17 @@ func (source *indexGraphSource) remember(ctx context.Context, symbols []ModuleSy
 	return nil
 }
 
-// node describes a symbol. Its group is its package path, or builtin for a predeclared function. One
-// with no declaration in the selected snapshots, such as a standard library function, has no
-// location. One with several, such as a function declared per build tag, is located at the first by
-// path and carries their count in the declarations property.
-func (source *indexGraphSource) node(symbol ModuleSymbol, declarations []ModuleMatch) (graph.Node, error) {
+// node describes a symbol: its id, its kind, which the GraphPropertySymbolKind property keeps should
+// a theme rename the node's kind, and its package path as its group, or builtin for a predeclared
+// function. One with no declaration in the selected snapshots, such as a standard library function,
+// has no location. One with several, such as a function declared per build tag, is located at the
+// first by path and carries their count in the declarations property. A declaration whose identifier
+// carries a producer's id puts it in the GraphPropertyIdentifierID property.
+func (source *indexGraphSource) node(ctx context.Context, symbol ModuleSymbol, declarations []ModuleMatch) (graph.Node, error) {
 	node := graph.Node{
 		ID: symbol.ID, Identifier: source.index.identifier(symbol), Kind: symbol.Kind,
 		Label: strings.TrimPrefix(symbol.QueryName, symbol.PackagePath+"."), Group: symbol.PackagePath,
+		Properties: map[string]string{GraphPropertySymbolKind: symbol.Kind},
 	}
 	builtin := symbol.Kind == "builtin"
 	if builtin {
@@ -290,11 +318,14 @@ func (source *indexGraphSource) node(symbol ModuleSymbol, declarations []ModuleM
 	if err != nil {
 		return graph.Node{}, err
 	}
-	document, err := source.index.document(scopedPosting{scope: position, document: active.Document.ID})
+	document, err := source.index.document(ctx, scopedPosting{scope: position, document: active.Document.ID})
 	if err != nil {
 		return graph.Node{}, err
 	}
 	node.Identifier = first.Identifier
+	if first.Identifier.Id != nil {
+		node.Properties[GraphPropertyIdentifierID] = first.Identifier.Id.String()
+	}
 	node.Location = &graph.Location{
 		RootKey: first.RootKey, CheckoutPath: first.Location, SnapshotID: first.SnapshotID,
 		SourceID: active.Source.ID.String(), Path: first.Path, Line: *first.Line, Column: *first.Column,
@@ -303,7 +334,7 @@ func (source *indexGraphSource) node(symbol ModuleSymbol, declarations []ModuleM
 		node.Location.IdentityKey = entry.Key
 	}
 	if len(declarations) > 1 {
-		node.Properties = map[string]string{"declarations": strconv.Itoa(len(declarations))}
+		node.Properties["declarations"] = strconv.Itoa(len(declarations))
 	}
 	return node, nil
 }

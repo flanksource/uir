@@ -67,11 +67,12 @@ func relativePackage(packagePath, moduleKey string) (string, bool) {
 // selectorScopes groups by root key the scopes whose root a selector admits. A selector only matches
 // symbols defined in their own module's root, so a module pattern, or a mod selector's pattern, that
 // rejects a root rejects every symbol that root could contribute.
-func (index *compactIndex) selectorScopes(selector Selector, glob, moduleGlob selectorGlob) map[string][]int {
+func (index *compactIndex) selectorScopes(selector compiledSelector) map[string][]int {
 	scopes := map[string][]int{}
 	for position, scope := range index.scopes {
 		root := scope.root.RootKey
-		if selector.ModulePattern != "" && !moduleGlob.matches(root) || selector.Kind == "mod" && !glob.matches(root) {
+		if selector.ModulePattern != "" && !selector.moduleGlob.matches(root) || selector.Kind == "mod" && !selector.glob.matches(root) ||
+			selector.within != nil && !selector.within.admitsRoot(root) {
 			continue
 		}
 		scopes[root] = append(scopes[root], position)
@@ -107,10 +108,10 @@ func packageFilter(selector Selector, glob selectorGlob) func(packagePath, modul
 }
 
 // selectorRanges is the handle ranges that can hold a selector's candidates in the admitted roots:
-// for a pkg selector, or a symbol selector qualified by a package path, the ranges of the root's
-// registered packages it can match, and otherwise each root module's whole range. A root whose module
-// key was never registered has no symbols.
-func (index *compactIndex) selectorRanges(ctx context.Context, selector Selector, glob selectorGlob, roots []string) ([]symbolhandle.Range, error) {
+// for a pkg selector, a symbol selector qualified by a package path, or a selector within pkg: scopes,
+// the ranges of the root's registered packages it can match, and otherwise each root module's whole
+// range. A root whose module key was never registered has no symbols.
+func (index *compactIndex) selectorRanges(ctx context.Context, selector compiledSelector, roots []string) ([]symbolhandle.Range, error) {
 	var modules []storage.SymbolModule
 	if err := index.database.WithContext(ctx).Where("module_key IN ?", roots).Order("number").Find(&modules).Error; err != nil {
 		return nil, fmt.Errorf("load the symbol modules of %d roots: %w", len(roots), err)
@@ -119,9 +120,11 @@ func (index *compactIndex) selectorRanges(ctx context.Context, selector Selector
 	case len(modules) == 0:
 		return nil, nil
 	case selector.Kind == "pkg":
-		return index.packageRanges(ctx, modules, packageFilter(selector, glob))
+		return index.packageRanges(ctx, modules, packageFilter(selector.Selector, selector.glob))
 	case selector.Kind != "mod" && selector.Owner == "" && strings.Contains(selector.Pattern, "/"):
 		return index.packageRanges(ctx, modules, qualifiedPackageFilter(selector.Pattern))
+	case selector.within != nil && selector.within.packagesOnly():
+		return index.packageRanges(ctx, modules, selector.within.admitsPackage)
 	}
 	ranges := make([]symbolhandle.Range, 0, len(modules))
 	for _, module := range modules {

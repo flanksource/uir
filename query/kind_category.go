@@ -40,6 +40,26 @@ func (index *indexContext) callable(symbol ModuleSymbol) bool {
 	return index.category(symbol.Kind) == symbolhandle.CategoryCallable
 }
 
+// dataSymbol reports whether a symbol is read and written as data: a member, such as a field or a
+// column, other than a Go predeclared identifier, or a type that is not Go's type or interface, such
+// as a record or a table. A Go type's uses are type references, and the reads and writes of its
+// fields belong to the fields.
+func (index *indexContext) dataSymbol(symbol ModuleSymbol) bool {
+	switch index.category(symbol.Kind) {
+	case symbolhandle.CategoryMember:
+		return symbol.Kind != symbolhandle.KindBuiltin.String()
+	case symbolhandle.CategoryType:
+		return symbol.Kind != symbolhandle.KindType.String() && symbol.Kind != symbolhandle.KindInterface.String()
+	}
+	return false
+}
+
+// graphRoot reports whether a graph may be rooted at a symbol: a callable, for its calls, or a data
+// symbol, for its readers and writers.
+func (index *indexContext) graphRoot(symbol ModuleSymbol) bool {
+	return index.callable(symbol) || index.dataSymbol(symbol)
+}
+
 // relationAccepts reports whether a relation can start from a symbol of kind: `>` from a callable,
 // the Go type relations from a Go type, and any other relation from anything but a container.
 func (index *indexContext) relationAccepts(relation, kind string) bool {

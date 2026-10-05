@@ -50,7 +50,30 @@ func missingHeadWarning(root, location string) MissingHeadWarning {
 	return MissingHeadWarning{RootKey: root, Location: location, Message: "registered checkout has no indexed head; run `uir reindex --all`"}
 }
 
+// moduleScopes selects the snapshots a query reads. A selection by root or snapshot is kept for the
+// cache generation, since only a publication or registration changes it; a selection by location
+// reads the filesystem to canonicalize the path, so it is made every time.
 func (pipeline *Pipeline) moduleScopes(ctx context.Context, options ModuleScopeOptions, allHeads bool) (moduleScopeSelection, error) {
+	generation, err := pipeline.generation(ctx)
+	if err != nil {
+		return moduleScopeSelection{}, err
+	}
+	if options.Location != "" {
+		return pipeline.selectModuleScopes(ctx, options, allHeads)
+	}
+	key := selectionKey{rootKey: options.RootKey, snapshotID: options.SnapshotID, allHeads: allHeads}
+	if selection, found := generation.selection(key); found {
+		return selection, nil
+	}
+	selection, err := pipeline.selectModuleScopes(ctx, options, allHeads)
+	if err != nil {
+		return moduleScopeSelection{}, err
+	}
+	generation.keepSelection(key, selection)
+	return selection, nil
+}
+
+func (pipeline *Pipeline) selectModuleScopes(ctx context.Context, options ModuleScopeOptions, allHeads bool) (moduleScopeSelection, error) {
 	if options.SnapshotID != "" {
 		id, err := uuid.Parse(options.SnapshotID)
 		if err != nil {

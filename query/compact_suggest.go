@@ -28,14 +28,15 @@ func (pipeline *Pipeline) SuggestSymbols(ctx context.Context, prefix string, opt
 	if options.Location != "" && options.SnapshotID != "" {
 		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("location and snapshot selectors are mutually exclusive")
 	}
-	selection, err := pipeline.moduleScopes(ctx, options, false)
+	session, _ := pipeline.session()
+	selection, err := session.moduleScopes(ctx, options, false)
 	if err != nil {
 		return ItemsWithWarnings[ModuleSymbol]{}, err
 	}
 	if len(selection.scopes) == 0 {
 		return ItemsWithWarnings[ModuleSymbol]{Items: []ModuleSymbol{}, Warnings: selection.warnings}, nil
 	}
-	base, err := newIndexContext(ctx, pipeline.database, selection.scopes)
+	base, err := newIndexContext(ctx, session, selection.scopes)
 	if err != nil {
 		return ItemsWithWarnings[ModuleSymbol]{}, err
 	}
