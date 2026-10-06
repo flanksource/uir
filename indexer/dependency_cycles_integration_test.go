@@ -122,7 +122,7 @@ var _ = Describe("dependency cycles", func() {
 		writeFile(filepath.Join(second, "source.go"), "package second\n\nfunc Broken(\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: first, ExactLocation: first})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: first, ExactLocation: first, Reason: storage.ReasonAdd})
 		Expect(err).To(HaveOccurred())
 		var snapshots int64
 		Expect(database.Model(&storage.ModuleSnapshot{}).Count(&snapshots).Error).To(Succeed())
@@ -131,7 +131,7 @@ var _ = Describe("dependency cycles", func() {
 
 	It("preserves parent locations for nested modules in a cycle", func(ctx SpecContext) {
 		database := openIndexerDB(ctx, indexerSQLiteOptions())
-		parent := GinkgoT().TempDir()
+		parent := canonicalTempDir()
 		child := filepath.Join(parent, "plugin")
 		Expect(os.MkdirAll(child, 0o755)).To(Succeed())
 		writeFile(filepath.Join(parent, "go.work"), "go 1.26\n\nuse (\n\t.\n\t./plugin\n)\n")
@@ -141,7 +141,7 @@ var _ = Describe("dependency cycles", func() {
 		writeFile(filepath.Join(child, "plugin.go"), "package plugin\n\nfunc Use() {}\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		results, err := engine.IndexModules(ctx, ModuleOptions{Path: parent})
+		results, err := engine.IndexModules(ctx, ModuleOptions{Path: parent, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(results).To(HaveLen(2))
 		var parentLocation, childLocation storage.ModuleLocation
@@ -152,7 +152,7 @@ var _ = Describe("dependency cycles", func() {
 
 	It("links a cycle between registered tagged module versions without moving heads", func(ctx SpecContext) {
 		database := openIndexerDB(ctx, indexerSQLiteOptions())
-		base := GinkgoT().TempDir()
+		base := canonicalTempDir()
 		proxy := filepath.Join(base, "proxy")
 		first, second := filepath.Join(base, "first"), filepath.Join(base, "second")
 		for _, fixture := range []struct {

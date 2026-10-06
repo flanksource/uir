@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -18,7 +19,7 @@ var _ = Describe("checking an indexed checkout", func() {
 		writeFile(source, "package current\n\nfunc Run() {}\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		indexed, err := engine.IndexModules(ctx, ModuleOptions{Path: root, IncludeTests: true})
+		indexed, err := engine.IndexModules(ctx, ModuleOptions{Path: root, IncludeTests: true, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		current, err := engine.CheckCurrent(ctx, root, true)
 		Expect(err).ToNot(HaveOccurred())
@@ -41,7 +42,7 @@ var _ = Describe("checking an indexed checkout", func() {
 		Expect(err).ToNot(HaveOccurred())
 		_, err = engine.CheckCurrent(ctx, root, true)
 		Expect(err).To(MatchError(ContainSubstring("no indexed head")))
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: root, IncludeTests: true})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: root, IncludeTests: true, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		_, err = engine.CheckCurrent(ctx, root, true)
 		Expect(err).To(MatchError(ContainSubstring("incomplete")))

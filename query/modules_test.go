@@ -7,6 +7,7 @@ import (
 
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -20,7 +21,7 @@ var _ = Describe("module queries", func() {
 		Expect(os.WriteFile(source, []byte("package calls\n\nfunc Target() {}\nfunc Caller() { Target(); Missing() }\n"), 0o644)).To(Succeed())
 		engine, err := indexer.New(database)
 		Expect(err).ToNot(HaveOccurred())
-		indexed, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace})
+		indexed, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		pipeline, err := query.NewPipeline(database)
 		Expect(err).ToNot(HaveOccurred())
@@ -37,7 +38,7 @@ var _ = Describe("module queries", func() {
 		Expect(callees.Matches[1].SymbolID).To(BeEmpty(), "an unresolved call is a callee without a symbol")
 		Expect(callees.Coverage).To(ConsistOf(HaveField("Coverage", "partial")))
 		Expect(os.Remove(source)).To(Succeed())
-		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace})
+		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		_, err = pipeline.RunModules(ctx, `calls.Target =`, query.ModuleScopeOptions{RootKey: "example.org/calls"})
 		Expect(err).To(MatchError(ContainSubstring("matched no indexed symbols")))
@@ -61,9 +62,9 @@ var _ = Describe("module queries", func() {
 		}
 		engine, err := indexer.New(database)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: primary})
+		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: primary, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: branch})
+		_, err = engine.IndexModules(ctx, indexer.ModuleOptions{Path: branch, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		pipeline, err := query.NewPipeline(database)
 		Expect(err).ToNot(HaveOccurred())

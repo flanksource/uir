@@ -84,7 +84,8 @@ table "locations" {
   unique "locations_root_id_canonical_path_key" { columns = [column.root_id, column.canonical_path] }
   index "locations_parent_idx" { columns = [column.parent_location_id] }
   check "locations_canonical_path_check" { expr = "length(canonical_path) > 0" }
-  check "locations_kind_check" { expr = "kind IN ('module', 'git', 'git-submodule')" }
+  // external: a location a non-Go producer publishes (indexer.Publish); its canonical_path is a URI.
+  check "locations_kind_check" { expr = "kind IN ('module', 'git', 'git-submodule', 'external')" }
 }
 
 table "snapshots" {
@@ -168,6 +169,53 @@ table "snapshots" {
     type = bigint
     null = false
   }
+  column "reason" {
+    type    = text
+    null    = false
+    default = "unknown"
+  }
+  column "index_started_at" {
+    type = timestamptz
+    null = true
+  }
+  // The size and change counts are null only on rows published before they existed, until the
+  // storage backfill fills them; every publication writes them.
+  column "file_count" {
+    type = bigint
+    null = true
+  }
+  column "symbol_count" {
+    type = bigint
+    null = true
+  }
+  column "occurrence_count" {
+    type = bigint
+    null = true
+  }
+  column "source_bytes" {
+    type = bigint
+    null = true
+  }
+  column "files_added" {
+    type = integer
+    null = true
+  }
+  column "files_changed" {
+    type = integer
+    null = true
+  }
+  column "files_deleted" {
+    type = integer
+    null = true
+  }
+  column "symbols_changed" {
+    type = integer
+    null = true
+  }
+  column "task_run_id" {
+    type = text
+    null = true
+  }
 
   primary_key { columns = [column.id] }
   foreign_key "snapshots_root_id_fkey" {
@@ -200,6 +248,7 @@ table "snapshots" {
   check "snapshots_coverage_check" { expr = "coverage IN ('indexed', 'partial', 'syntax', 'excluded')" }
   check "snapshots_package_count_check" { expr = "package_count >= 0" }
   check "snapshots_ordinal_check" { expr = "ordinal >= 1" }
+  check "snapshots_reason_check" { expr = "reason IN ('unknown', 'add', 'reindex', 'refactor', 'local-dependency', 'versioned-dependency', 'historical', 'dependency-cycle', 'import')" }
 }
 
 table "location_heads" {

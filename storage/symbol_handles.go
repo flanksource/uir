@@ -16,9 +16,10 @@ type packageKey struct {
 	path   string
 }
 
-// handleRegistry is the module and package numbering of one allocation; created lists the packages
-// this allocation numbered, whose buckets are empty.
+// handleRegistry is the kind registry and the module and package numbering of one allocation; created
+// lists the packages this allocation numbered, whose buckets are empty.
 type handleRegistry struct {
+	kinds    symbolhandle.Kinds
 	modules  map[string]uint64
 	packages map[packageKey]uint64
 	created  map[packageKey]bool
@@ -104,7 +105,7 @@ func checkStoredHandle(row Symbol, handle int64, expected symbolhandle.Fields) e
 }
 
 func (registry handleRegistry) bucketOf(row Symbol) (symbolhandle.Fields, symbolhandle.Range, error) {
-	kind, err := symbolhandle.ParseKind(row.Kind)
+	kind, err := registry.kinds.Lookup(row.Kind)
 	if err != nil {
 		return symbolhandle.Fields{}, symbolhandle.Range{}, fmt.Errorf("symbol %s: %w", row.ID, err)
 	}
@@ -113,8 +114,8 @@ func (registry handleRegistry) bucketOf(row Symbol) (symbolhandle.Fields, symbol
 		return symbolhandle.Fields{}, symbolhandle.Range{}, fmt.Errorf("symbol %s: %w", row.ID, err)
 	}
 	module := registry.modules[row.ModuleKey]
-	fields := symbolhandle.Fields{Module: module, Package: registry.packages[packageKey{module, row.PackagePath}], Visibility: visibility, Kind: kind}
-	bucket, err := symbolhandle.BucketRange(fields.Module, fields.Package, visibility, kind)
+	fields := symbolhandle.Fields{Module: module, Package: registry.packages[packageKey{module, row.PackagePath}], Visibility: visibility, Kind: kind.Code}
+	bucket, err := symbolhandle.BucketRange(fields.Module, fields.Package, visibility, kind.Code)
 	return fields, bucket, err
 }
 
@@ -135,9 +136,16 @@ func (registry handleRegistry) firstFree(ctx context.Context, database *gorm.DB,
 }
 
 func resolveHandleRegistry(ctx context.Context, database *gorm.DB, rows []Symbol) (handleRegistry, error) {
-	registry := handleRegistry{modules: map[string]uint64{}, packages: map[packageKey]uint64{}, created: map[packageKey]bool{}}
+	kinds, err := LoadSymbolKinds(ctx, database)
+	if err != nil {
+		return handleRegistry{}, err
+	}
+	registry := handleRegistry{kinds: kinds, modules: map[string]uint64{}, packages: map[packageKey]uint64{}, created: map[packageKey]bool{}}
 	moduleKeys := map[string]bool{}
 	for _, row := range rows {
+		if _, err := kinds.Lookup(row.Kind); err != nil {
+			return handleRegistry{}, fmt.Errorf("symbol %s (%s): %w", row.ID, row.CanonicalKey, err)
+		}
 		moduleKeys[row.ModuleKey] = true
 	}
 	if err := registry.resolveModules(ctx, database, sortedSet(moduleKeys)); err != nil {

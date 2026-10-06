@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
@@ -15,15 +16,19 @@ import (
 
 // moduleExtraction is everything publication writes for one root, computed before any transaction.
 // reusedHead is set instead of the extracted facts when the root's head snapshot is reusable.
+// indexerVersion is what produced the documents: IndexerVersion for Go, ExternalIndexerVersion for a
+// publication.
 type moduleExtraction struct {
-	root        discoveredRoot
-	reusedHead  uuid.UUID
-	contextHash string
-	packages    []extractedPackage
-	documents   map[string]extractedDocument
-	symbols     map[string]storage.Symbol
-	coverage    storage.Coverage
-	diagnostics storage.JSON
+	root           discoveredRoot
+	reusedHead     uuid.UUID
+	indexerVersion string
+	indexStartedAt time.Time
+	contextHash    string
+	packages       []extractedPackage
+	documents      map[string]extractedDocument
+	symbols        map[string]storage.Symbol
+	coverage       storage.Coverage
+	diagnostics    storage.JSON
 }
 
 // extractedPackage is one package_coverage row.
@@ -58,10 +63,11 @@ type extractedPosting struct {
 
 // extractModule type-checks the root, hashes each package's inputs, and renders every document.
 func extractModule(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (moduleExtraction, error) {
+	startedAt := time.Now().UTC()
 	load, err := loadTyped(ctx, loadPackages, root, includeTests)
 	if err != nil {
 		var loadFailure packageLoadError
-		if !root.Historical || !errors.As(err, &loadFailure) {
+		if !root.Historical || !errors.As(err, &loadFailure) || ctx.Err() != nil || !sourceResolutionFailure(err) {
 			return moduleExtraction{}, err
 		}
 		load = typedLoad{
@@ -78,7 +84,7 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 	for _, file := range root.Files {
 		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
 	}
-	extraction := moduleExtraction{root: root, documents: map[string]extractedDocument{}}
+	extraction := moduleExtraction{root: root, indexerVersion: IndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{}}
 	inputHashes := map[string]string{}
 	var coverages []storage.Coverage
 	for _, packagePath := range sortedKeys(grouped) {
@@ -229,11 +235,11 @@ func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.S
 		if symbol.ID == nil {
 			continue
 		}
-		if row := rows[*symbol.ID]; row.Kind != symbol.Kind || row.Visibility != symbol.Visibility {
-			return nil, nil, fmt.Errorf("symbol %s is a %s %s entry but a %s %s row", *symbol.ID, symbol.Visibility, symbol.Kind, row.Visibility, row.Kind)
-		}
 		if err := count(*symbol.ID, storage.RoleDefinition); err != nil {
 			return nil, nil, err
+		}
+		if row := rows[*symbol.ID]; row.Kind != symbol.Kind || row.Visibility != symbol.Visibility {
+			return nil, nil, fmt.Errorf("symbol %s is a %s %s entry but a %s %s row", *symbol.ID, symbol.Visibility, symbol.Kind, row.Visibility, row.Kind)
 		}
 		for _, implemented := range symbol.Implements {
 			if err := count(implemented, storage.RoleImplements); err != nil {

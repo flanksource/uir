@@ -106,9 +106,6 @@ func (indexer *Indexer) publishLocalGroup(ctx context.Context, graph localDepend
 		}
 		heads[index] = head
 	}
-	if err := verifyIndexInputs(ctx, indexer.database, rootsInGroup(graph.roots, group), options.IncludeTests); err != nil {
-		return err
-	}
 	for _, index := range group {
 		for dependencyIndex := range graph.roots[index].Dependencies {
 			dependency := &graph.roots[index].Dependencies[dependencyIndex]
@@ -133,13 +130,16 @@ func (indexer *Indexer) publishLocalGroup(ctx context.Context, graph localDepend
 		}
 	}
 	if reusable {
-		return indexer.reuseLocalGroup(ctx, graph, group, extractions, heads, results, snapshots)
+		return indexer.reuseLocalGroup(ctx, graph, group, extractions, heads, options, results, snapshots)
 	}
 	return indexer.createLocalGroup(ctx, graph, group, extractions, options, results, snapshots)
 }
 
-func (indexer *Indexer) reuseLocalGroup(ctx context.Context, graph localDependencyGraph, group []int, extractions map[int]moduleExtraction, heads map[int]storage.ModuleSnapshot, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
+func (indexer *Indexer) reuseLocalGroup(ctx context.Context, graph localDependencyGraph, group []int, extractions map[int]moduleExtraction, heads map[int]storage.ModuleSnapshot, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
 	err := storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
+		if err := verifyIndexInputs(ctx, transaction, groupInputs(graph, group), options.IncludeTests); err != nil {
+			return err
+		}
 		locations := map[string]storage.ModuleLocation{}
 		for _, index := range group {
 			extraction := extractions[index]
@@ -148,7 +148,7 @@ func (indexer *Indexer) reuseLocalGroup(ctx context.Context, graph localDependen
 			if _, _, err := ensureGraphLocation(ctx, transaction, graph, index, locations); err != nil {
 				return err
 			}
-			result, location, err := indexModule(ctx, transaction, extraction, locations, ModuleOptions{})
+			result, location, err := indexModule(ctx, transaction, extraction, locations, ModuleOptions{Reason: storage.ReasonDependencyCycle})
 			if err != nil {
 				return err
 			}
@@ -181,6 +181,9 @@ func (indexer *Indexer) createLocalGroup(ctx context.Context, graph localDepende
 		}
 	}
 	return storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
+		if err := verifyIndexInputs(ctx, transaction, groupInputs(graph, group), options.IncludeTests); err != nil {
+			return err
+		}
 		locations := map[string]storage.ModuleLocation{}
 		pending := []storage.SnapshotDependency{}
 		for _, index := range group {
@@ -198,7 +201,7 @@ func (indexer *Indexer) createLocalGroup(ctx context.Context, graph localDepende
 			result := ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(extraction.root.Files)}
 			snapshot, err := publishSnapshot(ctx, transaction, snapshotPublication{
 				root: root, location: location, base: base, extraction: extraction, force: options.Force,
-				startedAt: time.Now().UTC(), snapshotID: ids[index], pendingEdges: &pending,
+				startedAt: time.Now().UTC(), reason: storage.ReasonDependencyCycle, snapshotID: ids[index], pendingEdges: &pending,
 			}, &result)
 			if err != nil {
 				return err
@@ -244,10 +247,19 @@ func containsIndex(group []int, target int) bool {
 	return false
 }
 
-func rootsInGroup(roots []discoveredRoot, group []int) []discoveredRoot {
+// groupInputs is what verifyIndexInputs checks for a cycle group: its roots, with the edges between
+// members unlinked, since those name the snapshots the group's own publication creates.
+func groupInputs(graph localDependencyGraph, group []int) []discoveredRoot {
 	selected := make([]discoveredRoot, 0, len(group))
 	for _, index := range group {
-		selected = append(selected, roots[index])
+		root := graph.roots[index]
+		root.Dependencies = append([]dependencyObservation(nil), root.Dependencies...)
+		for dependencyIndex := range root.Dependencies {
+			if targetIndex, linked := graph.byPath[root.Dependencies[dependencyIndex].LocalDir]; linked && containsIndex(group, targetIndex) {
+				root.Dependencies[dependencyIndex].Edge.TargetSnapshotID = nil
+			}
+		}
+		selected = append(selected, root)
 	}
 	return selected
 }

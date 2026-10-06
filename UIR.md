@@ -119,6 +119,7 @@ These are the statement kinds currently registered in `StatementMarshaler`. A st
 | `control:if` | `IfStmt` | Conditional branch. |
 | `assignment:literal` | `LiteralStmt` | Literal value. |
 | `call` | `MethodCallStmt` | Method or function invocation. |
+| `dispatch_call` | `DispatchCallStmt` | Invocation whose implementation is chosen at run time among candidates. |
 | `call:read:record` | `RecordReadStmt` | Read from record-like source. |
 | `call:write:record` | `RecordWriteStmt` | Write to record-like source. |
 | `control:return` | `ReturnStmt` | Return statement. |
@@ -702,9 +703,12 @@ That means their JSON shape carries the usual record-field fields directly on th
 | `cast` | `CastStmt` | Cast expression. |
 | `unary` | `UnaryStmt` | Unary expression. |
 | `method_call` | `MethodCallStmt` | Method call expression. |
+| `dispatch_call` | `DispatchCallStmt` | Dispatch call expression. |
 | `endpoint_call` | `EndpointCallStmt` | Endpoint call expression. |
 | `record_read` | `RecordReadStmt` | Record read expression. |
 | `tuple` | `TupleStmt` | Tuple expression. |
+
+An `ExprStmt` with none of these set is an expression its producer could not model. It keeps the source text in `content`, which is what it renders as.
 
 `AssignmentStmt`:
 
@@ -764,6 +768,15 @@ That means their JSON shape carries the usual record-field fields directly on th
 | `Method` | `NodeRef or node` | Callee symbol. Current Go JSON uses the capitalized key `Method`. |
 | `receiver` | `ExprStmt` | Receiver expression for instance calls. |
 | `arguments` | `[]object` | Positional or named argument objects. |
+
+`DispatchCallStmt` is a call whose target is chosen at run time: an interface method with several implementers, a rule name several scopes define.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `Method` | `NodeRef or node` | Declared target, under the same capitalized key as `MethodCallStmt`. |
+| `receiver` | `ExprStmt` | Receiver expression for instance calls. |
+| `arguments` | `[]object` | Positional or named argument objects. |
+| `candidates` | `[]NodeRef or node` | The implementations that may run. A null candidate is refused. |
 
 `EndpointCallStmt`:
 
@@ -872,9 +885,14 @@ Use `NodeRef` when one node points at another and you do not want to duplicate t
 | metadata fields | `Metadata` | Relationship annotations or comments. |
 | source location fields | `SourceCode` | Relationship source location. |
 | `id` | `uuid` | Relationship ID. |
-| `relationship_type` | `RelationshipType` | Import, call, read, write, inheritance, and related relationship kinds. |
+| `relationship_type` | `RelationshipType` | Import, call, dispatch, read, write, inheritance, and related relationship kinds. |
+| `kind` | `string` | The producer's own, finer name for the reference (an include, a function call, a column read); omitted when the type says all there is. |
+| `via` | `string` | The construct the reference is written in, such as the element or statement that carries it; omitted when the producer does not say. |
 | `from` | `Node` | Source node. |
 | `to` | `Node` | Target node. |
+| `guards` | `[]ConditionStmt` | Conditions that must hold to reach the relationship's statement, outermost first. |
+
+`CollectRelationships(method)` walks a method body with `WalkStatements` and returns its calls, reads and writes with `from` set to the method and `guards` set from the enclosing `if`, `switch` and loop conditions. An else branch carries the negated condition, a switch case the match against the switch's value, and its default the negated disjunction of the other cases. A `DispatchCallStmt` yields one `call` to its declared target plus one `dispatch` per candidate. The `graph` package turns these relationships into a bounded nodes-and-edges call graph, each relationship's `kind` its edge's kind and its location, `content` and guards one call site. A non-Go lowering records its references with `lower.Recorder`, which returns them as relationships with `kind`, `via` and `content` set.
 
 ## Enumerations
 
@@ -918,7 +936,7 @@ Practical note:
 
 ### Relationship types
 
-`import`, `call`, `reference`, `inheritance`, `implements`, `includes`, `foreign_key`, `read`, `write`, `""`
+`import`, `call`, `reference`, `inheritance`, `implements`, `includes`, `foreign_key`, `read`, `write`, `dispatch`, `""`
 
 ### Comment types
 

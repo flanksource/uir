@@ -43,8 +43,13 @@ func registerHistoryCommand(root *cobra.Command) {
 		if err != nil {
 			return symboldiff.Result{}, err
 		}
+		taskContext, err := runContext(ctx)
+		if err != nil {
+			return symboldiff.Result{}, err
+		}
 		return symboldiff.DiffCommit(ctx, database, symboldiff.CommitOptions{
 			RootKey: options.Root, Commit: options.Commit, Visibility: visibility, Stat: options.Stat, IncludeTests: options.IncludeTests,
+			TaskContext: taskContext,
 		})
 	})
 	show.Use = "show <commit>"

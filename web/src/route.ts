@@ -1,6 +1,9 @@
-import type { ModuleRoot } from "./api";
+import type { ModuleGraphDirection, ModuleRoot } from "./api";
 
 export const ALL_MODULES = "*";
+/** The depth the Explorer opens a call graph at (graph.DefaultDepth). */
+export const DEFAULT_GRAPH_DEPTH = 2;
+const GRAPH_DIRECTIONS: readonly ModuleGraphDirection[] = ["callees", "callers", "both"];
 
 export type ScopeRoot = Pick<ModuleRoot, "root_key" | "location" | "snapshot_id">;
 
@@ -28,6 +31,15 @@ export type Route = {
   historyLayout: "inline" | "sidebar";
   historySearch: string;
   offset: number;
+  explorerTab: "source" | "call-graph";
+  graphDir: ModuleGraphDirection;
+  graphDepth: number;
+  /** The pinned call graph root, a graph symbol id; empty follows the selected symbol. */
+  graphRoot: string;
+  /** Comma-separated exclusion patterns; empty takes the server's defaults. */
+  graphExclude: string;
+  /** The task run expanded in the task manager. */
+  taskRun: string;
 };
 
 export function readRoute(location: Pick<Location, "pathname" | "search"> = window.location): Route {
@@ -57,17 +69,26 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     historyLayout: params.get("historyLayout") === "sidebar" ? "sidebar" : "inline",
     historySearch: params.get("historySearch") ?? "",
     offset: Number(params.get("offset") ?? 0),
+    explorerTab: params.get("explorerTab") === "call-graph" ? "call-graph" : "source",
+    graphDir: GRAPH_DIRECTIONS.find((direction) => direction === params.get("graphDir")) ?? "both",
+    graphDepth: Number(params.get("graphDepth") ?? DEFAULT_GRAPH_DEPTH),
+    graphRoot: params.get("graphRoot") ?? "",
+    graphExclude: params.get("graphExclude") ?? "",
+    taskRun: params.get("taskRun") ?? "",
   };
 }
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch", "graphRoot", "graphExclude", "taskRun"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
   if (route.historyGroup !== "package") params.set("historyGroup", route.historyGroup);
   if (route.explorerMode === "symbols") params.set("explorerMode", "symbols");
   if (route.historyLayout !== "inline") params.set("historyLayout", route.historyLayout);
+  if (route.explorerTab !== "source") params.set("explorerTab", route.explorerTab);
+  if (route.graphDir !== "both") params.set("graphDir", route.graphDir);
+  if (route.graphDepth !== DEFAULT_GRAPH_DEPTH) params.set("graphDepth", String(route.graphDepth));
   for (const key of ["line", "column", "offset"] as const) {
     if (route[key] > 0) params.set(key, String(route[key]));
   }
@@ -93,5 +114,5 @@ export function scopeValue(route: Pick<Route, "module">): string {
 export function scopePatch(root: ScopeRoot | null): Partial<Route> {
   if (!root) return { module: "" };
   return { module: root.root_key, location: root.location, snapshot: root.snapshot_id,
-    source: "", node: "", fileSearch: "", symbolSearch: "", compareFrom: "", compareTo: "", logCommit: "", includeTests: false, offset: 0 };
+    source: "", node: "", fileSearch: "", symbolSearch: "", compareFrom: "", compareTo: "", logCommit: "", includeTests: false, offset: 0, graphRoot: "" };
 }

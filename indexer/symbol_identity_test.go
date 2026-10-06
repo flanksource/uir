@@ -85,14 +85,14 @@ type symbolRowSummary struct {
 
 var _ = Describe("canonical symbol identity", func() {
 	It("encodes every identity field length-delimited and digests the encoding", func() {
-		identity := symbolIdentity{
+		identity := Identity{
 			ModuleKey: storeModule, PackagePath: storePackage, Kind: "method", OwnerID: "ab",
 			Name: "Save", ParameterTypes: []string{"context.Context", "example.org/acme/store.Invoice"},
 		}
-		key := identity.canonicalKey()
+		key := identity.CanonicalKey()
 		Expect(key).To(Equal("10:uir-symbol,1:1,16:example.org/acme,22:example.org/acme/store,6:method,2:ab,4:Save,1:2,15:context.Context,30:example.org/acme/store.Invoice,"))
 		digest := sha256.Sum256([]byte(key))
-		Expect(identity.id()).To(Equal(hex.EncodeToString(digest[:])))
+		Expect(SymbolID(identity)).To(Equal(hex.EncodeToString(digest[:])))
 	})
 
 	It("derives kind, owner, visibility, and ordered parameter types from the type checker", func() {

@@ -1,9 +1,6 @@
 package uir
 
-import (
-	"github.com/flanksource/clicky/api"
-	"github.com/flanksource/clicky/api/icons"
-)
+import "github.com/flanksource/clicky/api"
 
 type Visibility string
 
@@ -300,62 +297,11 @@ const (
 	NodeTypeUnknown NodeType = ""
 )
 
-func (n NodeType) Color() string {
-	switch n {
-	case NodeTypePackage, NodeTypeModule:
-		return "text-emerald-500"
-	case NodeTypeType:
-		return "text-blue-500"
-	case NodeTypeInterface:
-		return "text-cyan-500"
-	case NodeTypeMethod, NodeTypeFunction:
-		return "text-purple-500"
-	case NodeTypeRecord, NodeTypeTable:
-		return "text-orange-500"
-	case NodeTypeField, NodeTypeColumn:
-		return "text-amber-500"
-	case NodeTypeIndex:
-		return "text-purple-400"
-	case NodeTypeForeignKey:
-		return "text-teal-400"
-	case NodeTypeEndpoint:
-		return "text-gray-500"
-	case NodeTypeFunctionVariable, NodeTypePackageVariable:
-		return "text-amber-500"
-	case NodeTypeAnnotation:
-		return "text-violet-400"
-	case NodeTypeImport, NodeTypeDependency:
-		return "text-teal-500"
-	case NodeTypeUnknown, NodeTypeComment:
-		return "text-gray-400"
-	default:
-		return ""
-	}
-}
+func (n NodeType) Color() string { return nodeTypeStyles[n] }
 
 func (n NodeType) Icon() api.Textable {
-	switch n {
-	case NodeTypePackage, NodeTypeModule:
-		return icons.Package
-	case NodeTypeType:
-		return icons.Type
-	case NodeTypeInterface:
-		return icons.Interface
-	case NodeTypeMethod, NodeTypeFunction:
-		return icons.Method
-	case NodeTypeRecord:
-		return icons.Table
-	case NodeTypeTable:
-		return icons.Database
-	case NodeTypeIndex:
-		return icons.Key
-	case NodeTypeForeignKey:
-		return icons.Link
-	case NodeTypeField, NodeTypeColumn, NodeTypeFunctionVariable, NodeTypePackageVariable:
-		return icons.Variable
-	case NodeTypeEndpoint:
-		return icons.Http
-
+	if icon, found := nodeTypeIcons[n]; found {
+		return icon
 	}
 	return api.Text{Content: ""}
 }
@@ -486,6 +432,7 @@ const (
 	ASTStatementTypeRaw           StatementType = StatementType("raw")
 	ASTStatementTypeTemplateLit   StatementType = StatementType(StatementCategoryDataAssignment + ":template")
 	ASTStatementTypeForeignKey    StatementType = StatementType("foreign_key")
+	ASTStatementTypeDispatchCall  StatementType = StatementType("dispatch_call")
 )
 
 type RelationshipType string
@@ -500,6 +447,7 @@ const (
 	RelationshipTypeForeignKey  RelationshipType = "foreign_key" // Database foreign key constraint
 	RelationshipTypeRead        RelationshipType = "read"        // Read operation from a record/data source
 	RelationshipTypeWrite       RelationshipType = "write"       // Write operation to a record/data source
+	RelationshipTypeDispatch    RelationshipType = "dispatch"    // Caller to one implementation a dispatch call may run
 	RelationshipTypeNA          RelationshipType = ""
 )
 

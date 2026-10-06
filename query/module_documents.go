@@ -20,9 +20,13 @@ func (pipeline *Pipeline) scopeDocuments(ctx context.Context, scope moduleScope)
 	if err != nil {
 		return nil, err
 	}
+	kinds, err := storage.LoadSymbolKinds(ctx, pipeline.database)
+	if err != nil {
+		return nil, err
+	}
 	documents := make([]scopeDocument, 0, len(active))
 	for path, document := range active {
-		content, err := storage.DecodeDocument(document.Document, document.Source)
+		content, err := storage.DecodeDocument(document.Document, document.Source, storage.WithKinds(kinds))
 		if err != nil {
 			return nil, err
 		}

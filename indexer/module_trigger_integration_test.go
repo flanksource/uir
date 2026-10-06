@@ -32,7 +32,7 @@ func loadSnapshot(database *gorm.DB, id string) storage.ModuleSnapshot {
 
 func indexOnce(ctx context.Context, engine *Indexer, path string) ModuleResult {
 	GinkgoHelper()
-	results, err := engine.IndexModules(ctx, ModuleOptions{Path: path})
+	results, err := engine.IndexModules(ctx, ModuleOptions{Path: path, Reason: storage.ReasonAdd})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(results).To(HaveLen(1))
 	return results[0]
@@ -156,7 +156,7 @@ var _ = Describe("snapshot trigger", func() {
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
 		GinkgoT().Setenv("PATH", "")
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace})
+		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).To(MatchError(ContainSubstring("read go env")))
 		Expect(countRows(database, &storage.ModuleRoot{}, "1 = 1")).To(BeZero())
 	})

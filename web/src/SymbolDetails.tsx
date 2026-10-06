@@ -69,6 +69,21 @@ function ReferencesPanel({ references, onRoute, onCandidate }: { references: Ret
   </div>;
 }
 
+// CallsList lists the symbol's outgoing calls as indexed; a row reveals its line in the Source tab.
+function CallsList({ node, onRoute }: { node: ModuleNode; onRoute: OnRoute }) {
+  return <ol aria-label="Outgoing calls" className="flex flex-col text-sm">
+    {node.calls.map((call, index) => <li key={`${call.statement_path}:${index}`}>
+      <button type="button" disabled={!call.line} title={call.line ? `Open line ${call.line} in Source` : "The index recorded no line for this call"}
+        className="flex w-full min-w-0 items-baseline gap-2 rounded px-2 py-0.5 text-left hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
+        onClick={() => onRoute({ source: node.source_id, line: call.line ?? 0, column: 1, explorerTab: "source" })}>
+        <span className="w-10 shrink-0 text-right font-mono text-xs text-muted-foreground">{call.line ?? "?"}</span>
+        <code className="min-w-0 flex-1 truncate font-mono text-xs" title={call.text}>{call.text.split("\n")[0]}</code>
+        {!call.resolvable && <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">unresolved</span>}
+      </button>
+    </li>)}
+  </ol>;
+}
+
 export function SymbolDetails({ node, route, sources, onRoute }: { node?: ModuleNode; route: Route; sources: ModuleSource[]; onRoute: OnRoute }) {
   if (!node) return <div className="p-3"><Muted>Select a symbol to inspect its payload, field, calls, and references.</Muted></div>;
   return <SelectedSymbol node={node} route={route} sources={sources} onRoute={onRoute} />;
@@ -94,7 +109,7 @@ function SelectedSymbol({ node, route, sources, onRoute }: { node: ModuleNode; r
       <h3>UIR payload</h3><CodeBlock>{JSON.stringify(node.payload, null, 2)}</CodeBlock>
     </>}
     {tab === "field" && (node.field ? <CodeBlock>{JSON.stringify(node.field, null, 2)}</CodeBlock> : <Muted>No field projection</Muted>)}
-    {tab === "calls" && (node.calls.length ? <CodeBlock>{JSON.stringify(node.calls, null, 2)}</CodeBlock> : <Muted>No outgoing calls</Muted>)}
+    {tab === "calls" && (node.calls.length ? <CallsList node={node} onRoute={onRoute} /> : <Muted>No outgoing calls</Muted>)}
     {tab === "references" && <ReferencesPanel references={references} onRoute={onRoute} onCandidate={(queryName) => setCandidate({ node: node.id, queryName })} />}
     {tab === "raw" && <CodeBlock>{JSON.stringify(node, null, 2)}</CodeBlock>}
   </div>;

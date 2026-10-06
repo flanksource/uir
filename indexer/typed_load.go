@@ -42,6 +42,28 @@ type packageLoadError struct{ err error }
 func (failure packageLoadError) Error() string { return failure.err.Error() }
 func (failure packageLoadError) Unwrap() error { return failure.err }
 
+// sourceResolutionFailures are the go command's reports of a module graph the source itself cannot
+// resolve, however often the load is retried: the environment forbids the lookup, the version or
+// module does not exist, the sums are missing, or the manifest is invalid. go/packages returns them
+// only as the command's text.
+var sourceResolutionFailures = []string{
+	"module lookup disabled by GOPROXY=off", "404 Not Found", "410 Gone", "missing go.sum entry",
+	"unknown revision", "invalid version", "no matching versions", "errors parsing go.mod", "malformed module path",
+}
+
+// sourceResolutionFailure reports whether a failed historical load is one the commit's own sources
+// cause, which may be indexed as syntax. Anything else, an unreachable or failing proxy, a missing go
+// command, or an interrupted load, is not a fact about the commit and fails the index.
+func sourceResolutionFailure(err error) bool {
+	message := err.Error()
+	for _, failure := range sourceResolutionFailures {
+		if strings.Contains(message, failure) {
+			return true
+		}
+	}
+	return false
+}
+
 // loadTyped loads every package of the root (and its test variants when includeTests is set) with
 // full type information for the whole dependency graph, in the root's directory and build variant.
 func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (typedLoad, error) {
@@ -86,7 +108,7 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 	}
 	for _, file := range root.Files {
 		if _, typed := load.files[file.AbsolutePath]; typed && parsed[file.AbsolutePath] != file.ContentHash {
-			return typedLoad{}, fmt.Errorf("source %q changed while indexing root %q", file.PathKey, root.RootKey)
+			return typedLoad{}, fmt.Errorf("source %q of root %q changed: %w", file.PathKey, root.RootKey, ErrIndexInputsChanged)
 		}
 	}
 	return load, nil

@@ -5,10 +5,16 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+
+	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
+// TypeForm is the form (struct, interface, alias, or other) of a Go type declaration, classified from
+// its Go shape. It applies only to the builtin type kind; every other kind, including the other kinds of
+// the type category (interface, record, table, and custom kinds) whose shapes are not Go syntax, has no
+// type form.
 func TypeForm(version int, symbol DocumentSymbol) (string, error) {
-	if symbol.Kind != "type" {
+	if symbol.Kind != symbolhandle.KindType.String() {
 		if symbol.TypeForm != "" {
 			return "", fmt.Errorf("%s symbol has type_form %q", symbol.Kind, symbol.TypeForm)
 		}

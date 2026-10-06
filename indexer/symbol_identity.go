@@ -1,19 +1,11 @@
 package indexer
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/types"
-	"strconv"
-	"strings"
 
 	"github.com/flanksource/uir/storage"
-)
-
-const (
-	symbolIdentityDomain  = "uir-symbol"
-	symbolIdentityVersion = 1
 )
 
 // Notes on occurrences whose target is not a canonical symbol.
@@ -27,42 +19,6 @@ const (
 	noteUnresolvedImport = "unresolved import"
 	noteUnproven         = "unproven: involves an invalid type"
 )
-
-// symbolIdentity is the input to a canonical symbol id; see docs/symbol-index-storage.md.
-type symbolIdentity struct {
-	ModuleKey      string
-	PackagePath    string
-	Kind           string
-	OwnerID        string
-	Name           string
-	ParameterTypes []string
-}
-
-// canonicalKey is the versioned, length-delimited encoding the id digests: every field is written
-// as <byte length>:<bytes>, so no two field sequences share an encoding.
-func (identity symbolIdentity) canonicalKey() string {
-	var key strings.Builder
-	field := func(value string) {
-		key.WriteString(strconv.Itoa(len(value)))
-		key.WriteByte(':')
-		key.WriteString(value)
-		key.WriteByte(',')
-	}
-	field(symbolIdentityDomain)
-	field(strconv.Itoa(symbolIdentityVersion))
-	field(identity.ModuleKey)
-	field(identity.PackagePath)
-	field(identity.Kind)
-	field(identity.OwnerID)
-	field(identity.Name)
-	field(strconv.Itoa(len(identity.ParameterTypes)))
-	for _, parameter := range identity.ParameterTypes {
-		field(parameter)
-	}
-	return key.String()
-}
-
-func (identity symbolIdentity) id() string { return hashBytes([]byte(identity.canonicalKey())) }
 
 type packageClass int
 
@@ -182,7 +138,7 @@ func (resolver *symbolResolver) packageLevel(object types.Object, kind string) (
 
 // builtin records a universe-scope object; the error interface's Error method is owned by error.
 func (resolver *symbolResolver) builtin(object types.Object) (resolvedSymbol, error) {
-	identity := symbolIdentity{Kind: "builtin", Name: object.Name()}
+	identity := Identity{Kind: "builtin", Name: object.Name()}
 	if function, ok := object.(*types.Func); ok && function.Signature().Recv() != nil {
 		owner, err := resolver.resolve(types.Universe.Lookup("error"))
 		if err != nil {
@@ -201,7 +157,7 @@ func (resolver *symbolResolver) packageSymbol(pkg *types.Package) (resolvedSymbo
 	if origin.Class == unresolvedPackage {
 		return noted(noteUnresolvedImport)
 	}
-	return resolver.record(symbolIdentity{ModuleKey: origin.moduleKey(), PackagePath: pkg.Path(), Kind: "package", Name: pkg.Name()}, "exported")
+	return resolver.record(Identity{ModuleKey: origin.moduleKey(), PackagePath: pkg.Path(), Kind: "package", Name: pkg.Name()}, "exported")
 }
 
 func (resolver *symbolResolver) method(function *types.Func, parameters []string) (resolvedSymbol, error) {
@@ -244,7 +200,7 @@ func (resolver *symbolResolver) declare(object types.Object, kind, ownerID strin
 	if ast.IsExported(object.Name()) && (ownerID == "" || resolver.rows[ownerID].Visibility == "exported") {
 		visibility = "exported"
 	}
-	return resolver.record(symbolIdentity{
+	return resolver.record(Identity{
 		ModuleKey: origin.moduleKey(), PackagePath: object.Pkg().Path(), Kind: kind,
 		OwnerID: ownerID, Name: object.Name(), ParameterTypes: parameters,
 	}, visibility)
@@ -261,30 +217,17 @@ func (resolver *symbolResolver) origin(pkg *types.Package) (packageOrigin, error
 	return origin, nil
 }
 
-func (resolver *symbolResolver) record(identity symbolIdentity, visibility string) (resolvedSymbol, error) {
-	id, key := identity.id(), identity.canonicalKey()
+func (resolver *symbolResolver) record(identity Identity, visibility string) (resolvedSymbol, error) {
+	id, key := SymbolID(identity), identity.CanonicalKey()
 	if existing, found := resolver.rows[id]; found {
 		if existing.CanonicalKey != key {
 			return resolvedSymbol{}, fmt.Errorf("symbol id %s digests %q and %q", id, existing.CanonicalKey, key)
 		}
 		return resolvedSymbol{ID: id}, nil
 	}
-	parameters := identity.ParameterTypes
-	if parameters == nil {
-		parameters = []string{}
-	}
-	encoded, err := json.Marshal(parameters)
+	row, err := symbolRow(identity, visibility)
 	if err != nil {
-		return resolvedSymbol{}, fmt.Errorf("encode parameter types of %s: %w", identity.Name, err)
-	}
-	row := storage.Symbol{
-		ID: id, IdentityVersion: symbolIdentityVersion, CanonicalKey: key, ModuleKey: identity.ModuleKey,
-		PackagePath: identity.PackagePath, Kind: identity.Kind, Name: identity.Name,
-		SearchName: storage.SearchName(identity.Name), Visibility: visibility, ParameterTypes: storage.JSON(encoded),
-	}
-	if identity.OwnerID != "" {
-		owner := identity.OwnerID
-		row.OwnerID = &owner
+		return resolvedSymbol{}, err
 	}
 	resolver.rows[id] = row
 	return resolvedSymbol{ID: id}, nil

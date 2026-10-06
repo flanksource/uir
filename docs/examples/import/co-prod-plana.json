@@ -1,0 +1,259 @@
+{
+  "root_key": "Co/Prod/PlanA",
+  "name": "PlanA",
+  "location": {
+    "uri": "test://lab/Co/Prod/PlanA"
+  },
+  "revision": "r1",
+  "kinds": [
+    {
+      "name": "test.rule",
+      "category": "callable"
+    },
+    {
+      "name": "test.screen",
+      "category": "type"
+    }
+  ],
+  "symbols": [
+    {
+      "module_key": "Co/Prod/PlanA",
+      "package_path": "Co/Prod/PlanA/screens",
+      "kind": "test.screen",
+      "name": "Entry",
+      "visibility": "exported"
+    },
+    {
+      "module_key": "Co/Prod/PlanA",
+      "package_path": "Co/Prod/PlanA/screens",
+      "kind": "field",
+      "owner_id": "a270ef4d11d69343c173f8b2322f125fb0b9e24f5c51711c54b53b0cb1a35793",
+      "name": "Premium",
+      "visibility": "exported"
+    },
+    {
+      "module_key": "Co/Prod/PlanA",
+      "package_path": "Co/Prod/PlanA/rules",
+      "kind": "test.rule",
+      "name": "Apply",
+      "visibility": "exported"
+    },
+    {
+      "module_key": "Co/Prod",
+      "package_path": "Co/Prod/rules",
+      "kind": "test.rule",
+      "name": "Calc",
+      "visibility": "exported"
+    },
+    {
+      "module_key": "Co/Prod",
+      "package_path": "Co/Prod/records",
+      "kind": "record",
+      "name": "Policy",
+      "visibility": "exported"
+    },
+    {
+      "module_key": "Co/Prod",
+      "package_path": "Co/Prod/records",
+      "kind": "field",
+      "owner_id": "133430236d1a57229dcc2ce2a84abc87c26b7432a5a0c4592a1dde9ac215aaea",
+      "name": "Amount",
+      "visibility": "exported"
+    }
+  ],
+  "documents": [
+    {
+      "path_key": "rules/Apply.xml",
+      "package_path": "Co/Prod/PlanA/rules",
+      "content_hash": "a0dbca9dbaae3c8dfa31bb3cf2f1a1ba2dfcca84197e0fea340b9dbdb9e1bfa3",
+      "source": "<Rule name=\"Apply\">\n  <Call rule=\"Calc\"/>\n  <Read field=\"Policy.Amount\"/>\n  <Set field=\"Entry.Premium\" value=\"Policy.Amount\"/>\n</Rule>\n",
+      "content": {
+        "version": 3,
+        "package_path": "Co/Prod/PlanA/rules",
+        "symbols": [
+          {
+            "id": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725",
+            "key": "v1:[\"function\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/rules\",\"\",\"Apply\",\"\",\"\"]",
+            "kind": "test.rule",
+            "visibility": "exported",
+            "shape": "test.rule Apply",
+            "shape_hash": "94a9545528f0e7937ab560ad87a7a1a9f6ce4e2d93d4e5f55aa39d7b6b352d00",
+            "body_hash": "bfc0851944064321db3e07df5930370429b4a6e71a113311638f952cca4432e4",
+            "name": [
+              1,
+              13,
+              1,
+              18
+            ],
+            "name_bytes": [
+              12,
+              17
+            ],
+            "extent": [
+              1,
+              1,
+              5,
+              8
+            ],
+            "extent_bytes": [
+              0,
+              134
+            ],
+            "identifier": {
+              "module": "Co/Prod/PlanA",
+              "package": "Co/Prod/PlanA/rules",
+              "method": "Apply",
+              "node_type": "function"
+            },
+            "ordinal": 0
+          }
+        ],
+        "occurrences": [
+          {
+            "symbol": "50e1e3a5c7f08cc11cd8f55c496c32de5f5195dccff34c0b68028178612b5c21",
+            "role": "call",
+            "range": [
+              2,
+              15,
+              2,
+              19
+            ],
+            "bytes": [
+              34,
+              38
+            ],
+            "enclosing": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725",
+            "enclosing_key": "v1:[\"function\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/rules\",\"\",\"Apply\",\"\",\"\"]",
+            "target": {
+              "module": "Co/Prod",
+              "package": "Co/Prod/rules",
+              "method": "Calc",
+              "node_type": "function"
+            },
+            "resolvable": true,
+            "statement_path": "0",
+            "text": "<Call rule=\"Calc\"/>"
+          },
+          {
+            "symbol": "1889b837d9c7101587b8463785c61bc44c02fa9b090af716089017242e816ee8",
+            "role": "reference",
+            "range": [
+              3,
+              16,
+              3,
+              29
+            ],
+            "bytes": [
+              57,
+              70
+            ],
+            "enclosing": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725"
+          },
+          {
+            "symbol": "87c92d729dd4a5171d7d7788939e100d40826b41282fce7b8263a6396d16a023",
+            "role": "write",
+            "range": [
+              4,
+              15,
+              4,
+              28
+            ],
+            "bytes": [
+              88,
+              101
+            ],
+            "enclosing": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "path_key": "screens/Entry.xml",
+      "package_path": "Co/Prod/PlanA/screens",
+      "content_hash": "0e429448efa230d9d7e257c07e5939bec1597e577e636b4af65610f216269f44",
+      "source": "<Screen name=\"Entry\">\n  <Field name=\"Premium\"/>\n</Screen>\n",
+      "content": {
+        "version": 3,
+        "package_path": "Co/Prod/PlanA/screens",
+        "symbols": [
+          {
+            "id": "a270ef4d11d69343c173f8b2322f125fb0b9e24f5c51711c54b53b0cb1a35793",
+            "key": "v1:[\"class\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/screens\",\"Entry\",\"\",\"\",\"\"]",
+            "kind": "test.screen",
+            "visibility": "exported",
+            "shape": "test.screen Entry",
+            "shape_hash": "bd3b55283605c3817d7fc7992b9a38a140b1778ecc2357e81969a8c49011834b",
+            "body_hash": "9e47795e4d559f614a0eaa31c7c8bc2efc7739c166a7aaa0eff30eda12b83054",
+            "name": [
+              1,
+              15,
+              1,
+              20
+            ],
+            "name_bytes": [
+              14,
+              19
+            ],
+            "extent": [
+              1,
+              1,
+              3,
+              10
+            ],
+            "extent_bytes": [
+              0,
+              57
+            ],
+            "identifier": {
+              "module": "Co/Prod/PlanA",
+              "package": "Co/Prod/PlanA/screens",
+              "type": "Entry",
+              "node_type": "class"
+            },
+            "ordinal": 0
+          },
+          {
+            "id": "87c92d729dd4a5171d7d7788939e100d40826b41282fce7b8263a6396d16a023",
+            "key": "v1:[\"record_field\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/screens\",\"Entry\",\"\",\"Premium\",\"\"]",
+            "kind": "field",
+            "visibility": "exported",
+            "shape": "field Premium",
+            "shape_hash": "00611246c98e5f8e7993ec8c7cbec495519d3c5a3b9cae195fa5b8cc79236069",
+            "body_hash": "40041713e5a51666b42ed228dd4a564b3c2f0982b1caab95c28067d42f36ee89",
+            "name": [
+              2,
+              16,
+              2,
+              23
+            ],
+            "name_bytes": [
+              37,
+              44
+            ],
+            "extent": [
+              2,
+              3,
+              2,
+              26
+            ],
+            "extent_bytes": [
+              24,
+              47
+            ],
+            "identifier": {
+              "module": "Co/Prod/PlanA",
+              "package": "Co/Prod/PlanA/screens",
+              "type": "Entry",
+              "field": "Premium",
+              "node_type": "record_field"
+            },
+            "ordinal": 0
+          }
+        ],
+        "occurrences": [],
+        "diagnostics": []
+      }
+    }
+  ]
+}

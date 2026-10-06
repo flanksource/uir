@@ -1,32 +1,42 @@
-// Package symbolhandle is the H64a layout of a symbol handle: a database-local 64-bit surrogate for a
+// Package symbolhandle is the H64b layout of a symbol handle: a database-local 64-bit surrogate for a
 // canonical SHA-256 symbol id. Bits, most significant first:
 //
-//	0 | module 11 | package 16 | visibility 1 | kind 3 | local 32
+//	0 | module 11 | package 16 | visibility 1 | kind 6 | local 29
 //
 // The sign bit is always zero, so a handle is a non-negative int64 that both engines store as bigint,
 // and handles sort by module, package, visibility, kind, then local. Every prefix is a contiguous
 // range, so "every exported func of a package" is one B-tree range scan over symbols.handle or the
 // posting index. Module and package numbers come from the symbol_modules and symbol_packages
-// registries; local numbers are dense per (module, package, visibility, kind) bucket.
+// registries; kind codes from the builtin kinds and the database's symbol_kinds registry (code 0 is
+// reserved and never packed); local numbers are dense per (module, package, visibility, kind) bucket.
+//
+// H64b replaced H64a (kind 3 bits, local 32), which had room for the eight Go kinds only. A database
+// keeps the layout its handles were packed with in symbol_layout; one built under another layout has
+// its index discarded and rebuilt by `uir reindex`.
 package symbolhandle
 
 import (
 	"fmt"
 )
 
+// Layout names the bit layout Pack writes; storage records it per database.
+const Layout = "H64b"
+
 const (
-	ModuleBits  = 11
-	PackageBits = 16
-	LocalBits   = 32
+	ModuleBits     = 11
+	PackageBits    = 16
+	VisibilityBits = 1
+	KindBits       = 6
+	LocalBits      = 29
 
 	MaxModule  uint64 = 1<<ModuleBits - 1
 	MaxPackage uint64 = 1<<PackageBits - 1
 	MaxLocal   uint64 = 1<<LocalBits - 1
 
-	moduleShift     = 52
-	packageShift    = 36
-	visibilityShift = 35
-	kindShift       = 32
+	kindShift       = LocalBits
+	visibilityShift = kindShift + KindBits
+	packageShift    = visibilityShift + VisibilityBits
+	moduleShift     = packageShift + PackageBits
 )
 
 // Module numbers 0 and 1 are reserved: builtins have an empty module key, and the standard library is
@@ -63,15 +73,24 @@ type Range struct{ Low, High int64 }
 
 func (r Range) Contains(handle int64) bool { return handle >= r.Low && handle <= r.High }
 
-// Pack builds the handle of fields; a field wider than its bit budget is an error naming it.
+// Pack builds the handle of fields; a field wider than its bit budget, or the reserved kind 0, is an
+// error naming it.
 func Pack(fields Fields) (int64, error) {
+	if fields.Kind == 0 {
+		return 0, fmt.Errorf("symbol handle kind 0 is reserved")
+	}
+	return pack(fields)
+}
+
+// pack is Pack without the kind 0 check, for the low bound of a range wider than one kind.
+func pack(fields Fields) (int64, error) {
 	for _, field := range []struct {
 		name  string
 		value uint64
 		bits  uint
 	}{
 		{"module", fields.Module, ModuleBits}, {"package", fields.Package, PackageBits},
-		{"visibility", uint64(fields.Visibility), 1}, {"kind", uint64(fields.Kind), 3}, {"local", fields.Local, LocalBits},
+		{"visibility", uint64(fields.Visibility), VisibilityBits}, {"kind", uint64(fields.Kind), KindBits}, {"local", fields.Local, LocalBits},
 	} {
 		if field.value > 1<<field.bits-1 {
 			unit := "bits"
@@ -85,27 +104,33 @@ func Pack(fields Fields) (int64, error) {
 		uint64(fields.Kind)<<kindShift | fields.Local), nil
 }
 
-// Unpack splits a handle into its fields; a negative handle was not produced by Pack.
+// Unpack splits a handle into its fields; a negative handle, or one with the reserved kind 0, was not
+// produced by Pack.
 func Unpack(handle int64) (Fields, error) {
 	if handle < 0 {
 		return Fields{}, fmt.Errorf("symbol handle %d has the sign bit set", handle)
 	}
 	value := uint64(handle)
-	return Fields{
+	fields := Fields{
 		Module: value >> moduleShift & MaxModule, Package: value >> packageShift & MaxPackage,
-		Visibility: Visibility(value >> visibilityShift & 1), Kind: Kind(value >> kindShift & 7), Local: value & MaxLocal,
-	}, nil
+		Visibility: Visibility(value >> visibilityShift & (1<<VisibilityBits - 1)), Kind: Kind(value >> kindShift & uint64(MaxKind)),
+		Local: value & MaxLocal,
+	}
+	if fields.Kind == 0 {
+		return Fields{}, fmt.Errorf("symbol handle %d: kind 0 is reserved", handle)
+	}
+	return fields, nil
 }
 
 // PackageRange is every handle of one package.
 func PackageRange(module, pkg uint64) (Range, error) {
-	low, err := Pack(Fields{Module: module, Package: pkg})
+	low, err := pack(Fields{Module: module, Package: pkg})
 	return Range{Low: low, High: low | int64(1<<packageShift-1)}, err
 }
 
 // VisibilityRange is every handle of one package with one visibility.
 func VisibilityRange(module, pkg uint64, visibility Visibility) (Range, error) {
-	low, err := Pack(Fields{Module: module, Package: pkg, Visibility: visibility})
+	low, err := pack(Fields{Module: module, Package: pkg, Visibility: visibility})
 	return Range{Low: low, High: low | int64(1<<visibilityShift-1)}, err
 }
 

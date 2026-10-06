@@ -109,6 +109,7 @@ type ExprStmt struct {
 	Cast          *CastStmt          `json:"cast,omitempty"`
 	Unary         *UnaryStmt         `json:"unary,omitempty"`
 	MethodCall    *MethodCallStmt    `json:"method_call,omitempty"`
+	DispatchCall  *DispatchCallStmt  `json:"dispatch_call,omitempty"`
 	EndpointCall  *EndpointCallStmt  `json:"endpoint_call,omitempty"`
 	RecordRead    *RecordReadStmt    `json:"record_read,omitempty"`
 	Tuple         *TupleStmt         `json:"tuple,omitempty"`
@@ -123,6 +124,7 @@ func (e ExprStmt) Value() Statement {
 		e.Cast,
 		e.Unary,
 		e.MethodCall,
+		e.DispatchCall,
 		e.EndpointCall,
 		e.RecordRead,
 		e.Tuple,
@@ -156,6 +158,9 @@ func (e ExprStmt) GetRelationships() []Relationship {
 	if e.MethodCall != nil {
 		relationships = append(relationships, e.MethodCall.GetRelationships()...)
 	}
+	if e.DispatchCall != nil {
+		relationships = append(relationships, e.DispatchCall.GetRelationships()...)
+	}
 	if e.EndpointCall != nil {
 		relationships = append(relationships, e.EndpointCall.GetRelationships()...)
 	}
@@ -187,6 +192,10 @@ func (e ExprStmt) GetChildren() []Node {
 
 	if e.MethodCall != nil {
 		children = append(children, e.MethodCall.Method)
+	}
+	if e.DispatchCall != nil {
+		children = append(children, e.DispatchCall.Method)
+		children = append(children, e.DispatchCall.Candidates...)
 	}
 	if e.EndpointCall != nil {
 		children = append(children, e.EndpointCall.Endpoint)

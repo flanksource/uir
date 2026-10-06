@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/clicky/api"
+	"github.com/flanksource/uir"
 )
 
 const (
@@ -26,7 +27,7 @@ func (count *LineCount) String() string {
 // under each signature row. Its plain form is the "-"/"+" text of docs/diff.md; ANSI, markdown, and
 // HTML carry token marks.
 func (result Result) Pretty() api.Text {
-	text := api.Text{}.Append(result.RootKey+" "+result.From.Commit+".."+result.To.Commit, "font-bold").Append("\n")
+	text := api.Text{}.Append(result.RootKey+" "+result.From.Commit+".."+result.To.Commit, uir.StyleBold).Append("\n")
 	if result.LinesError != "" {
 		text = text.Append("line counts unavailable: "+result.LinesError, "text-red-600").Append("\n")
 	}
@@ -35,7 +36,7 @@ func (result Result) Pretty() api.Text {
 		if result.Stat && pkg.Lines != nil {
 			line += "  " + pkg.Lines.String()
 		}
-		text = text.Append(line, "font-bold").Append("\n")
+		text = text.Append(line, uir.StyleBold).Append("\n")
 		for _, file := range pkg.Files {
 			text = text.Add(file.pretty(result.Stat))
 		}

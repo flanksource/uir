@@ -41,6 +41,12 @@ export type ModuleLocation = {
   head_version: number;
 };
 
+export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local-dependency" | "versioned-dependency" | "historical" | "dependency-cycle" | "import";
+
+export type SnapshotKind = "head" | "historical" | "versioned";
+
+// ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts are against
+// base_snapshot_id; index_started_at is absent on snapshots published before it was recorded.
 export type ModuleSnapshot = {
   id: string;
   root_key: string;
@@ -52,10 +58,22 @@ export type ModuleSnapshot = {
   revision: string;
   worktree_state: "clean" | "dirty" | "unknown";
   coverage: "indexed" | "partial" | "syntax" | "excluded";
+  kind: SnapshotKind;
+  reason: SnapshotReason;
+  index_started_at?: string;
   started_at: string;
   completed_at: string;
+  task_run_id?: string;
   head: boolean;
   head_version?: number;
+  file_count: number;
+  symbol_count: number;
+  occurrence_count: number;
+  source_bytes: number;
+  files_added: number;
+  files_changed: number;
+  files_deleted: number;
+  symbols_changed: number;
 };
 
 export type ModuleSource = {
@@ -105,7 +123,8 @@ export type ModuleDependency = { module_path: string; declared_version: string; 
 export type ModuleDependencies = { captured: boolean; items: ModuleDependency[] };
 export type ModuleRefactorRequest = { snapshot: string; source: string; node?: string; action: "rename" | "move"; newName?: string; destination?: string };
 export type ModuleRefactorPreview = { diff: string; preview_hash: string; files: string[] };
-export type ModuleRefactorApply = { applied: boolean; files: string[]; snapshots: ModuleIndexResult[]; index_error?: string };
+/** A failed reindex after a successful apply is an error response (code reindex_failed), not a field. */
+export type ModuleRefactorApply = { applied: boolean; files: string[]; snapshots: ModuleIndexResult[]; run_id: string };
 export type ModuleQueryRow = {
   kind: string;
   node_kind?: string;
@@ -157,6 +176,45 @@ export type ModuleQueryResult = {
   stages: { name: string; value: string }[];
   path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
 };
+export type ModuleGraphDirection = "callees" | "callers" | "both";
+export type ModuleGraphSite = { path?: string; line?: number; column?: number; text?: string; guards?: string[] };
+export type ModuleGraphNode = {
+  id: string;
+  identifier: ModuleNode["identifier"];
+  kind: string;
+  label: string;
+  group?: string;
+  depth: number;
+  in: number;
+  out: number;
+  unresolved?: boolean;
+  location?: { root_key?: string; checkout_path?: string; snapshot_id?: string; source_id?: string; path?: string; identity_key?: string; line?: number; column?: number };
+  tone?: string;
+  icon?: string;
+  properties?: Record<string, string>;
+};
+export type ModuleGraphEdge = { id: string; from: string; to: string; type: "call" | "dispatch"; kind?: string; sites: ModuleGraphSite[] };
+export type ModuleGraphGroup = { id: string; label: string; parent?: string };
+export type ModuleGraphOmitted = {
+  node_limit?: boolean; beyond_depth?: number; unresolved?: number; unreadable_source?: string[];
+  /** Distinct nodes the exclusion patterns left out, per package. */
+  excluded?: Record<string, number>;
+};
+export type ModuleGraph = { roots: string[]; nodes: ModuleGraphNode[]; edges: ModuleGraphEdge[]; groups?: ModuleGraphGroup[]; omitted: ModuleGraphOmitted };
+/** A package the graph reached, drawn or excluded; `nodes` counts both. */
+export type ModuleGraphPackage = { path: string; external: boolean; nodes: number; excluded: boolean };
+export type ModuleGraphResult = ModuleGraph & {
+  /** The effective exclusion patterns. */
+  exclude: string[];
+  packages: ModuleGraphPackage[];
+  stages: { name: string; value: string }[]; warnings: MissingHeadWarning[]; candidates: ModuleQuerySymbol[];
+};
+export type ModuleGraphOptions = {
+  selector?: string; symbol?: string; direction?: ModuleGraphDirection; depth?: number; limit?: number;
+  /** Package patterns to leave out; empty or absent takes the server defaults, ["none"] excludes nothing. */
+  exclude?: string[];
+  root?: string; location?: string; snapshot?: string;
+};
 export type ModuleIndexResult = {
   root_key: string;
   location: string;
@@ -166,9 +224,15 @@ export type ModuleIndexResult = {
   parsed_files: number;
   reused_files: number;
   unchanged: boolean;
+  /** Why this module of the run failed; its counts are then zero. */
+  error?: string;
 };
+/** An add or reindex answers 202 Accepted with the task run that indexes in the background. */
+export type ModuleIndexRun = { run_id: string };
 export type GitRef = { name: string; commit: string };
-export type GitCommit = { commit: string; parents: string[]; subject: string; authored_at: string };
+/** snapshot_* are set when the commit has a snapshot in the listed checkout: the newest clean one, else the newest. */
+export type GitCommit = { commit: string; parents: string[]; subject: string; authored_at: string;
+  snapshot_id?: string; snapshot_reason?: SnapshotReason; snapshot_completed_at?: string };
 export type GitHistory = { root_key: string; location: string; branches: GitRef[]; commits: GitCommit[];
   pull_requests: { number: number; commit: string }[]; pull_request_error?: string };
 export type SymbolChange = { class: "added" | "removed" | "signature" | "body" | "moved"; kind: string;
@@ -302,11 +366,32 @@ function isQueryResult(value: unknown): value is ModuleQueryResult {
   return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "warnings", "stages"].every((key) => Array.isArray(result[key]));
 }
 
-export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexResult[]> {
+const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot"] as const;
+
+export async function getModuleGraph(options: ModuleGraphOptions, signal?: AbortSignal): Promise<TimedResponse<ModuleGraphResult>> {
+  const params: Record<string, string> = {};
+  for (const name of graphParameters) {
+    const value = options[name];
+    const text = Array.isArray(value) ? value.join(",") : value;
+    if (text !== undefined && text !== "") params[name] = String(text);
+  }
+  const result = await timedRequest<unknown>(moduleURL("graph", params), { signal });
+  if (!isGraphResult(result.data)) throw new Error(`Graph response is not a graph envelope: ${JSON.stringify(result.data).slice(0, 200)}`);
+  return { data: result.data, timing: result.timing };
+}
+
+function isGraphResult(value: unknown): value is ModuleGraphResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return typeof result.omitted === "object" && result.omitted !== null
+    && ["roots", "nodes", "edges", "exclude", "packages", "stages", "warnings", "candidates"].every((key) => Array.isArray(result[key]));
+}
+
+export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexRun> {
   return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, "no-workspace-uses": true }) });
 }
 
-export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexResult[]> {
+export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexRun> {
   return request(moduleURL("reindex"), { method: "POST", body: JSON.stringify({
     ...(options.path ? { args: [options.path] } : {}), "include-tests": options.includeTests ?? false,
     force: options.force ?? false, all: options.all ?? false,
@@ -317,6 +402,8 @@ export function listGitHistory(root: string, location: string): Promise<GitHisto
   return request(moduleURL("history", { root, location, limit: "50" }));
 }
 
-export function compareGitRevisions(root: string, from: string, to: string, visibility: string, includeTests: boolean): Promise<SymbolDiff> {
-  return request(moduleURL("diff"), { method: "POST", body: JSON.stringify({ args: [`${from}..${to}`], root, visibility, stat: true, "auto-index": true, "include-tests": includeTests }) });
+/** location, when given, is the registered checkout the commits resolve and auto-index from. */
+export function compareGitRevisions(root: string, from: string, to: string, visibility: string, includeTests: boolean, location?: string): Promise<SymbolDiff> {
+  return request(moduleURL("diff"), { method: "POST", body: JSON.stringify({ args: [`${from}..${to}`], root, visibility, stat: true, "auto-index": true, "include-tests": includeTests,
+    ...(location ? { location } : {}) }) });
 }
