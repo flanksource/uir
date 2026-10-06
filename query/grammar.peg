@@ -8,14 +8,23 @@ Query <- _ Set _ !.
 Set <- Intersection (_ UnionOperator _ Intersection)*
 Intersection <- Chain (_ IntersectionOperator _ Chain)*
 Chain <- Primary (_ (PathStep / Step / Modifier))*
-Primary <- Selector / Symbol / Open _ Set _ Close
+Primary <- Selector / EntityField / Symbol / Open _ Set _ Close
 Step <- Relation (_ Filter)* (_ Primary (_ Modifier)*)?
 
+# The generator runs an action as soon as it is reached and never takes its token back, so every
+# action below sits where its rule can no longer fail.
 Selector <- <SelectorText> { p.addToken("selector", text) }
 Modifier <- <('+' / '-') SelectorText> { p.addToken("modifier", text) }
-SelectorText <- ('package' / 'module' / 'method' / 'struct' / 'field' / 'func' / 'type' / 'path' / 'all' / 'var' / 'pkg' / 'mod') ':' SelectorValue (':' SelectorValue)?
-SelectorValue <- ([A-Za-z0-9_./*?@#$!] / '-' / '\\' .)+
-Symbol <- <[A-Za-z_*?]([A-Za-z0-9_./*?] / '-')*> { p.addToken("symbol", text) }
+SelectorText <- SelectorPrefix ':' SelectorValue (':' SelectorValue)?
+SelectorPrefix <- 'package' / 'module' / 'method' / 'struct' / 'field' / 'func' / 'type' / 'path' / 'all' / 'var' / 'pkg' / 'mod' / 'kind'
+SelectorValue <- Quoted / ([A-Za-z0-9_./*?@#$!] / '-' / '\\' .)+
+EntityField <- <!(SelectorPrefix ':') EntityName ':' !(RelationName !EntityChar) (Quoted / EntityChar+)> { p.addToken("entity_field", text) }
+EntityName <- Quoted / [A-Za-z_*?] EntityChar*
+EntityChar <- [A-Za-z0-9_*?] / '-'
+RelationName <- 'impl' / 'inherits' / 'methods'
+Symbol <- '"' <QuotedText> '"' { p.addToken("symbol", text) } / <[A-Za-z_*?]([A-Za-z0-9_./*?] / '-')*> { p.addToken("symbol", text) }
+Quoted <- '"' QuotedText '"'
+QuotedText <- ('\\' . / !'"' .)*
 Relation <- Transitive / Implementers / Inheritors / Methods / Incoming / Outgoing / Definition / Writes
 Transitive <- '<<' <[0-9]*> { p.addToken("relation", "<<" + text) }
 Implementers <- ':impl' { p.addToken("relation", ":impl") }

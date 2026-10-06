@@ -2,6 +2,7 @@
 package query
 
 import (
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
@@ -45,10 +46,16 @@ type Filter struct {
 	Value string `json:"value,omitempty"`
 }
 
+// Selector is a typed selector. SymbolKind is the registered kind a kind: selector names, such as
+// oipa.rule; Pattern then matches the names of that kind's symbols, every one when it was omitted.
+// Owner is the glob an Entity:Field reference matches against the name of a field's direct owner;
+// Pattern then matches the field's own name.
 type Selector struct {
 	Kind          string `json:"kind"`
 	Pattern       string `json:"pattern"`
 	ModulePattern string `json:"module_pattern,omitempty"`
+	SymbolKind    string `json:"symbol_kind,omitempty"`
+	Owner         string `json:"owner,omitempty"`
 }
 
 type TypedModifier struct {
@@ -74,15 +81,47 @@ type ResolutionStage struct {
 	Value string `json:"value"`
 }
 
-// Pipeline resolves parsed queries against relational UIR storage.
+// Pipeline resolves parsed queries against relational UIR storage. One pipeline may serve many
+// queries, concurrently: it keeps what a published index never changes (decoded documents, each
+// snapshot's active documents and defined symbols, symbol rows and handles) across them, and checks on
+// every query, against the location heads, primaries, handle layout, and kind registry, whether the
+// rest it keeps still holds.
 type Pipeline struct {
 	database *gorm.DB
+	options  pipelineOptions
+	cache    *indexCache
+	// query is set on the per-query copy session makes, which validates the cache once and keeps the
+	// generation it validated in validated.
+	query     bool
+	validated *cacheGeneration
+}
+
+// generation is the cache generation the query runs against, validated once per query.
+func (pipeline *Pipeline) generation(ctx context.Context) (*cacheGeneration, error) {
+	if pipeline.validated != nil {
+		return pipeline.validated, nil
+	}
+	generation, err := pipeline.cache.current(ctx, pipeline.database)
+	if err != nil {
+		return nil, err
+	}
+	if pipeline.query {
+		pipeline.validated = generation
+	}
+	return generation, nil
 }
 
 // NewPipeline creates a query pipeline for an initialized UIR database.
-func NewPipeline(database *gorm.DB) (*Pipeline, error) {
+func NewPipeline(database *gorm.DB, options ...PipelineOption) (*Pipeline, error) {
 	if database == nil {
 		return nil, errors.New("UIR query database is required")
 	}
-	return &Pipeline{database: database}, nil
+	configured := pipelineOptions{documents: DefaultDocumentCache}
+	for _, option := range options {
+		option(&configured)
+	}
+	if err := configured.validate(); err != nil {
+		return nil, err
+	}
+	return &Pipeline{database: database, options: configured, cache: newIndexCache(configured.documents)}, nil
 }

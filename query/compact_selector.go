@@ -9,49 +9,69 @@ import (
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"gorm.io/gorm"
 )
 
-func (index *compactIndex) resolveSelector(ctx context.Context, selector Selector) (compactValue, error) {
-	glob, err := compileSelectorGlob(selector.Pattern)
-	if err != nil {
-		return compactValue{}, err
+// compiledSelector is a typed selector with its globs compiled. within, when set, is a scope predicate
+// the selected symbols must also satisfy, which narrows the roots and handle ranges read.
+type compiledSelector struct {
+	Selector
+	glob, moduleGlob, ownerGlob selectorGlob
+	within                      *scopePredicate
+}
+
+func compileSelector(selector Selector, within *scopePredicate) (compiledSelector, error) {
+	compiled := compiledSelector{Selector: selector, within: within}
+	var err error
+	if compiled.glob, err = compileSelectorGlob(selector.Pattern); err != nil {
+		return compiledSelector{}, err
 	}
-	if selector.Kind == "module" || selector.Kind == "package" {
-		return index.resolveTreeSelector(selector.Kind, selector.Pattern, glob)
-	}
-	var moduleGlob selectorGlob
 	if selector.ModulePattern != "" {
-		moduleGlob, err = compileSelectorGlob(selector.ModulePattern)
+		if compiled.moduleGlob, err = compileSelectorGlob(selector.ModulePattern); err != nil {
+			return compiledSelector{}, err
+		}
+	}
+	if selector.Owner != "" {
+		if compiled.ownerGlob, err = compileSelectorGlob(selector.Owner); err != nil {
+			return compiledSelector{}, err
+		}
+	}
+	return compiled, nil
+}
+
+func (index *compactIndex) resolveSelector(ctx context.Context, selector Selector) (compactValue, error) {
+	return index.resolveSelectorWithin(ctx, selector, nil)
+}
+
+// resolveSelectorWithin resolves a selector, keeping only the symbols within admits when it is set.
+func (index *compactIndex) resolveSelectorWithin(ctx context.Context, selector Selector, within *scopePredicate) (compactValue, error) {
+	if selector.Kind == "module" || selector.Kind == "package" {
+		glob, err := compileSelectorGlob(selector.Pattern)
 		if err != nil {
 			return compactValue{}, err
 		}
+		return index.resolveTreeSelector(ctx, selector.Kind, selector.Pattern, glob)
 	}
-	candidates, err := index.selectorCandidates(ctx, selector, glob, moduleGlob)
+	compiled, err := compileSelector(selector, within)
+	if err != nil {
+		return compactValue{}, err
+	}
+	candidates, err := index.selectorCandidates(ctx, compiled)
 	if err != nil {
 		return compactValue{}, err
 	}
 	matched := make([]storage.Symbol, 0, len(candidates))
 	for _, row := range candidates {
-		if selector.Kind == "path" {
-			name, err := index.queryName(ctx, row)
-			if err != nil {
-				return compactValue{}, err
-			}
-			if pathMatchesSymbol(glob, selector.Pattern, ModuleSymbol{ModuleKey: row.ModuleKey, PackagePath: row.PackagePath, QueryName: name}) {
-				matched = append(matched, row)
-			}
-			continue
-		}
-		key, inside, err := index.selectorKey(ctx, selector, moduleGlob, row)
+		selected, err := index.selects(ctx, compiled, row)
 		if err != nil {
 			return compactValue{}, err
 		}
-		if inside && glob.matches(key) {
+		if selected {
 			matched = append(matched, row)
 		}
 	}
-	matches, active, err := index.selectorDeclarations(ctx, selector, moduleGlob, matched)
+	matches, active, err := index.selectorDeclarations(ctx, compiled, matched)
 	if err != nil {
 		return compactValue{}, err
 	}
@@ -63,19 +83,32 @@ func (index *compactIndex) resolveSelector(ctx context.Context, selector Selecto
 	return compactValue{symbols: symbols, matches: matches}, nil
 }
 
-// selectorFilter narrows a symbols query by a selector's kind and, for a plain name, by that name
-// through the search index.
-func selectorFilter(query *gorm.DB, selector Selector) (*gorm.DB, error) {
-	kinds := map[string][]string{"func": {"func", "method"}, "method": {"method"}, "field": {"field"}, "struct": {"type"}, "type": {"type"}, "var": {"var"}}
-	switch selector.Kind {
-	case "func", "method", "field", "struct", "type", "var":
-		query = query.Where("kind IN ?", kinds[selector.Kind])
-		if !strings.ContainsAny(selector.Pattern, "*?\\./") {
-			query = query.Where("search_name = ? AND name = ?", storage.SearchName(selector.Pattern), selector.Pattern)
+// selects reports whether a candidate row matches the selector's pattern.
+func (index *compactIndex) selects(ctx context.Context, selector compiledSelector, row storage.Symbol) (bool, error) {
+	if selector.Kind == "path" {
+		name, err := index.queryName(ctx, row)
+		if err != nil {
+			return false, err
 		}
-	case "pkg", "mod", "all", "path":
-	default:
-		return nil, fmt.Errorf("unknown selector kind %q", selector.Kind)
+		return pathMatchesSymbol(selector.glob, selector.Pattern, ModuleSymbol{ModuleKey: row.ModuleKey, PackagePath: row.PackagePath, QueryName: name}), nil
+	}
+	key, inside, err := index.selectorKey(ctx, selector, row)
+	return inside && selector.glob.matches(key), err
+}
+
+// selectorFilter narrows a symbols query by the kinds a selector selects and, for a plain name, by
+// that name through the search index.
+func selectorFilter(query *gorm.DB, selector Selector, registry symbolhandle.Kinds) (*gorm.DB, error) {
+	kinds, err := selectorKinds(selector, registry)
+	if err != nil {
+		return nil, err
+	}
+	if !symbolSelectors[selector.Kind] {
+		return query, nil
+	}
+	query = query.Where("kind IN ?", kinds)
+	if !strings.ContainsAny(selector.Pattern, "*?\\./") {
+		query = query.Where("search_name = ? AND name = ?", storage.SearchName(selector.Pattern), selector.Pattern)
 	}
 	return query, nil
 }
@@ -84,16 +117,21 @@ func selectorFilter(query *gorm.DB, selector Selector) (*gorm.DB, error) {
 // the admitted roots that the root's scope defines. A selector matches only symbols defined in their
 // own module's root, so dependencies, other roots, and symbols no selected snapshot defines are never
 // read or named.
-func (index *compactIndex) selectorCandidates(ctx context.Context, selector Selector, glob, moduleGlob selectorGlob) ([]storage.Symbol, error) {
-	filtered, err := selectorFilter(index.database.WithContext(ctx).Model(&storage.Symbol{}), selector)
+func (index *compactIndex) selectorCandidates(ctx context.Context, selector compiledSelector) ([]storage.Symbol, error) {
+	if selector.Kind == "kind" {
+		if err := index.register(ctx, selector.SymbolKind); err != nil {
+			return nil, err
+		}
+	}
+	filtered, err := selectorFilter(index.database.WithContext(ctx).Model(&storage.Symbol{}), selector.Selector, index.kinds)
 	if err != nil {
 		return nil, err
 	}
-	scopes := index.selectorScopes(selector, glob, moduleGlob)
+	scopes := index.selectorScopes(selector)
 	if len(scopes) == 0 {
 		return nil, nil
 	}
-	ranges, err := index.selectorRanges(ctx, selector, glob, slices.Sorted(maps.Keys(scopes)))
+	ranges, err := index.selectorRanges(ctx, selector, slices.Sorted(maps.Keys(scopes)))
 	if err != nil {
 		return nil, err
 	}
@@ -108,9 +146,21 @@ func (index *compactIndex) selectorCandidates(ctx context.Context, selector Sele
 		}
 		candidates = append(candidates, rows...)
 	}
+	if selector.within != nil {
+		candidates = slices.DeleteFunc(candidates, func(row storage.Symbol) bool { return !selector.within.admitsPackage(row.PackagePath, row.ModuleKey) })
+	}
 	if err := index.remember(candidates); err != nil {
 		return nil, err
 	}
+	if candidates, err = index.definedInRoot(ctx, scopes, candidates); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(candidates, func(left, right storage.Symbol) int { return strings.Compare(left.ID, right.ID) })
+	return candidates, index.prefetchOwners(ctx, candidates)
+}
+
+// definedInRoot keeps the candidates that a scope of their own module's root defines.
+func (index *compactIndex) definedInRoot(ctx context.Context, scopes map[string][]int, candidates []storage.Symbol) ([]storage.Symbol, error) {
 	defined := map[int64]bool{}
 	for root, positions := range scopes {
 		handles := make([]int64, 0, len(candidates))
@@ -118,6 +168,9 @@ func (index *compactIndex) selectorCandidates(ctx context.Context, selector Sele
 			if row.ModuleKey == root {
 				handles = append(handles, row.Handle)
 			}
+		}
+		if len(handles) == 0 {
+			continue
 		}
 		for _, position := range positions {
 			found, err := index.definedBy(ctx, position, handles)
@@ -127,22 +180,32 @@ func (index *compactIndex) selectorCandidates(ctx context.Context, selector Sele
 			maps.Copy(defined, found)
 		}
 	}
-	candidates = slices.DeleteFunc(candidates, func(row storage.Symbol) bool { return !defined[row.Handle] })
-	slices.SortFunc(candidates, func(left, right storage.Symbol) int { return strings.Compare(left.ID, right.ID) })
-	return candidates, index.prefetchOwners(ctx, candidates)
+	return slices.DeleteFunc(candidates, func(row storage.Symbol) bool { return !defined[row.Handle] }), nil
 }
 
 // selectorKey is the spelling a selector's pattern is matched against: the package path, the module
 // key, the name, or the qualified name when the pattern has a package or owner, and with a module
-// pattern the package path relative to the module; false for a package outside its module.
-func (index *compactIndex) selectorKey(ctx context.Context, selector Selector, moduleGlob selectorGlob, row storage.Symbol) (string, bool, error) {
+// pattern the package path relative to the module; false for a package outside its module. An
+// Entity:Field reference matches the name, and is false for a symbol whose direct owner's name its
+// owner glob rejects.
+func (index *compactIndex) selectorKey(ctx context.Context, selector compiledSelector, row storage.Symbol) (string, bool, error) {
+	if selector.Owner != "" {
+		if row.OwnerID == nil {
+			return "", false, nil
+		}
+		owner, found := index.symbols.row(*row.OwnerID)
+		if !found {
+			return "", false, fmt.Errorf("owner %s of symbol %s was not prefetched", *row.OwnerID, row.ID)
+		}
+		return row.Name, selector.ownerGlob.matches(owner.Name), nil
+	}
 	key := row.PackagePath
 	switch selector.Kind {
 	case "mod":
 		key = row.ModuleKey
 	case "all":
 		key = row.Name
-	case "func", "method", "field", "struct", "type", "var":
+	case "func", "method", "field", "struct", "type", "var", "kind":
 		key = row.Name
 		if strings.ContainsAny(selector.Pattern, "./") {
 			name, err := index.queryName(ctx, row)
@@ -158,14 +221,19 @@ func (index *compactIndex) selectorKey(ctx context.Context, selector Selector, m
 	if selector.ModulePattern == "" {
 		return key, true, nil
 	}
-	if !moduleGlob.matches(row.ModuleKey) {
+	if !selector.moduleGlob.matches(row.ModuleKey) {
 		return "", false, nil
 	}
 	relative, inside := relativePackage(row.PackagePath, row.ModuleKey)
 	return relative, inside, nil
 }
 
-func (index *compactIndex) resolveTreeSelector(kind, pattern string, glob selectorGlob) (compactValue, error) {
+func (index *compactIndex) resolveTreeSelector(ctx context.Context, kind, pattern string, glob selectorGlob) (compactValue, error) {
+	if kind != "module" {
+		if err := index.prefetch(ctx, index.scopeDocumentPostings()); err != nil {
+			return compactValue{}, err
+		}
+	}
 	value := compactValue{}
 	seen := map[string]bool{}
 	for position, scope := range index.scopes {
@@ -174,7 +242,7 @@ func (index *compactIndex) resolveTreeSelector(kind, pattern string, glob select
 			paths[scope.root.RootKey] = true
 		} else {
 			for id := range scope.documents {
-				document, err := index.document(scopedPosting{scope: position, document: id})
+				document, err := index.document(ctx, scopedPosting{scope: position, document: id})
 				if err != nil {
 					return compactValue{}, err
 				}
@@ -205,7 +273,7 @@ func (index *compactIndex) resolveTreeSelector(kind, pattern string, glob select
 // selectorDeclarations positions each matched symbol at its declarations in the scopes of its own
 // module's root, keeping for a struct selector only declarations whose type form is a struct, and
 // reports which symbols kept one.
-func (index *compactIndex) selectorDeclarations(ctx context.Context, selector Selector, moduleGlob selectorGlob, matched []storage.Symbol) ([]ModuleMatch, map[string]bool, error) {
+func (index *compactIndex) selectorDeclarations(ctx context.Context, selector compiledSelector, matched []storage.Symbol) ([]ModuleMatch, map[string]bool, error) {
 	postings, err := index.postings(ctx, symbolIDs(matched), "definition")
 	if err != nil {
 		return nil, nil, err
@@ -214,15 +282,18 @@ func (index *compactIndex) selectorDeclarations(ctx context.Context, selector Se
 	for _, row := range matched {
 		byID[row.ID] = row
 	}
+	postings = slices.DeleteFunc(postings, func(posting scopedPosting) bool {
+		root := index.scopes[posting.scope].root.RootKey
+		return byID[posting.symbol].ModuleKey != root || selector.ModulePattern != "" && !selector.moduleGlob.matches(root)
+	})
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, nil, err
+	}
 	active := map[string]bool{}
 	var matches []ModuleMatch
 	for _, posting := range postings {
 		row := byID[posting.symbol]
-		root := index.scopes[posting.scope].root.RootKey
-		if row.ModuleKey != root || selector.ModulePattern != "" && !moduleGlob.matches(root) {
-			continue
-		}
-		document, err := index.document(posting)
+		document, err := index.document(ctx, posting)
 		if err != nil {
 			return nil, nil, err
 		}

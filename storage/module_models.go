@@ -31,6 +31,11 @@ type ModuleLocation struct {
 
 func (ModuleLocation) TableName() string { return "locations" }
 
+// LocationExternal is the kind of a location a non-Go producer publishes with indexer.Publish: its
+// canonical path is the producer's URI rather than a checkout, and only that producer refreshes it, so
+// add, reindex, and reindex --all never read it. A Go location is a module, git, or git-submodule.
+const LocationExternal = "external"
+
 // WorktreeState records whether a snapshot's bytes are exactly its Git revision's bytes.
 type WorktreeState string
 
@@ -50,8 +55,27 @@ const (
 	CoverageExcluded Coverage = "excluded"
 )
 
+// SnapshotReason is why a snapshot was published. ReasonUnknown marks only rows published before
+// reasons were recorded; a publication must name one of the others.
+type SnapshotReason string
+
+const (
+	ReasonUnknown             SnapshotReason = "unknown"
+	ReasonAdd                 SnapshotReason = "add"
+	ReasonReindex             SnapshotReason = "reindex"
+	ReasonRefactor            SnapshotReason = "refactor"
+	ReasonLocalDependency     SnapshotReason = "local-dependency"
+	ReasonVersionedDependency SnapshotReason = "versioned-dependency"
+	ReasonHistorical          SnapshotReason = "historical"
+	ReasonDependencyCycle     SnapshotReason = "dependency-cycle"
+	// ReasonImport marks a snapshot a non-Go producer published with indexer.Publish.
+	ReasonImport SnapshotReason = "import"
+)
+
 // ModuleSnapshot is a published index run; a row exists only once its publication committed. Ordinal
-// is its dense, database-local number (from 1) that symbol deltas reference.
+// is its dense, database-local number (from 1) that symbol deltas reference. The size and change
+// counts are nil only on a row published before they were recorded, until the storage backfill
+// derives them; Stats reads them.
 type ModuleSnapshot struct {
 	ID                uuid.UUID     `gorm:"column:id;primaryKey"`
 	RootID            uuid.UUID     `gorm:"column:root_id"`
@@ -72,6 +96,19 @@ type ModuleSnapshot struct {
 	StartedAt         time.Time     `gorm:"column:started_at"`
 	CompletedAt       time.Time     `gorm:"column:completed_at"`
 	Ordinal           int64         `gorm:"column:ordinal"`
+	// Reason says why the snapshot was published, IndexStartedAt when its extraction began, and
+	// TaskRunID which task run published it, when one did.
+	Reason          SnapshotReason `gorm:"column:reason"`
+	IndexStartedAt  *time.Time     `gorm:"column:index_started_at"`
+	TaskRunID       *string        `gorm:"column:task_run_id"`
+	FileCount       *int64         `gorm:"column:file_count"`
+	SymbolCount     *int64         `gorm:"column:symbol_count"`
+	OccurrenceCount *int64         `gorm:"column:occurrence_count"`
+	SourceBytes     *int64         `gorm:"column:source_bytes"`
+	FilesAdded      *int           `gorm:"column:files_added"`
+	FilesChanged    *int           `gorm:"column:files_changed"`
+	FilesDeleted    *int           `gorm:"column:files_deleted"`
+	SymbolsChanged  *int           `gorm:"column:symbols_changed"`
 }
 
 func (ModuleSnapshot) TableName() string { return "snapshots" }

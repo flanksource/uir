@@ -43,6 +43,45 @@ var _ = Describe("compact indexed queries", func() {
 		Expect(runQuery(ctx, pipeline, "struct:Store :methods func:Store.Save", scope).Total).To(Equal(1))
 		Expect(runQuery(ctx, pipeline, "field:Store.count ~w func:Store.Save", scope).Total).To(Equal(1))
 		Expect(runQuery(ctx, pipeline, "func:Run >>3 func:Store.Save", scope).Path).ToNot(BeNil())
+
+		Expect(runQuery(ctx, pipeline, "kind:method:Store.Save", scope).Symbols).To(Equal(runQuery(ctx, pipeline, "func:Store.Save", scope).Symbols))
+		Expect(runQuery(ctx, pipeline, "kind:func:Run", scope).Symbols).To(Equal(runQuery(ctx, pipeline, "func:Run", scope).Symbols))
+		Expect(runQuery(ctx, pipeline, "kind:func:Save", scope).Symbols).To(BeEmpty(), "kind:func excludes methods, unlike func:")
+		Expect(runQuery(ctx, pipeline, "kind:func & pkg:example.org/shop:app", scope).Symbols).To(Equal(runQuery(ctx, pipeline, "func:* & pkg:example.org/shop:app", scope).Symbols))
+		Expect(runQuery(ctx, pipeline, "kind:type & pkg:example.org/shop:store", scope).Symbols).To(Equal(runQuery(ctx, pipeline, "type:* & pkg:example.org/shop:store", scope).Symbols))
+		_, err = pipeline.RunModules(ctx, "kind:acme.rule", scope)
+		Expect(err).To(MatchError(ContainSubstring(`symbol kind "acme.rule" is not registered`)))
+	})
+	It("resolves an Entity:Field reference to the fields its owner declares", func(ctx SpecContext) {
+		const module = entitiesModule
+		checkout := entitiesCheckout()
+		database := openQueryDatabase(ctx, "sqlite")
+		indexCheckout(ctx, database, checkout)
+		pipeline, err := query.NewPipeline(database)
+		Expect(err).ToNot(HaveOccurred())
+		scope := query.ModuleScopeOptions{RootKey: module, Location: checkout}
+		names := func(expression string) []string {
+			GinkgoHelper()
+			var found []string
+			for _, symbol := range runQuery(ctx, pipeline, expression, scope).Symbols {
+				found = append(found, symbol.QueryName)
+			}
+			return found
+		}
+
+		Expect(names("Plan:PlanField1")).To(Equal([]string{module + "/model.Plan.PlanField1"}))
+		Expect(names(`Plan:"PlanField1"`)).To(Equal([]string{module + "/model.Plan.PlanField1"}))
+		Expect(names("Plan:*")).To(Equal([]string{module + "/model.Plan.PlanField1", module + "/model.Plan.Status"}))
+		Expect(names("*:PlanField1")).To(Equal([]string{module + "/model.Plan.PlanField1", module + "/model.Policy.PlanField1"}))
+		Expect(names("Plan:* & mod:" + module)).To(HaveLen(2))
+		Expect(names("Plan:Missing")).To(BeEmpty())
+		Expect(names("Plan:Touch")).To(BeEmpty(), "only fields, not other symbols named like one")
+		Expect(names(`"Touch"`)).To(Equal([]string{module + "/model.Touch"}))
+		Expect(runQuery(ctx, pipeline, "Plan:PlanField1 ~w func:Touch", scope).Total).To(Equal(1))
+		Expect(runQuery(ctx, pipeline, "Plan:PlanField1 ~w func:Read", scope).Total).To(BeZero())
+		Expect(runQuery(ctx, pipeline, "Plan:PlanField1 < (func:Touch | func:Read)", scope).Matches).To(
+			Equal(runQuery(ctx, pipeline, "model.Plan.PlanField1 < (func:Touch | func:Read)", scope).Matches))
+		Expect(runQuery(ctx, pipeline, "Policy:PlanField1 < func:Read", scope).Total).To(Equal(1))
 	})
 	It("classifies a type from its selected snapshot", func(ctx SpecContext) {
 		database := openQueryDatabase(ctx, "sqlite")

@@ -14,9 +14,12 @@ func (index *indexContext) declarations(ctx context.Context, symbolIDs []string,
 	if err != nil {
 		return nil, err
 	}
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, err
+	}
 	matches := []ModuleMatch{}
 	for _, posting := range postings {
-		document, err := index.document(posting)
+		document, err := index.document(ctx, posting)
 		if err != nil {
 			return nil, err
 		}
@@ -42,37 +45,84 @@ func (index *indexContext) candidates(ctx context.Context, symbols []ModuleSymbo
 	}
 	for _, symbol := range symbols {
 		if !slices.ContainsFunc(matches, func(match ModuleMatch) bool { return match.SymbolID == symbol.ID }) {
-			matches = append(matches, ModuleMatch{Kind: "candidate", SymbolID: symbol.ID, Identifier: symbol.identifier()})
+			matches = append(matches, ModuleMatch{Kind: "candidate", SymbolID: symbol.ID, Identifier: index.identifier(symbol)})
 		}
 	}
 	return matches, nil
 }
 
-// occurrences reads the reference postings of the symbols and returns a row for every occurrence of
-// one of them that keep accepts, named by its enclosing declaration.
-func (index *indexContext) occurrences(ctx context.Context, target string, symbols map[string]bool, kind string, keep func(storage.DocumentOccurrence) bool) ([]ModuleMatch, error) {
-	ids := make([]string, 0, len(symbols))
-	for id := range symbols {
-		ids = append(ids, id)
+// occurrenceQuery selects occurrence rows of kind: the occurrences keep accepts of the symbols in
+// targets, each of which stands for the target it maps to, in the documents of the roots roots admits,
+// or of every root when roots is nil. A row of a symbol that stands for another target is a dispatch
+// row.
+type occurrenceQuery struct {
+	targets map[string]string
+	kind    string
+	keep    func(storage.DocumentOccurrence) bool
+	roots   func(rootKey string) bool
+}
+
+// singleTarget maps each symbol to target, which a call to it stands for.
+func singleTarget(target string, symbols ...string) map[string]string {
+	targets := map[string]string{target: target}
+	for _, symbol := range symbols {
+		targets[symbol] = target
 	}
-	slices.Sort(ids)
-	postings, err := index.postings(ctx, ids, "reference")
+	return targets
+}
+
+// occurrences reads the reference postings of the query's symbols and returns a row for every
+// occurrence of one of them that keep accepts, named by its enclosing declaration.
+func (index *indexContext) occurrences(ctx context.Context, request occurrenceQuery) ([]ModuleMatch, error) {
+	postings, err := index.postingsIn(ctx, postingRequest{ids: sortedKeys(keysOf(request.targets)), roles: []string{"reference"}, roots: request.roots})
 	if err != nil {
+		return nil, err
+	}
+	if err := index.prefetch(ctx, postings); err != nil {
 		return nil, err
 	}
 	matches := []ModuleMatch{}
 	for _, posting := range postings {
-		document, err := index.document(posting)
+		document, err := index.document(ctx, posting)
 		if err != nil {
 			return nil, err
 		}
 		for _, occurrence := range document.content.Occurrences {
-			if occurrence.Symbol == nil || *occurrence.Symbol != posting.symbol || !keep(occurrence) {
+			if occurrence.Symbol == nil || *occurrence.Symbol != posting.symbol || !request.keep(occurrence) {
 				continue
 			}
-			match := index.occurrenceMatch(posting, document, kind, occurrence)
-			match.Dispatch = posting.symbol != target
+			match := index.occurrenceMatch(posting, document, request.kind, occurrence)
+			match.Dispatch = posting.symbol != request.targets[posting.symbol]
 			matches = append(matches, match)
+		}
+	}
+	return matches, nil
+}
+
+func keysOf[V any](values map[string]V) map[string]bool {
+	keys := make(map[string]bool, len(values))
+	for key := range values {
+		keys[key] = true
+	}
+	return keys
+}
+
+// declaredBy lists, as rows of kind and role, the declarations in the documents of the postings whose
+// entry has field naming the target.
+func (index *indexContext) declaredBy(ctx context.Context, postings []scopedPosting, kind, role string, names func(storage.DocumentSymbol) []string, target string) ([]ModuleMatch, error) {
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, err
+	}
+	var matches []ModuleMatch
+	for _, posting := range postings {
+		document, err := index.document(ctx, posting)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range document.content.Symbols {
+			if entry.ID != nil && slices.Contains(names(entry), target) {
+				matches = append(matches, index.declarationMatch(posting, document, kind, role, entry))
+			}
 		}
 	}
 	return matches, nil
@@ -87,19 +137,11 @@ func (index *indexContext) implementations(ctx context.Context, target ModuleSym
 	if err != nil {
 		return nil, err
 	}
-	matches := []ModuleMatch{}
-	for _, posting := range postings {
-		document, err := index.document(posting)
-		if err != nil {
-			return nil, err
-		}
-		for _, entry := range document.content.Symbols {
-			if entry.ID != nil && slices.Contains(entry.Implements, target.ID) {
-				matches = append(matches, index.declarationMatch(posting, document, "implementation", "implements", entry))
-			}
-		}
+	matches, err := index.declaredBy(ctx, postings, "implementation", "implements", func(entry storage.DocumentSymbol) []string { return entry.Implements }, target.ID)
+	if matches == nil && err == nil {
+		matches = []ModuleMatch{}
 	}
-	return matches, nil
+	return matches, err
 }
 
 func (index *indexContext) embedders(ctx context.Context, target ModuleSymbol) ([]ModuleMatch, error) {
@@ -110,60 +152,46 @@ func (index *indexContext) embedders(ctx context.Context, target ModuleSymbol) (
 	if err != nil {
 		return nil, err
 	}
-	var matches []ModuleMatch
-	for _, posting := range postings {
-		document, err := index.document(posting)
-		if err != nil {
-			return nil, err
-		}
-		for _, entry := range document.content.Symbols {
-			if entry.ID != nil && slices.Contains(entry.Embeds, target.ID) {
-				matches = append(matches, index.declarationMatch(posting, document, "inheritance", "embeds", entry))
-			}
-		}
-	}
-	return matches, nil
+	return index.declaredBy(ctx, postings, "inheritance", "embeds", func(entry storage.DocumentSymbol) []string { return entry.Embeds }, target.ID)
 }
 
-func (index *indexContext) requireEmbeddingFacts() error {
-	for position, scope := range index.scopes {
-		for id := range scope.documents {
-			document, err := index.document(scopedPosting{scope: position, document: id})
-			if err != nil {
-				return err
-			}
-			if document.content.Version < 3 {
-				return fmt.Errorf("snapshot %s lacks embedding facts; reindex its checkout", scope.snapshot.ID)
-			}
+func (index *indexContext) requireEmbeddingFacts(ctx context.Context) error {
+	all := index.scopeDocumentPostings()
+	if err := index.prefetch(ctx, all); err != nil {
+		return err
+	}
+	for _, posting := range all {
+		document, err := index.document(ctx, posting)
+		if err != nil {
+			return err
+		}
+		if document.content.Version < 3 {
+			return fmt.Errorf("snapshot %s lacks embedding facts; reindex its checkout", index.scopes[posting.scope].snapshot.ID)
 		}
 	}
 	return nil
 }
 
 // callers lists the call occurrences of the target and, with dispatch, of the interface methods the
-// target's receiver type implements in each scope.
-func (index *indexContext) callers(ctx context.Context, target ModuleSymbol, dispatch bool, result *ModuleQueryResult) error {
-	targets := map[string]bool{target.ID: true}
+// target's receiver type implements in each scope, in the roots roots admits (every root when nil).
+func (index *indexContext) callers(ctx context.Context, target ModuleSymbol, dispatch bool, roots func(string) bool, result *ModuleQueryResult) ([]ModuleMatch, error) {
+	targets := singleTarget(target.ID)
 	if dispatch {
 		methods, err := index.dispatchMethods(ctx, target)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		for _, method := range methods {
-			targets[method] = true
-		}
+		targets = singleTarget(target.ID, methods...)
 		noun := "interface methods"
 		if len(methods) == 1 {
 			noun = "interface method"
 		}
 		result.Stages = append(result.Stages, ResolutionStage{Name: "dispatch", Value: fmt.Sprintf("%d %s", len(methods), noun)})
 	}
-	var err error
-	result.Matches, err = index.occurrences(ctx, target.ID, targets, "caller", func(occurrence storage.DocumentOccurrence) bool {
-		return occurrence.Role == "call"
-	})
-	return err
+	return index.occurrences(ctx, occurrenceQuery{targets: targets, kind: "caller", keep: isCall, roots: roots})
 }
+
+func isCall(occurrence storage.DocumentOccurrence) bool { return occurrence.Role == "call" }
 
 // dispatchMethods maps a concrete method T.M to I.M for every interface I that T's declarations in
 // scope implement. Interfaces outside the import closure of T are not recorded, so not proven.
@@ -171,27 +199,13 @@ func (index *indexContext) dispatchMethods(ctx context.Context, target ModuleSym
 	if target.Kind != "method" || target.OwnerID == "" {
 		return nil, fmt.Errorf("dispatch applies to methods, %s is a %s", target.Name, target.Kind)
 	}
-	postings, err := index.postings(ctx, []string{target.OwnerID}, "definition")
+	interfaces, declared, err := index.ownerInterfaces(ctx, target.OwnerID)
 	if err != nil {
 		return nil, err
 	}
-	if len(postings) == 0 {
+	if !declared {
 		return nil, fmt.Errorf("including dispatch needs the declaration of %s in scope; select the root that declares it", target.Owner)
 	}
-	var interfaces []string
-	for _, posting := range postings {
-		document, err := index.document(posting)
-		if err != nil {
-			return nil, err
-		}
-		entry, err := index.entry(posting, document, target.OwnerID)
-		if err != nil {
-			return nil, err
-		}
-		interfaces = append(interfaces, entry.Implements...)
-	}
-	slices.Sort(interfaces)
-	interfaces = slices.Compact(interfaces)
 	var methods []string
 	for start := 0; start < len(interfaces); start += lookupBatch {
 		var rows []storage.Symbol
@@ -215,15 +229,44 @@ func (index *indexContext) dispatchMethods(ctx context.Context, target ModuleSym
 	return methods, nil
 }
 
+// ownerInterfaces are the interfaces the declarations in scope of the owner implement, sorted and
+// distinct, and whether the owner is declared in scope at all.
+func (index *indexContext) ownerInterfaces(ctx context.Context, owner string) ([]string, bool, error) {
+	postings, err := index.postings(ctx, []string{owner}, "definition")
+	if err != nil {
+		return nil, false, err
+	}
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, false, err
+	}
+	var interfaces []string
+	for _, posting := range postings {
+		document, err := index.document(ctx, posting)
+		if err != nil {
+			return nil, false, err
+		}
+		entry, err := index.entry(posting, document, owner)
+		if err != nil {
+			return nil, false, err
+		}
+		interfaces = append(interfaces, entry.Implements...)
+	}
+	slices.Sort(interfaces)
+	return slices.Compact(interfaces), len(postings) > 0, nil
+}
+
 // callees lists the call occurrences whose enclosing declaration is the target, resolved or not.
 func (index *indexContext) callees(ctx context.Context, target ModuleSymbol) ([]ModuleMatch, error) {
 	postings, err := index.postings(ctx, []string{target.ID}, "definition")
 	if err != nil {
 		return nil, err
 	}
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, err
+	}
 	matches := []ModuleMatch{}
 	for _, posting := range postings {
-		document, err := index.document(posting)
+		document, err := index.document(ctx, posting)
 		if err != nil {
 			return nil, err
 		}

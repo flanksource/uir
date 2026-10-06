@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -78,8 +79,12 @@ func readDocuments(ctx context.Context, database *gorm.DB, files []changedFile, 
 	if err != nil {
 		return err
 	}
+	kinds, err := storage.LoadSymbolKinds(ctx, database)
+	if err != nil {
+		return err
+	}
 	for _, id := range ids {
-		if err := byID[id].decode(contents[id]); err != nil {
+		if err := byID[id].decode(contents[id], kinds); err != nil {
 			return err
 		}
 	}
@@ -92,10 +97,12 @@ func readDocuments(ctx context.Context, database *gorm.DB, files []changedFile, 
 	return nil
 }
 
-func (side *fileSide) decode(content storage.JSON) error {
+// decode validates the side's document against the database's kind registry, which may hold the custom
+// kinds of a non-Go producer.
+func (side *fileSide) decode(content storage.JSON, kinds symbolhandle.Kinds) error {
 	document := side.active.Document
 	document.Content = content
-	decoded, err := decodeDocument(document, side.active.Source)
+	decoded, err := decodeDocument(document, side.active.Source, storage.WithKinds(kinds))
 	if err != nil {
 		return err
 	}

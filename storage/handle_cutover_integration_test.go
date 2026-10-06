@@ -140,7 +140,7 @@ func reindex(ctx context.Context, database *gorm.DB, checkout string) indexer.Mo
 	GinkgoHelper()
 	engine, err := indexer.New(database)
 	Expect(err).ToNot(HaveOccurred())
-	results, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: checkout, ExistingOnly: true})
+	results, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: checkout, ExistingOnly: true, Reason: storage.ReasonReindex})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(results).To(HaveLen(1))
 	return results[0]

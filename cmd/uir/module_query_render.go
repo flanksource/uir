@@ -43,7 +43,7 @@ func (display moduleQueryDisplay) Tree() api.TreeNode {
 	if display.result.Path == nil && len(display.result.Matches) < display.result.Total {
 		count = fmt.Sprintf("%d of %d matches", len(display.result.Matches), display.result.Total)
 	}
-	root := &moduleQueryTreeNode{label: clicky.Text(count, "font-bold")}
+	root := &moduleQueryTreeNode{label: clicky.Text(count, uir.StyleBold)}
 	if display.result.Path != nil {
 		appendCallPath(root, display.result.Path)
 	} else {
@@ -52,10 +52,10 @@ func (display moduleQueryDisplay) Tree() api.TreeNode {
 		}
 	}
 	for _, coverage := range display.result.Coverage {
-		root.children = append(root.children, &moduleQueryTreeNode{label: api.Text{}.Add(icons.Warning).Space().Append(coverage.PackagePath, "text-amber-500").Space().Append(coverage.Coverage, "muted")})
+		root.children = append(root.children, &moduleQueryTreeNode{label: api.Text{}.Add(icons.Warning).Space().Append(coverage.PackagePath, uir.StyleWarning).Space().Append(coverage.Coverage, uir.StyleMuted)})
 	}
 	for _, warning := range display.result.Warnings {
-		root.children = append(root.children, &moduleQueryTreeNode{label: api.Text{}.Add(icons.Warning).Space().Append(warning.RootKey, "text-amber-500").Space().Append(warning.Message, "muted")})
+		root.children = append(root.children, &moduleQueryTreeNode{label: missingHeadLabel(warning)})
 	}
 	return root
 }
@@ -148,7 +148,7 @@ func appendQueryMatch(root *moduleQueryTreeNode, groups []string, row moduleQuer
 			}
 		}
 		if index == 0 && group != "module" {
-			label = api.Text{}.Add(label).Space().Append(row.Root, "muted").Space().Append(row.Location, "muted").Space().Append(row.SnapshotID, "muted")
+			label = api.Text{}.Add(label).Space().Append(row.Root, uir.StyleMuted).Space().Append(row.Location, uir.StyleMuted).Space().Append(row.SnapshotID, uir.StyleMuted)
 		}
 		parent = parent.addChild(group+":"+key, label)
 	}
@@ -156,7 +156,7 @@ func appendQueryMatch(root *moduleQueryTreeNode, groups []string, row moduleQuer
 	label := api.Text{}.Add(querySymbolType(row).Icon()).Space()
 	if row.declaration != "" {
 		if row.definitionLine != nil {
-			label = label.Append(*row.definitionLine, "text-muted").Space()
+			label = label.Append(*row.definitionLine, uir.StyleTextMuted).Space()
 		}
 		label = label.Add(api.CodeBlock("go", row.declaration))
 	} else {
@@ -168,12 +168,12 @@ func appendQueryMatch(root *moduleQueryTreeNode, groups []string, row moduleQuer
 	}
 	label = api.Text{}
 	if row.Line != nil {
-		label = label.Append(*row.Line, "text-muted").Space()
+		label = label.Append(*row.Line, uir.StyleTextMuted).Space()
 	}
 	if row.usage != "" {
 		label = label.Add(api.CodeBlock("go", row.usage))
 	} else {
-		label = label.Append(row.Source, "text-muted")
+		label = label.Append(row.Source, uir.StyleTextMuted)
 	}
 	symbol.children = append(symbol.children, &moduleQueryTreeNode{label: label})
 }
@@ -182,7 +182,7 @@ func queryGroup(row moduleQueryRow, group string) (string, api.Textable) {
 	switch group {
 	case "module":
 		key := row.Root + "\x00" + row.Location + "\x00" + row.SnapshotID
-		return key, api.Text{}.Add(uir.NodeTypeModule.Icon()).Space().Append(row.Root, uir.NodeTypeModule.Color()).Space().Append(row.Location, "muted").Space().Append(row.SnapshotID, "muted")
+		return key, api.Text{}.Add(uir.NodeTypeModule.Icon()).Space().Append(row.Root, uir.NodeTypeModule.Color()).Space().Append(row.Location, uir.StyleMuted).Space().Append(row.SnapshotID, uir.StyleMuted)
 	case "package":
 		key := row.Root + "\x00" + row.Location + "\x00" + row.SnapshotID + "\x00" + row.PackagePath
 		return key, api.Text{}.Add(uir.NodeTypePackage.Icon()).Space().Append(row.PackagePath, uir.NodeTypePackage.Color())
@@ -236,7 +236,7 @@ func appendCallPath(root *moduleQueryTreeNode, path *moduleCallPath) {
 		nodeType := querySymbolType(moduleQueryRow{Kind: symbol.Kind})
 		label := api.Text{}.Add(nodeType.Icon()).Space().Append(symbol.QueryName, nodeType.Color())
 		if index > 0 && index-1 < len(path.Calls) {
-			label = label.Space().Append(path.Calls[index-1].Source, "muted")
+			label = label.Space().Append(path.Calls[index-1].Source, uir.StyleMuted)
 		}
 		child := &moduleQueryTreeNode{label: label}
 		parent.children = append(parent.children, child)

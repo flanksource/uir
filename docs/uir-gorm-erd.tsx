@@ -43,7 +43,7 @@ function ModulesAndPublication() {
         { name: 'canonical_path', type: 'text' },
         { name: 'parent_location_id', type: 'uuid?', fk: true },
         { name: 'mount_path', type: 'text' },
-        { name: 'kind', type: 'module | git | git-submodule' },
+        { name: 'kind', type: 'module | git | git-submodule | external' },
         { name: 'repository_uri', type: 'text?' },
         { name: 'created_at', type: 'timestamptz' },
       ]} />
@@ -141,13 +141,13 @@ function SymbolIndex() {
         { name: 'canonical_key', type: 'text · unique' },
         { name: 'module_key', type: 'text' },
         { name: 'package_path', type: 'text' },
-        { name: 'kind', type: 'package | type | func | …' },
+        { name: 'kind', type: 'text · symbol_kinds.name', fk: true },
         { name: 'owner_id', type: 'text? · self', fk: true },
         { name: 'name', type: 'text' },
         { name: 'search_name', type: 'text' },
         { name: 'visibility', type: 'exported | internal' },
         { name: 'parameter_types', type: 'jsonb' },
-        { name: 'handle', type: 'bigint · unique · H64a' },
+        { name: 'handle', type: 'bigint · unique · H64b' },
       ]} />
       <Entity id={id('posting')} title="symbol_postings" detail="Inverted index: which documents mention a symbol, by compact keys" accent={COLORS.fk} fields={[
         { name: 'document_ordinal', type: 'bigint', pk: true, fk: true },
@@ -199,7 +199,7 @@ function HandlesAndDeltas() {
         { name: 'number', type: 'integer · 0–65535', pk: true },
         { name: 'package_path', type: 'text · unique per module' },
       ]} />
-      <Entity id={id('symbol-ref')} title="symbols" detail="Symbol reference; handle = 0 | module 11 | package 16 | visibility 1 | kind 3 | local 32" fields={[
+      <Entity id={id('symbol-ref')} title="symbols" detail="Symbol reference; handle = 0 | module 11 | package 16 | visibility 1 | kind 6 | local 29; kind codes from symbol_kinds" fields={[
         { name: 'id', type: 'text · 64 hex', pk: true },
         { name: 'handle', type: 'bigint · unique' },
       ]} />

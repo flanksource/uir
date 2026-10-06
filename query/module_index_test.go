@@ -7,6 +7,7 @@ import (
 
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"gorm.io/gorm"
@@ -96,7 +97,7 @@ func indexCheckout(ctx context.Context, database *gorm.DB, path string) indexer.
 	GinkgoHelper()
 	engine, err := indexer.New(database)
 	Expect(err).ToNot(HaveOccurred())
-	results, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: path})
+	results, err := engine.IndexModules(ctx, indexer.ModuleOptions{Path: path, Reason: storage.ReasonAdd})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(results).To(HaveLen(1))
 	return results[0]

@@ -3,7 +3,9 @@ package indexer
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/flanksource/commons-db/dbtest"
@@ -34,6 +36,33 @@ func closeIndexerDB(database *gorm.DB) {
 	sqlDB, err := database.DB()
 	Expect(err).To(Succeed())
 	Expect(sqlDB.Close()).To(Succeed())
+}
+
+// canonicalTempDir is a spec temp directory with symlinks resolved, the form the index registers
+// checkouts under, so specs hold where TMPDIR is itself a symlink.
+func canonicalTempDir() string {
+	GinkgoHelper()
+	directory, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+	Expect(err).ToNot(HaveOccurred())
+	return directory
+}
+
+// gitOutput runs git in directory and returns its trimmed standard output.
+func gitOutput(ctx context.Context, directory string, args ...string) string {
+	GinkgoHelper()
+	output, err := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...).Output()
+	Expect(err).ToNot(HaveOccurred(), "git %v", args)
+	return strings.TrimSpace(string(output))
+}
+
+// commitPaths stages paths and commits them, returning the new commit.
+func commitPaths(ctx context.Context, directory, message string, paths ...string) string {
+	GinkgoHelper()
+	for _, args := range [][]string{append([]string{"add"}, paths...), {"-c", "user.name=Example", "-c", "user.email=example@example.org", "commit", "-m", message}} {
+		output, err := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...).CombinedOutput()
+		Expect(err).ToNot(HaveOccurred(), string(output))
+	}
+	return gitOutput(ctx, directory, "rev-parse", "HEAD")
 }
 
 func writeFile(path, content string) {

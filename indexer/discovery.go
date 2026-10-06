@@ -18,8 +18,12 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
+// discoveredRoot is one root publication registers and indexes: a Go module found on disk, or the root
+// a Publication names, whose LocalPath is then its URI and Kind storage.LocationExternal. Name is the
+// root's display name when publication registers it.
 type discoveredRoot struct {
 	RootKey           string
+	Name              string
 	ParentRootKey     string
 	MountPath         string
 	LocalPath         string

@@ -3,28 +3,41 @@ package query
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"github.com/flanksource/uir/storage"
 )
 
+// compactIndex evaluates compact expressions over an index context. Symbol rows and query names live
+// in the context's shared symbol facts; dispatch keeps the implementations of interface methods found
+// in this query's scopes.
 type compactIndex struct {
 	*indexContext
-	names    map[string]string
-	rows     map[string]storage.Symbol
 	dispatch map[string][]ModuleSymbol
 }
 
 func newCompactIndex(index *indexContext) *compactIndex {
-	return &compactIndex{indexContext: index, names: map[string]string{}, rows: map[string]storage.Symbol{}, dispatch: map[string][]ModuleSymbol{}}
+	return &compactIndex{indexContext: index, dispatch: map[string][]ModuleSymbol{}}
 }
 
 func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]ModuleSymbol, error) {
-	wildcard := strings.ContainsAny(pattern, "*?")
+	literal, exact := globLiteral(pattern)
 	query := index.database.WithContext(ctx).Model(&storage.Symbol{})
-	lastDot, lastSlash := strings.LastIndex(pattern, "."), strings.LastIndex(pattern, "/")
-	if wildcard {
+	if exact {
+		lastDot, lastSlash := strings.LastIndex(literal, "."), strings.LastIndex(literal, "/")
+		switch {
+		case lastDot > lastSlash:
+			name := literal[lastDot+1:]
+			query = query.Where("search_name = ? AND name = ?", storage.SearchName(name), name)
+		case lastSlash >= 0:
+			query = query.Where("kind = ? AND package_path = ?", "package", literal)
+		default:
+			query = query.Where("search_name = ? AND name = ?", storage.SearchName(literal), literal)
+		}
+	} else if !strings.Contains(pattern, `\`) {
+		lastDot, lastSlash := strings.LastIndex(pattern, "."), strings.LastIndex(pattern, "/")
 		if lastDot > lastSlash && lastSlash >= 0 && !strings.ContainsAny(pattern[:lastDot], "*?") {
 			query = query.Where("package_path = ?", pattern[:lastDot])
 		}
@@ -34,19 +47,9 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 				query = query.Where("search_name LIKE ?", prefix+"%")
 			}
 		}
-	} else {
-		switch {
-		case lastDot > lastSlash:
-			name := pattern[lastDot+1:]
-			query = query.Where("search_name = ? AND name = ?", storage.SearchName(name), name)
-		case lastSlash >= 0:
-			query = query.Where("kind = ? AND package_path = ?", "package", pattern)
-		default:
-			query = query.Where("search_name = ? AND name = ?", storage.SearchName(pattern), pattern)
-		}
 	}
 	var glob selectorGlob
-	if wildcard {
+	if !exact {
 		var err error
 		glob, err = compileSelectorGlob(pattern)
 		if err != nil {
@@ -73,23 +76,26 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 	return index.activeSymbols(ctx, matched)
 }
 
+// symbolPatternMatches reports whether a bare symbol pattern selects a qualified name: an exact
+// pattern, its escapes removed, by its full path or a dotted suffix, and a glob by the glob.
 func symbolPatternMatches(pattern, qualified string, glob selectorGlob) bool {
-	legacyChildren := strings.HasSuffix(pattern, ".*") && strings.Count(pattern, "*") == 1 && !strings.Contains(pattern, "?")
+	literal, exact := globLiteral(pattern)
+	legacyChildren := strings.HasSuffix(pattern, ".*") && strings.Count(pattern, "*") == 1 && !strings.ContainsAny(pattern, `?\`)
 	if strings.Contains(pattern, "/") {
 		if legacyChildren {
 			return directChild(qualified, strings.TrimSuffix(pattern, ".*"))
 		}
-		if strings.ContainsAny(pattern, "*?") {
+		if !exact {
 			return glob.matches(qualified)
 		}
-		return qualified == pattern
+		return qualified == literal
 	}
 	short := qualified[strings.LastIndex(qualified, "/")+1:]
 	if legacyChildren {
 		prefix := strings.TrimSuffix(pattern, ".*")
 		return directChild(short, prefix) || directChildSuffix(short, prefix)
 	}
-	if strings.ContainsAny(pattern, "*?") {
+	if !exact {
 		for {
 			if glob.matches(short) {
 				return true
@@ -101,7 +107,7 @@ func symbolPatternMatches(pattern, qualified string, glob selectorGlob) bool {
 			short = short[dot+1:]
 		}
 	}
-	return short == pattern || strings.HasSuffix(short, "."+pattern)
+	return short == literal || strings.HasSuffix(short, "."+literal)
 }
 
 func directChild(name, prefix string) bool {
@@ -127,12 +133,14 @@ func directChildSuffix(name, prefix string) bool {
 }
 
 func (index *compactIndex) queryName(ctx context.Context, row storage.Symbol) (string, error) {
-	if name, found := index.names[row.ID]; found {
+	if name, found := index.symbols.name(row.ID); found {
 		return name, nil
 	}
-	index.rows[row.ID] = row
+	if err := index.remember([]storage.Symbol{row}); err != nil {
+		return "", err
+	}
 	if row.Kind == "package" {
-		index.names[row.ID] = row.PackagePath
+		index.symbols.keepName(row.ID, row.PackagePath)
 		return row.PackagePath, nil
 	}
 	parts := []string{row.Name}
@@ -141,36 +149,38 @@ func (index *compactIndex) queryName(ctx context.Context, row storage.Symbol) (s
 		if depth == 32 {
 			return "", fmt.Errorf("symbol %s has an owner chain deeper than 32", row.ID)
 		}
-		owner, found := index.rows[*ownerID]
+		owner, found := index.symbols.row(*ownerID)
 		if !found {
 			if err := index.database.WithContext(ctx).Where("id = ?", *ownerID).First(&owner).Error; err != nil {
 				return "", fmt.Errorf("load owner %s of symbol %s: %w", *ownerID, row.ID, err)
 			}
-			index.rows[*ownerID] = owner
+			if err := index.remember([]storage.Symbol{owner}); err != nil {
+				return "", err
+			}
 		}
 		parts = append(parts, owner.Name)
 		ownerID = owner.OwnerID
 	}
 	slices.Reverse(parts)
 	name := row.PackagePath + "." + strings.Join(parts, ".")
-	index.names[row.ID] = name
+	index.symbols.keepName(row.ID, name)
 	return name, nil
 }
 
-// prefetchOwners loads, in IN batches, every owner up the rows' owner chains that queryName has not
+// prefetchOwners loads, in IN batches, every owner up the rows' owner chains that the pipeline has not
 // seen, so naming the rows reads no owner one at a time.
 func (index *compactIndex) prefetchOwners(ctx context.Context, rows []storage.Symbol) error {
 	for depth := 0; len(rows) > 0; depth++ {
 		if depth == 32 {
 			return fmt.Errorf("symbol %s has an owner chain deeper than 32", rows[0].ID)
 		}
+		if err := index.remember(rows); err != nil {
+			return err
+		}
 		missing := map[string]bool{}
 		for _, row := range rows {
-			if _, found := index.rows[row.ID]; !found {
-				index.rows[row.ID] = row
-			}
 			if row.OwnerID != nil {
-				if _, found := index.rows[*row.OwnerID]; !found {
+				if _, found := index.symbols.row(*row.OwnerID); !found {
 					missing[*row.OwnerID] = true
 				}
 			}
@@ -259,16 +269,39 @@ func (index *compactIndex) symbolsByID(ctx context.Context, ids []string) ([]Mod
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows := make([]storage.Symbol, 0, len(ids))
-	for start := 0; start < len(ids); start += lookupBatch {
+	byID, err := index.symbolRowsByID(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return index.convertSymbols(ctx, slices.Collect(maps.Values(byID)))
+}
+
+// symbolRowsByID loads the rows of distinct symbol ids, reading only those the pipeline has not kept;
+// an unknown id is an error.
+func (index *compactIndex) symbolRowsByID(ctx context.Context, ids []string) (map[string]storage.Symbol, error) {
+	rows := make(map[string]storage.Symbol, len(ids))
+	var missing []string
+	for _, id := range ids {
+		if row, found := index.symbols.row(id); found {
+			rows[id] = row
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	for start := 0; start < len(missing); start += lookupBatch {
 		var found []storage.Symbol
-		if err := index.database.WithContext(ctx).Where("id IN ?", ids[start:min(start+lookupBatch, len(ids))]).Find(&found).Error; err != nil {
+		if err := index.database.WithContext(ctx).Where("id IN ?", missing[start:min(start+lookupBatch, len(missing))]).Find(&found).Error; err != nil {
 			return nil, fmt.Errorf("load symbols by id: %w", err)
 		}
-		rows = append(rows, found...)
+		if err := index.remember(found); err != nil {
+			return nil, err
+		}
+		for _, row := range found {
+			rows[row.ID] = row
+		}
 	}
 	if len(rows) != len(ids) {
 		return nil, fmt.Errorf("loaded %d symbols for %d ids", len(rows), len(ids))
 	}
-	return index.convertSymbols(ctx, rows)
+	return rows, nil
 }

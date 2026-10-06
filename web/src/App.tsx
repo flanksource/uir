@@ -1,35 +1,32 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell, Button, Combobox, CommandPaletteTrigger, SegmentedControl, type CommandGroup } from "@flanksource/clicky-ui/components";
 import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleIndexResult, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
+import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleIndexRun, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
 import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
 import { queryExamples, queryScope, type QueryExample } from "./query-model";
 import { QueryCommandPalette } from "./QueryCommandPalette";
 import { HistoryView } from "./HistoryView";
 import { QueryView } from "./QueryView";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue, type Route } from "./route";
+import { SnapshotTable } from "./SnapshotTable";
 import { SystemDetails } from "./SystemDetails";
+import { MODULE_INDEX_KIND, TASKS_API, useRunEnd } from "./task-links";
 import { Card, ErrorMessage, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
 import { useLoad, useTimedLoad } from "./use-load";
 
 const ExplorerView = lazy(() => import("./ExplorerView").then((module) => ({ default: module.ExplorerView })));
 
-function DataList<T extends { id: string }>({ rows, loading, error, columns, onClick, total, offset, onPage }: {
+function DataList<T extends { id: string }>({ rows, loading, error, columns, onClick }: {
   rows: T[];
   loading: boolean;
   error?: string;
   columns: DataTableColumn<T>[];
   onClick?: (row: T) => void;
-  total?: number;
-  offset?: number;
-  onPage?: (offset: number) => void;
 }) {
   return <>
     <ErrorMessage error={error} />
     <DataTable className="min-h-40 max-h-[28rem]" data={rows} columns={columns} loading={loading} getRowId={(row) => row.id} onRowClick={onClick}
-      emptyMessage="No saved records match this view"
-      pagination={total !== undefined && onPage ? { page: Math.floor((offset ?? 0) / 100), pageSize: 100, total,
-        onPageChange: (next) => onPage(next * 100), onPageSizeChange: () => onPage(0), pageSizeOptions: [100] } : undefined} />
+      emptyMessage="No saved records match this view" />
   </>;
 }
 
@@ -39,13 +36,7 @@ const locationColumns: DataTableColumn<ModuleLocation>[] = [
   { key: "primary", label: "Primary", render: (_, row) => row.primary ? "Yes" : "" },
   { key: "head_version", label: "Head", render: (_, row) => `v${row.head_version}` },
 ];
-const snapshotColumns: DataTableColumn<ModuleSnapshot>[] = [
-  { key: "id", label: "Snapshot", render: (_, row) => row.id.slice(0, 12), sortable: true },
-  { key: "head", label: "Published", render: (_, row) => row.head ? `Head v${row.head_version}` : "" },
-  { key: "revision", label: "Git revision", render: (_, row) => row.revision?.slice(0, 12) ?? "" },
-  { key: "started_at", label: "Started", sortable: true },
-];
-function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath: string; onSuccess: (results: ModuleIndexResult[]) => void }) {
+function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath: string; onSuccess: (run: ModuleIndexRun) => void }) {
   const [path, setPath] = useState(defaultPath);
   const [includeTests, setIncludeTests] = useState(false);
   const [force, setForce] = useState(false);
@@ -60,10 +51,9 @@ function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath
     setError("");
     setMessage("");
     try {
-      const results = action === "add" ? await addModules(path.trim(), includeTests) : await reindexModules({ path: path.trim(), includeTests, force });
-      if (!results.length) throw new Error(`No Go modules found under ${path}`);
-      setMessage(`${action === "add" ? "Added" : "Reindexed"} ${results.length} module ${results.length === 1 ? "root" : "roots"}`);
-      onSuccess(results);
+      const run = action === "add" ? await addModules(path.trim(), includeTests) : await reindexModules({ path: path.trim(), includeTests, force });
+      setMessage(`${action === "add" ? "Adding" : "Reindexing"} in task run ${run.run_id}`);
+      onSuccess(run);
     } catch (reason) { setError(String(reason)); }
     finally { setPending(false); }
   }
@@ -87,6 +77,11 @@ export function App() {
   const [route, setRouteState] = useState(readRoute);
   const [refresh, setRefresh] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [indexRun, setIndexRun] = useState("");
+  useRunEnd(indexRun, () => {
+    setIndexRun("");
+    setRefresh((current) => current + 1);
+  });
   useEffect(() => {
     const onPop = () => setRouteState(readRoute());
     window.addEventListener("popstate", onPop);
@@ -165,7 +160,8 @@ export function App() {
     ]} /></div>}
     sidebarFooter={<SystemDetails />}
     bodyHeader={<span>{selectedRoot?.name || route.module || "All modules"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
-    bodyActions={<Row><TaskManagerButton basePath="/api/v1" kind="module-index" tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
+    bodyActions={<Row><TaskManagerButton basePath={TASKS_API} kind={MODULE_INDEX_KIND} tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })}
+      selectedId={route.taskRun} onSelectRun={(id) => setRoute({ taskRun: id ?? "" }, true)} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
     {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} roots={roots} heads={heads} browse={browse} locations={locations} onRoute={setRoute} onRefresh={() => setRefresh((current) => current + 1)} /></Suspense> : <PageLayout>
       {roots.loading && <Muted>Loading module roots…</Muted>}
       <ErrorMessage error={roots.error} />
@@ -176,14 +172,14 @@ export function App() {
         </Section>
         {route.module && <Section><h2>Checkouts</h2><DataList rows={locations.data ?? []} loading={locations.loading} error={locations.error} columns={locationColumns}
           onClick={(row) => setRoute({ location: row.canonical_path, snapshot: row.head_snapshot_id, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 })} /></Section>}
-        {route.location && <Section><h2>Snapshots for {route.location}</h2><DataList rows={snapshots.data?.data ?? []} loading={snapshots.loading} error={snapshots.error} columns={snapshotColumns}
-          onClick={(row) => setRoute({ snapshot: row.id, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 })} total={snapshots.data?.page.total} offset={route.offset} onPage={(offset) => setRoute({ offset })} /></Section>}
-        <IndexForm root={route.module} defaultPath={route.location} onSuccess={(results) => {
-          setRoute(scopePatch(results[0]));
-          setRefresh((current) => current + 1);
+        {route.location && <Section><h2>Snapshots for {route.location}</h2><SnapshotTable snapshots={snapshots} route={route} onRoute={setRoute} /></Section>}
+        <IndexForm root={route.module} defaultPath={route.location} onSuccess={(run) => {
+          setIndexRun(run.run_id);
+          setRoute({ view: "tasks", taskRun: run.run_id });
         }} />
       </>}
-      {route.view === "tasks" && <><Heading>Indexing tasks</Heading><TaskManager basePath="/api/v1" kind="module-index" /></>}
+      {route.view === "tasks" && <><Heading>Indexing tasks</Heading><TaskManager basePath={TASKS_API} kind={MODULE_INDEX_KIND}
+        selectedId={route.taskRun} onSelectRun={(id) => setRoute({ taskRun: id ?? "" }, true)} /></>}
       {route.view === "query" && <>
         <QueryView route={route} query={query} examples={examples.items} onRoute={setRoute} />
         <ErrorMessage error={browse.error ?? examples.error} />

@@ -321,23 +321,23 @@ func (id Identifier) Pretty() api.Text {
 	style := id.GetNodeType().Color()
 
 	if id.Module != "" {
-		s = s.Append(id.Module, style).Append(".", "muted")
+		s = s.Append(id.Module, style).Append(".", StyleMuted)
 	}
 	if id.Package != "" {
-		s = s.Append(id.Package, style).Append(".", "muted")
+		s = s.Append(id.Package, style).Append(".", StyleMuted)
 	}
 	if id.Type != "" {
 		s = s.Append(id.Type, style)
 	}
 	if id.Method != "" {
 		if id.Type != "" || id.Package != "" || id.Module != "" {
-			s = s.Append(".", "muted")
+			s = s.Append(".", StyleMuted)
 		}
 		s = s.Append(id.Method, style)
 	}
 	if id.Field != "" {
 		if id.Type != "" || id.Package != "" || id.Module != "" || id.Method != "" {
-			s = s.Append(".", "muted")
+			s = s.Append(".", StyleMuted)
 		}
 		s = s.Append(id.Field, style)
 	}

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 
 	"github.com/flanksource/uir"
@@ -39,7 +38,7 @@ type treeItem struct {
 // BuildTree creates a hierarchical tree from a uir.UIR using the given grouping levels.
 func BuildTree(u *uir.UIR, groupBy []string) api.TreeNode {
 	if u == nil {
-		return &groupNode{label: clicky.Text("(empty)"), children: nil}
+		return &groupNode{label: api.Text{Content: "(empty)"}, children: nil}
 	}
 
 	items := flattenUIR(u)
@@ -251,17 +250,17 @@ func groupKey(item treeItem, level string, gitRoot string) string {
 func groupLabel(key string, level string) api.Text {
 	switch level {
 	case "git_root":
-		return clicky.Text(key, "font-bold")
+		return api.Text{Content: key, Style: uir.StyleBold}
 	case "folder":
-		return clicky.Text(key+"/", "text-gray-600")
+		return api.Text{Content: key + "/", Style: uir.StyleSecondary}
 	case "file":
-		return clicky.Text(key, "text-gray-700")
+		return api.Text{Content: key, Style: "text-gray-700"}
 	case "package":
-		return clicky.Text("package ", "text-blue-500").Append(key, "text-green-600 font-bold")
+		return api.Text{Content: "package ", Style: uir.StyleKeyword}.Append(key, uir.StyleDeclarationName)
 	case "language":
-		return clicky.Text(key, "text-purple-600 font-bold")
+		return api.Text{Content: key, Style: "text-purple-600 font-bold"}
 	default:
-		return clicky.Text(key)
+		return api.Text{Content: key}
 	}
 }
 
@@ -308,7 +307,7 @@ func Tree(u *uir.UIR) api.TreeNode {
 type typeTreeNode struct{ typ uir.TypedNode }
 
 func (n *typeTreeNode) Pretty() api.Text {
-	return clicky.Text("class ", "text-blue-500").Append(n.typ.Type, "text-green-600 font-bold")
+	return api.Text{Content: "class ", Style: uir.StyleKeyword}.Append(n.typ.Type, uir.StyleDeclarationName)
 }
 
 func (n *typeTreeNode) GetChildren() []api.TreeNode {
@@ -328,12 +327,12 @@ func (n *typeTreeNode) GetChildren() []api.TreeNode {
 type methodTreeNode struct{ m uir.MethodNode }
 
 func (n *methodTreeNode) Pretty() api.Text {
-	t := clicky.Text(n.m.Method, "text-green-600").Add(n.m.Params.Pretty())
+	t := api.Text{Content: n.m.Method, Style: uir.StyleName}.Add(n.m.Params.Pretty())
 	if len(n.m.Returns) > 0 {
-		t = t.Append(" : ", "text-gray-600").Add(n.m.Returns.Pretty())
+		t = t.Append(" : ", uir.StylePunctuation).Add(n.m.Returns.Pretty())
 	}
 	if n.m.Body != nil && len(n.m.Body.Children) > 0 {
-		t = t.Add(clicky.Collapsed("body", n.m.Body.Pretty()))
+		t = t.Add(api.Collapsed{Label: "body", Content: n.m.Body.Pretty()})
 	}
 	return t
 }
@@ -348,7 +347,7 @@ func (n *endpointTreeNode) GetChildren() []api.TreeNode { return nil }
 type recordTreeNode struct{ rec uir.ASTRecord }
 
 func (n *recordTreeNode) Pretty() api.Text {
-	return clicky.Text(string(n.rec.RecordType)+" ", "text-blue-500").Append(n.rec.Type, "text-green-600")
+	return api.Text{Content: string(n.rec.RecordType) + " ", Style: uir.StyleKeyword}.Append(n.rec.Type, uir.StyleName)
 }
 
 func (n *recordTreeNode) GetChildren() []api.TreeNode {
@@ -364,8 +363,8 @@ func (n *recordTreeNode) GetChildren() []api.TreeNode {
 type tableTreeNode struct{ tbl uir.RecordTable }
 
 func (n *tableTreeNode) Pretty() api.Text {
-	return clicky.Text(string(n.tbl.RecordType)+" ", "text-blue-500").
-		Append(n.tbl.QualifiedName(), "text-green-600")
+	return api.Text{Content: string(n.tbl.RecordType) + " ", Style: uir.StyleKeyword}.
+		Append(n.tbl.QualifiedName(), uir.StyleName)
 }
 
 func (n *tableTreeNode) GetChildren() []api.TreeNode {

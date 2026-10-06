@@ -73,19 +73,17 @@ type activeBatch struct {
 	content     bool
 }
 
-// addActiveDocuments looks up one batch of paths' documents by (root_id, path_key, input_hash), with
-// or without content, and adds each one that matches its path's package input hash to result.
+// addActiveDocuments looks up one batch of paths' documents by (root_id, path_key), with or without
+// content, and adds each one that matches its path's package input hash to result. The input hash is
+// matched here rather than in SQL: `input_hash IN ?` beside `path_key IN ?` makes SQLite probe the
+// unique index once per path × hash pair, which dominated cold queries.
 func addActiveDocuments(ctx context.Context, database *gorm.DB, batch activeBatch, result map[string]ActiveDocument) error {
-	hashes := make([]string, 0, len(batch.paths))
-	for _, path := range batch.paths {
-		hashes = append(hashes, batch.inputHashes[batch.sources[path].PackagePath])
-	}
 	query := database.WithContext(ctx)
 	if !batch.content {
 		query = query.Omit("content")
 	}
 	var documents []Document
-	if err := query.Where("root_id = ? AND path_key IN ? AND input_hash IN ?", batch.snapshot.RootID, batch.paths, hashes).Find(&documents).Error; err != nil {
+	if err := query.Where("root_id = ? AND path_key IN ?", batch.snapshot.RootID, batch.paths).Find(&documents).Error; err != nil {
 		return fmt.Errorf("load documents for snapshot %s: %w", batch.snapshot.ID, err)
 	}
 	for _, document := range documents {

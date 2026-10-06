@@ -29,13 +29,34 @@ func (b *RelationshipBuilder) Text(text string) *RelationshipBuilder {
 	return b
 }
 
+func (b *RelationshipBuilder) Kind(kind string) *RelationshipBuilder {
+	b.rel.Kind = kind
+	return b
+}
+
+func (b *RelationshipBuilder) Via(via string) *RelationshipBuilder {
+	b.rel.Via = via
+	return b
+}
+
 type UIRRelationship struct {
 	Metadata         `json:",inline" gorm:"-"`
 	SourceCode       `json:",inline" gorm:"-"`
 	ID               uuid.UUID        `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
 	RelationshipType RelationshipType `json:"relationship_type,omitempty"`
-	From             *Node            `json:"from,omitempty" gorm:"serializer:json"`
-	To               Node             `json:"to,omitempty" gorm:"serializer:json"`
+	// Kind is the producer's own name for the reference, finer than
+	// RelationshipType: a language says which of its constructs reach another
+	// entity (an include, a function call, a column read). Empty when the
+	// RelationshipType says all there is.
+	Kind string `json:"kind,omitempty"`
+	// Via names the construct the reference is written in, such as the element
+	// or statement that carries it. Empty when the producer does not say.
+	Via  string `json:"via,omitempty"`
+	From *Node  `json:"from,omitempty" gorm:"serializer:json"`
+	To   Node   `json:"to,omitempty" gorm:"serializer:json"`
+	// Guards are the conditions that must hold to reach the relationship's
+	// statement, outermost first.
+	Guards []ConditionStmt `json:"guards,omitempty" gorm:"serializer:json"`
 }
 
 func (r UIRRelationship) GetFrom() Node {

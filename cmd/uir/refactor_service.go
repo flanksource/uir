@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
@@ -31,11 +32,15 @@ type refactorPreview struct {
 }
 
 type refactorApplyResult struct {
-	Applied    bool                   `json:"applied"`
-	Files      []string               `json:"files"`
-	Snapshots  []indexer.ModuleResult `json:"snapshots"`
-	IndexError string                 `json:"index_error,omitempty"`
+	Applied   bool                   `json:"applied"`
+	Files     []string               `json:"files"`
+	Snapshots []indexer.ModuleResult `json:"snapshots"`
+	RunID     string                 `json:"run_id"`
 }
+
+// gopatchTimeout bounds one gopatch run. Gopatch runs detached from the request: a client that goes
+// away must not kill it halfway through rewriting files.
+const gopatchTimeout = 5 * time.Minute
 
 type preparedRefactor struct {
 	args     []string
@@ -74,12 +79,12 @@ func registerRefactorCommands(root *cobra.Command, runtime *commandRuntime) {
 		if _, err := runGopatch(ctx, runtime.GopatchBin, prepared.location, prepared.args, prepared.dsn); err != nil {
 			return refactorApplyResult{}, err
 		}
-		result := refactorApplyResult{Applied: true, Files: prepared.files, Snapshots: []indexer.ModuleResult{}}
-		result.Snapshots, err = reindexRefactorFiles(ctx, runtime, prepared.files)
+		runID, snapshots, err := reindexRefactorFiles(ctx, runtime, prepared.files)
 		if err != nil {
-			result.IndexError = err.Error()
+			return refactorApplyResult{}, entity.NewStatusErrorf(http.StatusInternalServerError, "reindex_failed",
+				"Gopatch applied the refactor to %s, but reindexing failed: %v", strings.Join(prepared.files, ", "), err)
 		}
-		return result, nil
+		return refactorApplyResult{Applied: true, Files: prepared.files, Snapshots: snapshots, RunID: runID}, nil
 	})
 	apply.Short = "Apply a reviewed gopatch rename or move"
 	setModuleRoute(apply, "modules/refactor/apply")
@@ -113,7 +118,11 @@ func prepareRefactor(ctx context.Context, runtime *commandRuntime, options refac
 	if err != nil {
 		return preparedRefactor{}, err
 	}
-	current, err := engine.CheckCurrent(ctx, source.Location, true)
+	includeTests, err := engine.HeadIncludesTests(ctx, source.Location)
+	if err != nil {
+		return preparedRefactor{}, fmt.Errorf("refactor requires a current, fully indexed checkout: %w", err)
+	}
+	current, err := engine.CheckCurrent(ctx, source.Location, includeTests)
 	if err != nil {
 		return preparedRefactor{}, fmt.Errorf("refactor requires a current, fully indexed checkout: %w", err)
 	}
@@ -190,6 +199,8 @@ func runGopatch(ctx context.Context, binary, directory string, args []string, ds
 	if binary == "" {
 		return "", errors.New("gopatch binary is not configured; set serve --gopatch-bin")
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gopatchTimeout)
+	defer cancel()
 	command := exec.CommandContext(ctx, binary, args...)
 	command.Dir = directory
 	output, err := command.Output()
@@ -280,32 +291,47 @@ func refactorDiffFiles(diff, directory string) ([]string, error) {
 	return ordered, nil
 }
 
-func reindexRefactorFiles(ctx context.Context, runtime *commandRuntime, files []string) ([]indexer.ModuleResult, error) {
+// reindexRefactorFiles reindexes, as one run, every registered checkout holding a refactored file,
+// each under the test setting its head was indexed with. The run starts under runContext, so a client
+// that goes away does not stop it, and the apply waits for it under its own context.
+func reindexRefactorFiles(ctx context.Context, runtime *commandRuntime, files []string) (string, []indexer.ModuleResult, error) {
 	database, err := runtime.Database(ctx)
 	if err != nil {
-		return nil, err
+		return "", nil, err
+	}
+	engine, err := indexer.New(database)
+	if err != nil {
+		return "", nil, err
 	}
 	var locations []storage.ModuleLocation
-	if err := database.WithContext(ctx).Find(&locations).Error; err != nil {
-		return nil, fmt.Errorf("list checkout locations after refactor: %w", err)
+	if err := database.WithContext(ctx).Order("canonical_path").Find(&locations).Error; err != nil {
+		return "", nil, fmt.Errorf("list checkout locations after refactor: %w", err)
 	}
-	results := []indexer.ModuleResult{}
-	var failures []error
+	var requests []indexer.ModuleOptions
 	for _, location := range locations {
 		if !locationContainsAny(location.CanonicalPath, files) {
 			continue
 		}
-		indexed, err := indexModules(ctx, database, indexer.ModuleOptions{Path: location.CanonicalPath, ExactLocation: location.CanonicalPath, IncludeTests: true, ExistingOnly: true})
+		includeTests, err := engine.HeadIncludesTests(ctx, location.CanonicalPath)
 		if err != nil {
-			failures = append(failures, fmt.Errorf("reindex checkout %q: %w", location.CanonicalPath, err))
-			continue
+			return "", nil, err
 		}
-		results = append(results, indexed...)
+		requests = append(requests, indexer.ModuleOptions{Path: location.CanonicalPath, ExactLocation: location.CanonicalPath,
+			IncludeTests: includeTests, ExistingOnly: true, Reason: storage.ReasonRefactor})
 	}
-	if len(failures) > 0 {
-		return results, fmt.Errorf("refactor applied; %w", errors.Join(failures...))
+	if len(requests) == 0 {
+		return "", nil, fmt.Errorf("no registered checkout holds the refactored files %s", strings.Join(files, ", "))
 	}
-	return results, nil
+	runCtx, err := runContext(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	run, err := indexer.StartModulesTask(runCtx, engine, requests)
+	if err != nil {
+		return "", nil, err
+	}
+	results, err := run.Wait(ctx)
+	return run.ID(), results, err
 }
 
 func locationContainsAny(root string, files []string) bool {

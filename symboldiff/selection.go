@@ -90,6 +90,20 @@ func (scope rootScope) resolveCommit(ctx context.Context, revision string) (stri
 	return "", fmt.Errorf("revision %q does not resolve in any registered checkout of root %q (%s); pass the full commit hash", revision, scope.root.RootKey, scope.checkoutPaths())
 }
 
+// preferring moves the registered checkout at location to the front, so commits resolve and index
+// from it first.
+func (scope rootScope) preferring(location string) (rootScope, error) {
+	for index, candidate := range scope.locations {
+		if candidate.CanonicalPath != location {
+			continue
+		}
+		ordered := append([]storage.ModuleLocation{candidate}, scope.locations[:index]...)
+		scope.locations = append(ordered, scope.locations[index+1:]...)
+		return scope, nil
+	}
+	return rootScope{}, fmt.Errorf("checkout %q is not registered for root %q (registered: %s)", location, scope.root.RootKey, scope.checkoutPaths())
+}
+
 // checkoutFor returns the first registered checkout, primary first, that contains the commit.
 func (scope rootScope) checkoutFor(ctx context.Context, commit string) (string, error) {
 	for _, location := range scope.locations {

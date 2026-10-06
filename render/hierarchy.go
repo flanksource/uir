@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/api/icons"
 
@@ -15,7 +14,7 @@ import (
 
 func BuildHierarchyTree(u *uir.UIR) api.TreeNode {
 	if u == nil || u.Hierarchy == nil || len(u.Hierarchy.Nodes) == 0 {
-		return &groupNode{label: clicky.Text("(empty hierarchy)"), children: nil}
+		return &groupNode{label: api.Text{Content: "(empty hierarchy)"}, children: nil}
 	}
 
 	nodeByID := make(map[string]uir.HierarchyNode, len(u.Hierarchy.Nodes))
@@ -71,7 +70,7 @@ type hierarchyNodeTree struct {
 }
 
 func (n *hierarchyNodeTree) Pretty() api.Text {
-	label := clicky.Text("")
+	label := api.Text{}
 	switch strings.ToLower(n.node.Kind) {
 	case "company", "sub_company", "product", "plan", "transaction", "segment", "business_rule", "collection", "product_group":
 		label = label.Add(icons.Package).Append(" ")
@@ -86,9 +85,9 @@ func (n *hierarchyNodeTree) Pretty() api.Text {
 	if name == "" {
 		name = n.node.ID
 	}
-	label = label.Append(name, "text-green-600 font-bold")
+	label = label.Append(name, uir.StyleDeclarationName)
 	if n.node.Kind != "" {
-		label = label.Append(" ", "").Append("("+n.node.Kind+")", "text-gray-500")
+		label = label.Append(" ", "").Append("("+n.node.Kind+")", uir.StyleDim)
 	}
 	return label
 }
@@ -116,15 +115,15 @@ func (n *hierarchyNodeTree) GetChildren() []api.TreeNode {
 			continue
 		}
 		children = append(children, hierarchyLeafText(
-			clicky.Text("attach ", "text-gray-500").Append(hierarchySymbolSummary(attachment.SymbolRef), "text-blue-500"),
+			api.Text{Content: "attach ", Style: uir.StyleDim}.Append(hierarchySymbolSummary(attachment.SymbolRef), "text-blue-500"),
 		))
 	}
 
 	for _, edge := range sortedHierarchyEdges(n.node.Children, false) {
 		children = append(children, hierarchyLeafText(
-			clicky.Text("ref ", "text-gray-500").
+			api.Text{Content: "ref ", Style: uir.StyleDim}.
 				Append(hierarchyEdgeLabel(edge), "text-purple-600").
-				Append(" -> ", "text-gray-500").
+				Append(" -> ", uir.StyleDim).
 				Append(hierarchyTargetLabel(edge.TargetID, n.nodeByID), "text-blue-500"),
 		))
 	}
@@ -148,7 +147,7 @@ type attachedSymbolTreeNode struct {
 }
 
 func (n *attachedSymbolTreeNode) Pretty() api.Text {
-	return clicky.Text("attach ", "text-gray-500").
+	return api.Text{Content: "attach ", Style: uir.StyleDim}.
 		Append(n.role, "text-purple-600").
 		Append(" ", "").
 		Add(n.symbol.Pretty())
@@ -171,7 +170,7 @@ func (n *hierarchyLeafNode) GetChildren() []api.TreeNode {
 }
 
 func hierarchyLeaf(text string) api.TreeNode {
-	return &hierarchyLeafNode{label: clicky.Text(text, "text-gray-600")}
+	return &hierarchyLeafNode{label: api.Text{Content: text, Style: uir.StyleSecondary}}
 }
 
 func hierarchyLeafText(text api.Text) api.TreeNode {
@@ -184,7 +183,7 @@ func hierarchyCollapsedLeaf(name string, value any) api.TreeNode {
 		return hierarchyLeaf(name)
 	}
 	return &hierarchyLeafNode{
-		label: clicky.Text("").Add(clicky.Collapsed(name, clicky.Text(string(raw), "text-gray-600"))),
+		label: api.Text{}.Add(api.Collapsed{Label: name, Content: api.Text{Content: string(raw), Style: uir.StyleSecondary}}),
 	}
 }
 
@@ -197,10 +196,10 @@ func hierarchySummaryLabel(graph *uir.HierarchyGraph) api.Text {
 		}
 		attachments += len(node.Attachments)
 	}
-	return clicky.Text("hierarchy", "font-bold").
-		Append(fmt.Sprintf(" nodes=%d", len(graph.Nodes)), "text-gray-600").
-		Append(fmt.Sprintf(" attachments=%d", attachments), "text-gray-600").
-		Append(fmt.Sprintf(" files=%d", len(fileSet)), "text-gray-600")
+	return api.Text{Content: "hierarchy", Style: uir.StyleBold}.
+		Append(fmt.Sprintf(" nodes=%d", len(graph.Nodes)), uir.StyleSecondary).
+		Append(fmt.Sprintf(" attachments=%d", attachments), uir.StyleSecondary).
+		Append(fmt.Sprintf(" files=%d", len(fileSet)), uir.StyleSecondary)
 }
 
 func sortedHierarchyEdges(edges []uir.HierarchyEdge, containment bool) []uir.HierarchyEdge {

@@ -1,38 +1,35 @@
 package indexer
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/flanksource/uir/storage"
-	"golang.org/x/mod/modfile"
 	"gorm.io/gorm"
 )
 
+// RevisionOptions selects one commit of a registered checkout. Reason is historical for a commit
+// indexed on demand, or versioned-dependency for a selected dependency version.
 type RevisionOptions struct {
 	RootKey      string
 	Checkout     string
 	Commit       string
 	Version      string
 	IncludeTests bool
-}
-
-type preparedRevision struct {
-	root     discoveredRoot
-	location storage.ModuleLocation
-	cleanup  func() error
+	Reason       storage.SnapshotReason
 }
 
 // IndexRevision publishes a clean historical snapshot for an already registered module without
-// moving its checkout head or changing the checkout's working tree.
+// moving its checkout head or changing the checkout's working tree. A stored, fully indexed snapshot
+// of a commit without dependencies is reused without extracting; otherwise the commit is extracted,
+// and a stored snapshot identical to the extraction, degraded or not, is reused instead of publishing
+// a duplicate.
 func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptions) (result ModuleResult, err error) {
+	if options.Reason != storage.ReasonHistorical && options.Reason != storage.ReasonVersionedDependency {
+		return result, fmt.Errorf("index revision %s of %q: reason %q is not historical or versioned-dependency", options.Commit, options.RootKey, options.Reason)
+	}
 	prepared, err := indexer.prepareRevision(ctx, options)
 	if err != nil {
 		return result, err
@@ -44,146 +41,76 @@ func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptio
 		return result, err
 	}
 	root = selectedRoots[0]
-	if len(root.Dependencies) == 0 {
-		var existing storage.ModuleSnapshot
-		query := indexer.database.WithContext(ctx).Where("root_id = ? AND revision = ? AND configuration_hash = ? AND worktree_state = ? AND dependency_set_hash IS NOT NULL",
-			location.RootID, root.GitCommit, root.ConfigurationHash, storage.WorktreeClean)
-		if options.Version != "" {
-			query = query.Where("module_version = ?", options.Version)
-		}
-		err = query.Order("completed_at DESC").Take(&existing).Error
-		if err == nil {
-			return ModuleResult{RootKey: options.RootKey, Location: options.Checkout, SnapshotID: existing.ID.String(), Unchanged: true}, nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return result, fmt.Errorf("load clean snapshot of %s: %w", root.GitCommit, err)
-		}
+	if existing, found, err := indexer.reusableRevision(ctx, location, root); err != nil || found {
+		return revisionResult(options, existing), err
 	}
-	return indexer.publishRevision(ctx, root, location, options.IncludeTests)
-}
-
-func (indexer *Indexer) prepareRevision(ctx context.Context, options RevisionOptions) (prepared preparedRevision, err error) {
-	if indexer == nil || indexer.database == nil {
-		return prepared, errors.New("UIR index database is required")
-	}
-	var location storage.ModuleLocation
-	if err = indexer.database.WithContext(ctx).Table("locations AS location").Select("location.*").
-		Joins("JOIN modules AS root ON root.id = location.root_id").
-		Where("root.root_key = ? AND location.canonical_path = ?", options.RootKey, options.Checkout).Take(&location).Error; err != nil {
-		return prepared, fmt.Errorf("load registered checkout %q of %q: %w", options.Checkout, options.RootKey, err)
-	}
-	top, err := revisionGit(ctx, options.Checkout, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return prepared, err
-	}
-	commit, err := revisionGit(ctx, options.Checkout, "rev-parse", "--verify", "--quiet", "--end-of-options", options.Commit+"^{commit}")
-	if err != nil {
-		return prepared, err
-	}
-	relative, err := filepath.Rel(top, options.Checkout)
-	if err != nil {
-		return prepared, fmt.Errorf("locate module within checkout: %w", err)
-	}
-	worktree, cleanup, err := revisionWorktree(ctx, top, commit)
-	if err != nil {
-		return prepared, err
-	}
-	defer func() {
-		if err != nil {
-			err = errors.Join(err, cleanup())
-		}
-	}()
-	modulePath, err := filepath.EvalSymlinks(filepath.Join(worktree, relative))
-	if err != nil {
-		return prepared, fmt.Errorf("canonicalize historical module at %q: %w", relative, err)
-	}
-	roots, err := discoverModules(ctx, modulePath, options.IncludeTests)
-	if err != nil {
-		return prepared, err
-	}
-	for _, root := range roots {
-		if root.LocalPath == modulePath && root.RootKey == options.RootKey {
-			root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.GitCommit, root.Files)
-			if err != nil {
-				return prepared, err
-			}
-			if root.WorktreeState != storage.WorktreeClean {
-				return prepared, fmt.Errorf("historical worktree of %s is %s", commit, root.WorktreeState)
-			}
-			root.Revision = root.GitCommit
-			root.Historical = true
-			root.ModuleVersion = options.Version
-			environment, envErr := readGoEnvironmentWithWork(ctx, root.LocalPath, true)
-			if envErr != nil {
-				return prepared, envErr
-			}
-			root.Variant = environment.Variant
-			root.Variant.GoWorkOff = true
-			root.WorkFile = ""
-			root.ModFile, err = historicalModfile(root.LocalPath)
-			if err != nil {
-				return prepared, err
-			}
-			manifests, manifestErr := readManifests(root.LocalPath, "")
-			if manifestErr != nil {
-				return prepared, manifestErr
-			}
-			root.ContentSetHash = contentSetHash(root.Files, manifests)
-			root.ConfigurationHash = configurationHash(options.IncludeTests, root.Variant)
-			root.Dependencies, err = readDependencies(ctx, root)
-			if err != nil {
-				return prepared, err
-			}
-			return preparedRevision{root: root, location: location, cleanup: cleanup}, nil
-		}
-	}
-	return prepared, fmt.Errorf("revision %s has no module %q at %q", commit, options.RootKey, relative)
-}
-
-func historicalModfile(directory string) (string, error) {
-	path := filepath.Join(directory, "go.mod")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read historical go.mod: %w", err)
-	}
-	manifest, err := modfile.Parse(path, content, nil)
-	if err != nil {
-		return "", fmt.Errorf("parse historical go.mod: %w", err)
-	}
-	for _, replacement := range append([]*modfile.Replace(nil), manifest.Replace...) {
-		if replacement.New.Version == "" {
-			if err := manifest.DropReplace(replacement.Old.Path, replacement.Old.Version); err != nil {
-				return "", fmt.Errorf("remove historical local replacement %q: %w", replacement.Old.Path, err)
-			}
-		}
-	}
-	formatted, err := manifest.Format()
-	if err != nil {
-		return "", fmt.Errorf("format historical go.mod: %w", err)
-	}
-	scratch := filepath.Join(directory, ".tmp")
-	if err := os.MkdirAll(scratch, 0o755); err != nil {
-		return "", fmt.Errorf("create historical module scratch: %w", err)
-	}
-	alternate := filepath.Join(scratch, "uir-historical.mod")
-	if err := os.WriteFile(alternate, formatted, 0o644); err != nil {
-		return "", fmt.Errorf("write historical module manifest: %w", err)
-	}
-	if sums, err := os.ReadFile(filepath.Join(directory, "go.sum")); err == nil {
-		if err := os.WriteFile(filepath.Join(scratch, "uir-historical.sum"), sums, 0o644); err != nil {
-			return "", fmt.Errorf("write historical module sums: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("read historical module sums: %w", err)
-	}
-	return alternate, nil
-}
-
-func (indexer *Indexer) publishRevision(ctx context.Context, root discoveredRoot, location storage.ModuleLocation, includeTests bool) (result ModuleResult, err error) {
-	extraction, err := extractModule(ctx, indexer.loadPackages, root, includeTests)
+	extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
 	if err != nil {
 		return result, fmt.Errorf("extract historical module %q: %w", root.RootKey, err)
 	}
+	identical, found, err := indexer.storedRevision(ctx, location, root, &extraction)
+	if err != nil || found {
+		return revisionResult(options, identical), err
+	}
+	return indexer.publishRevision(ctx, location, extraction, options.Reason)
+}
+
+// ReusableRevision is the stored snapshot IndexRevision would reuse for options without extracting,
+// found by checking the commit out and discovering its module, which indexes nothing. A caller that
+// finds one needs no index run.
+func (indexer *Indexer) ReusableRevision(ctx context.Context, options RevisionOptions) (result ModuleResult, found bool, err error) {
+	prepared, err := indexer.prepareRevision(ctx, options)
+	if err != nil {
+		return result, false, err
+	}
+	defer func() { err = errors.Join(err, prepared.cleanup()) }()
+	existing, found, err := indexer.reusableRevision(ctx, prepared.location, prepared.root)
+	if err != nil || !found {
+		return result, false, err
+	}
+	return revisionResult(options, existing), true, nil
+}
+
+// reusableRevision is the fully indexed stored snapshot of a commit without dependencies. A commit
+// with dependencies is never reused without extracting.
+func (indexer *Indexer) reusableRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot) (storage.ModuleSnapshot, bool, error) {
+	if len(root.Dependencies) != 0 {
+		return storage.ModuleSnapshot{}, false, nil
+	}
+	return indexer.storedRevision(ctx, location, root, nil)
+}
+
+func revisionResult(options RevisionOptions, snapshot storage.ModuleSnapshot) ModuleResult {
+	return ModuleResult{RootKey: options.RootKey, Location: options.Checkout, SnapshotID: snapshot.ID.String(), Unchanged: true}
+}
+
+// storedRevision is the newest clean snapshot of root's commit under its configuration and dependency
+// set (and version, when it has one). Without an extraction only a fully indexed snapshot qualifies;
+// with one, the snapshot must have the extraction's context hash and coverage.
+func (indexer *Indexer) storedRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (storage.ModuleSnapshot, bool, error) {
+	query := indexer.database.WithContext(ctx).Where("root_id = ? AND revision = ? AND configuration_hash = ? AND worktree_state = ? AND dependency_set_hash = ?",
+		location.RootID, root.GitCommit, root.ConfigurationHash, storage.WorktreeClean, dependencyHash(root.Dependencies))
+	if root.ModuleVersion != "" {
+		query = query.Where("module_version = ?", root.ModuleVersion)
+	}
+	if extraction == nil {
+		query = query.Where("coverage = ?", storage.CoverageIndexed)
+	} else {
+		query = query.Where("context_hash = ? AND coverage = ?", extraction.contextHash, extraction.coverage)
+	}
+	var existing storage.ModuleSnapshot
+	err := query.Order("completed_at DESC").Take(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return storage.ModuleSnapshot{}, false, nil
+	}
+	if err != nil {
+		return storage.ModuleSnapshot{}, false, fmt.Errorf("load clean snapshot of %s: %w", root.GitCommit, err)
+	}
+	return existing, true, nil
+}
+
+func (indexer *Indexer) publishRevision(ctx context.Context, location storage.ModuleLocation, extraction moduleExtraction, reason storage.SnapshotReason) (result ModuleResult, err error) {
+	root := extraction.root
 	err = storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
 		var stored storage.ModuleRoot
 		if loadErr := transaction.Where("id = ?", location.RootID).Take(&stored).Error; loadErr != nil {
@@ -195,7 +122,7 @@ func (indexer *Indexer) publishRevision(ctx context.Context, root discoveredRoot
 		}
 		result = ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(root.Files)}
 		snapshot, publishErr := publishSnapshot(ctx, transaction, snapshotPublication{
-			root: stored, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(), preserveHead: true,
+			root: stored, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(), reason: reason, preserveHead: true,
 		}, &result)
 		if publishErr != nil {
 			return publishErr
@@ -204,36 +131,4 @@ func (indexer *Indexer) publishRevision(ctx context.Context, root discoveredRoot
 		return nil
 	})
 	return result, err
-}
-
-func revisionWorktree(ctx context.Context, top, commit string) (string, func() error, error) {
-	scratch := filepath.Join(top, ".tmp")
-	if err := os.MkdirAll(scratch, 0o755); err != nil {
-		return "", nil, fmt.Errorf("create historical snapshot scratch directory: %w", err)
-	}
-	path, err := os.MkdirTemp(scratch, "uir-revision-")
-	if err != nil {
-		return "", nil, fmt.Errorf("create historical snapshot worktree: %w", err)
-	}
-	if _, err := revisionGit(ctx, top, "worktree", "add", "--detach", path, commit); err != nil {
-		return "", nil, errors.Join(err, os.Remove(path))
-	}
-	return path, func() error {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		// This private worktree contains generated historical manifests and sums.
-		_, err := revisionGit(cleanupCtx, top, "worktree", "remove", "--force", path)
-		return err
-	}, nil
-}
-
-func revisionGit(ctx context.Context, directory string, args ...string) (string, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s in %q: %w: %s", strings.Join(args, " "), directory, err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(string(output)), nil
 }
