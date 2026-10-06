@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/flanksource/uir"
@@ -46,10 +47,13 @@ type Schema struct {
 	Ref                  string             `json:"$ref,omitempty"`
 	Const                string             `json:"const,omitempty"`
 	Enum                 []string           `json:"enum,omitempty"`
+	Pattern              string             `json:"pattern,omitempty"`
+	Not                  *Schema            `json:"not,omitempty"`
 	OneOf                []*Schema          `json:"oneOf,omitempty"`
 	AnyOf                []*Schema          `json:"anyOf,omitempty"`
 	Items                *Schema            `json:"items,omitempty"`
 	Properties           map[string]*Schema `json:"properties,omitempty"`
+	Required             []string           `json:"required,omitempty"`
 	AdditionalProperties any                `json:"additionalProperties,omitempty"`
 	Defs                 map[string]*Schema `json:"$defs,omitempty"`
 }
@@ -149,19 +153,15 @@ type unionMember struct {
 // so a member need not declare it as a field: node_kind never is one, and a
 // ScopedVariableRef has no statementBase to carry statement_type.
 //
-// The choice is anyOf rather than oneOf because the discriminator is optional:
-// a node nested in a UIR document through a concrete field carries no node_kind,
-// and since every other property is optional too, such a node matches several
-// branches at once. oneOf demands exactly one match and would reject it — anyOf
-// says what is actually true, that the node is shaped like one of the registered
-// kinds.
+// Concrete fields do not require a tag. Each polymorphic branch has its own
+// definition requiring the registry's tag, making the oneOf choices disjoint.
 //
 // A registry that accepts refinements stamps a refined kind under refinement
 // beside the discriminator, so every member declares that field too.
 func (g *generator) union(key, refinement string, members []unionMember) (*Schema, error) {
 	refs := make([]*Schema, 0, len(members))
 	for _, member := range members {
-		r, err := g.define(member.typ)
+		_, err := g.define(member.typ)
 		if err != nil {
 			return nil, err
 		}
@@ -181,14 +181,22 @@ func (g *generator) union(key, refinement string, members []unionMember) (*Schem
 			if _, declared := def.Properties[refinement]; declared {
 				return nil, fmt.Errorf("%s declares %s, which its registry stamps itself", member.typ.Name(), refinement)
 			}
-			def.Properties[refinement] = &Schema{
-				Description: fmt.Sprintf("The statement's type when it is refined past the kind under %s — a refinement below it in the ':'-hierarchy (call:package refines call), or one the kind accepts from outside it.", key),
-				Type:        "string",
-			}
+			def.Properties[refinement] = refinementSchema(member.value)
+			def.Properties[refinement].Description = fmt.Sprintf("The statement's type when it is refined past the kind under %s, restricted to refinements its registry accepts.", key)
 		}
-		refs = append(refs, r)
+		name := "Node" + member.typ.Name()
+		if key == statementDiscriminator {
+			name = "Statement" + member.typ.Name()
+		}
+		if _, exists := g.defs[name]; exists {
+			return nil, fmt.Errorf("polymorphic definition %s already exists", name)
+		}
+		variant := *def
+		variant.Required = append(slices.Clone(def.Required), key)
+		g.defs[name] = &variant
+		refs = append(refs, ref(name))
 	}
-	return &Schema{AnyOf: refs}, nil
+	return &Schema{OneOf: refs}, nil
 }
 
 // define registers t under its own name and returns a reference to it. The
@@ -220,7 +228,15 @@ func (g *generator) define(t reflect.Type) (*Schema, error) {
 // invalid rather than passing silently.
 func (g *generator) object(t reflect.Type) (*Schema, error) {
 	properties := map[string]*Schema{}
+	var required []string
 	for _, f := range jsonFields(t) {
+		if tag, shadowed := g.src.wireTags[t.Name()][f.GoName]; shadowed {
+			name, options, _ := strings.Cut(tag, ",")
+			if name != "" {
+				f.Name = name
+			}
+			f.OmitEmpty = hasOption(options, "omitempty")
+		}
 		property, err := g.schemaFor(f.Type)
 		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", t.Name(), f.GoName, err)
@@ -237,9 +253,12 @@ func (g *generator) object(t reflect.Type) (*Schema, error) {
 			property.Description = doc
 		}
 		properties[f.Name] = property
+		if !f.OmitEmpty {
+			required = append(required, f.Name)
+		}
 	}
 
-	schema := &Schema{Type: "object", AdditionalProperties: false}
+	schema := &Schema{Type: "object", AdditionalProperties: false, Required: required}
 	if len(properties) > 0 {
 		schema.Properties = properties
 	}

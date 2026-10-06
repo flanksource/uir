@@ -11,6 +11,8 @@ RUN pnpm run build
 
 FROM golang:1.26.1-bookworm AS build
 ENV GOWORK=off
+ARG TASK_VERSION=3.50.0
+RUN go install "github.com/go-task/task/v3/cmd/task@v${TASK_VERSION}"
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

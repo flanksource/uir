@@ -1,0 +1,18 @@
+{
+  "name": "@flanksource/uir",
+  "version": "1.0.0",
+  "description": "Generated UIR wire types and schema validation",
+  "type": "commonjs",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./schema": "./uir.schema.json"
+  },
+  "files": ["dist", "uir.schema.json", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": { "ajv": "8.17.1", "ajv-formats": "3.0.1" },
+  "devDependencies": { "typescript": "5.9.3", "vitest": "3.2.4" }
+}

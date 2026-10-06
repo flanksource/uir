@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "declaration": true,
+    "resolveJsonModule": true,
+    "outDir": "dist",
+    "types": []
+  },
+  "include": ["index.ts", "model.d.ts"]
+}
