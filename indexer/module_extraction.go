@@ -64,7 +64,11 @@ type extractedPosting struct {
 // extractModule type-checks the root, hashes each package's inputs, and renders every document.
 func extractModule(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (moduleExtraction, error) {
 	startedAt := time.Now().UTC()
-	load, err := loadTyped(ctx, loadPackages, root, includeTests)
+	var load typedLoad
+	err := Phase(ctx, "typecheck", func(ctx context.Context) (err error) {
+		load, err = loadTyped(ctx, loadPackages, root, includeTests)
+		return err
+	})
 	if err != nil {
 		var loadFailure packageLoadError
 		if !root.Historical || !errors.As(err, &loadFailure) || ctx.Err() != nil || !sourceResolutionFailure(err) {
@@ -78,8 +82,19 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 			load.directories[filepath.Dir(file.AbsolutePath)] = true
 		}
 	}
+	var extraction moduleExtraction
+	err = Phase(ctx, "extract", func(context.Context) (err error) {
+		extraction, err = extractTypedLoad(&load, startedAt)
+		return err
+	})
+	return extraction, err
+}
+
+// extractTypedLoad hashes each package's inputs of a type-checked root and renders every document.
+func extractTypedLoad(load *typedLoad, startedAt time.Time) (moduleExtraction, error) {
+	root := load.root
 	resolver := newSymbolResolver(load.origins)
-	shapes, builder := newExportShapes(resolver, &load), newDocumentBuilder(resolver)
+	shapes, builder := newExportShapes(resolver, load), newDocumentBuilder(resolver)
 	grouped := map[string][]discoveredFile{}
 	for _, file := range root.Files {
 		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
@@ -88,7 +103,7 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 	inputHashes := map[string]string{}
 	var coverages []storage.Coverage
 	for _, packagePath := range sortedKeys(grouped) {
-		extracted, err := extractPackage(&load, shapes, builder, &extraction, packagePath, grouped[packagePath])
+		extracted, err := extractPackage(load, shapes, builder, &extraction, packagePath, grouped[packagePath])
 		if err != nil {
 			return moduleExtraction{}, fmt.Errorf("extract package %q: %w", packagePath, err)
 		}
@@ -99,6 +114,7 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 	extraction.symbols = resolver.rows
 	extraction.contextHash = contextHash(root.ConfigurationHash, inputHashes)
 	extraction.coverage = weakestCoverage(coverages)
+	var err error
 	if extraction.diagnostics, err = snapshotDiagnostics(extraction.packages); err != nil {
 		return moduleExtraction{}, err
 	}

@@ -18,12 +18,15 @@ import (
 )
 
 // reusableHead is the location's head snapshot when the root can be reported unchanged without
-// type-checking: the head's revision, content set (sources and manifests) and configuration equal
-// the discovered root's, and no file imports a module the toolchain loads from another directory.
-// Under those conditions every package's input hash, and so the context hash, is unchanged by
-// construction: sources, dependency versions and toolchain are fixed, standard-library and
-// module-cache export shapes are functions of them, and the root's own packages' shapes recurse only
-// through those. A workspace sibling's export shape is not recorded against the snapshots that
+// type-checking: the head's revision, content set (sources and manifests), configuration and
+// dependency set equal the discovered root's, and no file imports a module the toolchain loads from
+// another directory. The root's dependencies must already be resolved to their target snapshots, as
+// IndexModules does before extracting, because the dependency set hash covers those targets: a
+// dependency with a new snapshot makes the root publish again, to link it, even when the root's own
+// sources are unchanged. Under those conditions every package's input hash, and so the context hash,
+// is unchanged by construction: sources, dependency versions and toolchain are fixed, standard-library
+// and module-cache export shapes are functions of them, and the root's own packages' shapes recurse
+// only through those. A workspace sibling's export shape is not recorded against the snapshots that
 // consumed it, so a root importing one is always type-checked and compared by context hash.
 func reusableHead(ctx context.Context, database *gorm.DB, root discoveredRoot, force bool) (uuid.UUID, bool, error) {
 	if force {
@@ -33,7 +36,8 @@ func reusableHead(ctx context.Context, database *gorm.DB, root discoveredRoot, f
 	if err != nil || !found {
 		return uuid.Nil, false, err
 	}
-	if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash || head.DependencySetHash == nil || len(root.Dependencies) > 0 {
+	if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash ||
+		head.DependencySetHash == nil || *head.DependencySetHash != dependencyHash(root.Dependencies) {
 		return uuid.Nil, false, nil
 	}
 	siblings, err := workspaceSiblingImports(root)
