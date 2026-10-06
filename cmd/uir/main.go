@@ -36,6 +36,10 @@ type commandRuntime struct {
 	DSN        string
 	Schema     string
 	GopatchBin string
+	CPUProfile string
+	MemProfile string
+	Trace      string
+	profiles   profileFiles
 	database   *gorm.DB
 	owned      bool
 	// taskRuns is the clicky run store installed while the database is open, so every run this
@@ -65,6 +69,8 @@ func execute() int {
 
 func run(ctx context.Context, args []string) (returnErr error) {
 	runtime := &commandRuntime{}
+	// Profiles stop last, so they cover shutdown and closing the database.
+	defer func() { returnErr = errors.Join(returnErr, runtime.stopProfiles()) }()
 	defer func() { returnErr = errors.Join(returnErr, runtime.Close()) }()
 	defer shutdown.Shutdown()
 	root := newRootCommand(runtime)
@@ -81,6 +87,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path (default $"+dsnEnv+", then ~/.config/uir/uir.db)")
 	root.PersistentFlags().StringVar(&runtime.Schema, "schema", "", "PostgreSQL schema (default $"+schemaEnv+")")
+	bindProfileFlags(root, runtime)
 	properties.BindFlags(root.PersistentFlags())
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
 	clicky.GenerateCLI(root)

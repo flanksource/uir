@@ -114,8 +114,11 @@ func startModuleIndex(ctx context.Context, start func(context.Context, *indexer.
 	if err != nil {
 		return moduleIndexRun{}, err
 	}
-	database, err := runtime.Database(ctx)
-	if err != nil {
+	var database *gorm.DB
+	if err := indexer.Phase(ctx, "db-open", func(ctx context.Context) (err error) {
+		database, err = runtime.Database(ctx)
+		return err
+	}); err != nil {
 		return moduleIndexRun{}, err
 	}
 	engine, err := indexer.New(database)
