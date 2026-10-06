@@ -145,9 +145,10 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 		}, clickytask.WithContext(ctx), noTaskRetries)
 		return run, nil
 	}
+	memo := newRunMemo()
 	for _, target := range spec.targets {
 		module := group.Add(target.rootKey, func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
-			indexCtx := context.WithValue(WithTaskRunID(taskContext, run.ID()), runGroupKey{}, group.Group)
+			indexCtx := withRunMemo(context.WithValue(WithTaskRunID(taskContext, run.ID()), runGroupKey{}, group.Group), memo)
 			results, err := indexer.indexTarget(indexCtx, target.options, progress.Warnf)
 			if refreshErr := published.refresh(context.WithoutCancel(taskContext), indexer, run.ID()); refreshErr != nil {
 				err = errors.Join(err, refreshErr)
@@ -217,8 +218,11 @@ func waitForRun(ctx context.Context, group *clickytask.Group) error {
 }
 
 // indexTarget indexes one module checkout, again while its inputs change under it, up to
-// indexAttempts times in all; any other outcome is returned at once.
+// indexAttempts times in all; any other outcome is returned at once. An attempt whose inputs changed
+// makes the run forget everything it remembered, so the next attempt indexes every dependency whose
+// inputs changed again instead of reusing its stale snapshot.
 func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions, warn func(string, ...any)) ([]ModuleResult, error) {
+	ctx, memo := ensureRunMemo(ctx)
 	for attempt := 1; ; attempt++ {
 		results, err := indexer.IndexModules(ctx, options)
 		if !errors.Is(err, ErrIndexInputsChanged) {
@@ -227,6 +231,7 @@ func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions, 
 		if attempt == indexAttempts {
 			return nil, fmt.Errorf("index inputs changed in %d consecutive attempts: %w", indexAttempts, err)
 		}
+		memo.forget()
 		warn("attempt %d: %v; indexing again", attempt, err)
 	}
 }

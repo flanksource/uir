@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/flanksource/uir/storage"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -39,6 +40,9 @@ type ModuleResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+// IndexModules indexes the modules options selects, and the local and versioned dependencies they
+// need first. Every location it publishes or confirms is remembered in the run's memo, which it starts
+// when ctx belongs to no run, so a later module of the run that depends on one reuses its snapshot.
 func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions) ([]ModuleResult, error) {
 	if indexer == nil || indexer.database == nil {
 		return nil, errors.New("UIR index database is required")
@@ -46,8 +50,21 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 	if !headReasons[options.Reason] {
 		return nil, fmt.Errorf("index modules under %q: reason %q is not one of add, reindex, refactor, local-dependency", options.Path, options.Reason)
 	}
-	roots, err := discoverRequestedModules(ctx, options)
+	ctx, memo := ensureRunMemo(ctx)
+	results, err := indexer.indexModules(ctx, options)
 	if err != nil {
+		return nil, err
+	}
+	memo.rememberModules(results, options.IncludeTests)
+	return results, nil
+}
+
+func (indexer *Indexer) indexModules(ctx context.Context, options ModuleOptions) ([]ModuleResult, error) {
+	var roots []discoveredRoot
+	if err := Phase(ctx, "discover", func(ctx context.Context) (err error) {
+		roots, err = discoverRequestedModules(ctx, options)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	if options.ExistingOnly {
@@ -57,32 +74,65 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 			}
 		}
 	}
+	var graph localDependencyGraph
+	var cyclic bool
+	if err := Phase(ctx, "dependencies", func(ctx context.Context) (err error) {
+		graph, cyclic, err = readModuleDependencies(ctx, roots, options.IncludeTests)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	if cyclic {
+		return indexer.indexLocalCycleGraph(ctx, graph, len(roots), options)
+	}
+	ctx = withActivePaths(ctx, roots)
+	if err := Phase(ctx, "local-deps", func(ctx context.Context) error {
+		return indexer.indexLocalDependencies(ctx, roots, options.IncludeTests)
+	}); err != nil {
+		return nil, err
+	}
+	if err := Phase(ctx, "versioned-deps", func(ctx context.Context) error {
+		return indexer.indexVersionedDependencies(ctx, roots, options.IncludeTests)
+	}); err != nil {
+		return nil, err
+	}
+	extractions, err := indexer.extractModules(ctx, roots, options)
+	if err != nil {
+		return nil, err
+	}
+	return indexer.publishModules(ctx, roots, extractions, options)
+}
+
+// readModuleDependencies reads every root's dependencies and, unless an enclosing IndexModules is
+// already indexing local dependencies, discovers their local dependency graph and whether it is cyclic.
+func readModuleDependencies(ctx context.Context, roots []discoveredRoot, includeTests bool) (localDependencyGraph, bool, error) {
+	var err error
 	for i := range roots {
 		roots[i].Dependencies, err = readDependencies(ctx, roots[i])
 		if err != nil {
-			return nil, fmt.Errorf("read dependencies of module %q: %w", roots[i].RootKey, err)
+			return localDependencyGraph{}, false, fmt.Errorf("read dependencies of module %q: %w", roots[i].RootKey, err)
 		}
 	}
-	if ctx.Value(activeModulePaths{}) == nil {
-		graph, err := discoverLocalDependencyGraph(ctx, roots, options.IncludeTests)
-		if err != nil {
-			return nil, err
-		}
-		if graph.cyclic() {
-			return indexer.indexLocalCycleGraph(ctx, graph, len(roots), options)
-		}
+	if ctx.Value(activeModulePaths{}) != nil {
+		return localDependencyGraph{}, false, nil
 	}
-	ctx = withActivePaths(ctx, roots)
-	if err := indexer.indexLocalDependencies(ctx, roots, options.IncludeTests); err != nil {
-		return nil, err
+	graph, err := discoverLocalDependencyGraph(ctx, roots, includeTests)
+	if err != nil {
+		return localDependencyGraph{}, false, err
 	}
-	if err := indexer.indexVersionedDependencies(ctx, roots, options.IncludeTests); err != nil {
-		return nil, err
-	}
+	return graph, graph.cyclic(), nil
+}
+
+// extractModules extracts every root whose head snapshot is not reusable.
+func (indexer *Indexer) extractModules(ctx context.Context, roots []discoveredRoot, options ModuleOptions) ([]moduleExtraction, error) {
 	extractions := make([]moduleExtraction, 0, len(roots))
 	for _, root := range roots {
-		head, reusable, err := reusableHead(ctx, indexer.database, root, options.Force)
-		if err != nil {
+		var head uuid.UUID
+		var reusable bool
+		if err := Phase(ctx, "unchanged-check", func(ctx context.Context) (err error) {
+			head, reusable, err = reusableHead(ctx, indexer.database, root, options.Force)
+			return err
+		}); err != nil {
 			return nil, fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, err)
 		}
 		if reusable {
@@ -95,9 +145,17 @@ func (indexer *Indexer) IndexModules(ctx context.Context, options ModuleOptions)
 		}
 		extractions = append(extractions, extraction)
 	}
+	return extractions, nil
+}
+
+// publishModules publishes every extraction in one transaction, after verifying the inputs it was
+// extracted from are still current.
+func (indexer *Indexer) publishModules(ctx context.Context, roots []discoveredRoot, extractions []moduleExtraction, options ModuleOptions) ([]ModuleResult, error) {
 	var results []ModuleResult
-	err = storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
-		if err := verifyIndexInputs(ctx, transaction, roots, options.IncludeTests); err != nil {
+	err := storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
+		if err := Phase(ctx, "verify-inputs", func(ctx context.Context) error {
+			return verifyIndexInputs(ctx, transaction, roots, options.IncludeTests)
+		}); err != nil {
 			return err
 		}
 		results = make([]ModuleResult, 0, len(roots))

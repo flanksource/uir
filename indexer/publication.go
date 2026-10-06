@@ -87,17 +87,22 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	}
 	previous := map[string]storage.SourceRevision{}
 	if publication.base.snapshot.ID != uuid.Nil {
-		var err error
-		if previous, err = storage.EffectiveSources(ctx, database, publication.base.snapshot.ID); err != nil {
+		if err := Phase(ctx, "effective-sources", func(ctx context.Context) (err error) {
+			previous, err = storage.EffectiveSources(ctx, database, publication.base.snapshot.ID)
+			return err
+		}); err != nil {
 			return storage.ModuleSnapshot{}, err
 		}
 	}
-	current, err := sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, previous)
-	if err != nil {
-		return storage.ModuleSnapshot{}, err
-	}
-	handles, err := publishDocuments(ctx, database, publication, current, result)
-	if err != nil {
+	var current map[string]storage.SourceRevision
+	var handles map[string]int64
+	if err := Phase(ctx, "documents", func(ctx context.Context) (err error) {
+		if current, err = sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, previous); err != nil {
+			return err
+		}
+		handles, err = publishDocuments(ctx, database, publication, current, result)
+		return err
+	}); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	snapshot := publication.snapshot()
@@ -108,26 +113,52 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err := publishBlobsAndEdges(ctx, database, publication, snapshot); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if err := createSourceDeltas(ctx, database, snapshot, previous, current); err != nil {
-		return storage.ModuleSnapshot{}, err
-	}
-	if err := createPackageCoverage(ctx, database, snapshot, publication.extraction.packages); err != nil {
-		return storage.ModuleSnapshot{}, err
-	}
-	if err := createSymbolDeltas(ctx, database, snapshot, publication, previous, handles); err != nil {
-		return storage.ModuleSnapshot{}, err
-	}
-	if _, err := storage.RecordSnapshotStats(ctx, database, snapshot.ID); err != nil {
+	if err := publishSnapshotRows(ctx, database, publication, snapshot, previous, current, handles); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	if publication.preserveHead {
 		result.HeadVersion = publication.base.head.Version
-	} else {
-		if result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot); err != nil {
-			return storage.ModuleSnapshot{}, err
-		}
+		return snapshot, nil
+	}
+	if err := Phase(ctx, "advance-head", func(ctx context.Context) (err error) {
+		result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot)
+		return err
+	}); err != nil {
+		return storage.ModuleSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// publishSnapshotRows writes the rows a created snapshot derives from its sources and symbols: its
+// source deltas, package coverage, symbol deltas, and stats.
+func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot, previous, current map[string]storage.SourceRevision, handles map[string]int64) error {
+	if err := Phase(ctx, "source-deltas", func(ctx context.Context) error {
+		return createSourceDeltas(ctx, database, snapshot, previous, current)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "package-coverage", func(ctx context.Context) error {
+		return createPackageCoverage(ctx, database, snapshot, publication.extraction.packages)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "symbol-deltas", func(ctx context.Context) error {
+		return createSymbolDeltas(ctx, database, snapshot, publication, previous, handles)
+	}); err != nil {
+		return err
+	}
+	return Phase(ctx, "snapshot-stats", func(ctx context.Context) error {
+		files := make(map[string]storage.SnapshotFile, len(current))
+		for path, revision := range current {
+			extracted, found := publication.extraction.documents[path]
+			if !found {
+				return fmt.Errorf("stats of snapshot %s: no document was extracted for %q", snapshot.ID, path)
+			}
+			files[path] = storage.SnapshotFile{Source: revision, SymbolCount: extracted.symbolCount, OccurrenceCount: extracted.occurrenceCount}
+		}
+		_, err := storage.RecordSnapshotStats(ctx, database, snapshot.ID, storage.SnapshotStatsOptions{Base: previous, Files: files})
+		return err
+	})
 }
 
 // publishBlobsAndEdges stores the bytes of a snapshot that is not a clean commit, and its dependency
