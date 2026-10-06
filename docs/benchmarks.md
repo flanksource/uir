@@ -300,9 +300,77 @@ A larger lever on history growth is the package-granular input hash the design a
 
 Do not add `head_documents`. The measured derivation per head is 1 ms of CTE plus one batched document lookup, and a two-head query costs about what a one-head query does within host noise. The per-head cost that does exist is `storage.ActiveDocuments` selecting `documents.*`, content included, for every active path: 15 MB for commons, and for uir about 111 × 145 KB ≈ 16 MB per head. Queries then decode only the few documents a posting selected. The proposed fix is a storage change: select everything but `content` in the membership lookup and load `content` only for the documents a posting or diff selects. It helps `query` and `symboldiff` alike. The head table would not remove that read, because it too would have to fetch `content` to answer anything.
 
+## `reindex --all` on a real database (2026-10-06)
+
+**Setup.** A copy of `~/.config/uir/uir.db`: SQLite, 694 MB, 27 snapshots, 4,518 documents, 80,145 symbol deltas. Two registered locations had no head: `clicky/examples/enitity` and `commons-db/cmd/query`, both nested modules. Commands: `bash fixtures/bench/reindex-all.sh cold 1`, which runs `uir reindex --all --cpuprofile --memprofile --trace`, then `go tool pprof -tags`, and `go run ./hack/tracephases` for the wall time of each `indexer.Phase` region.
+
+**Result.**
+- **Time:** 9 m 35 s wall and 1,269 s of CPU (2.2 cores) for 2 targets.
+- **Allocation:** 423 GB allocated in total.
+- **Failure:** `commons-db/cmd/query` failed with `package ".../cmd/query/recordresults" is not part of the loaded package graph` (`hack/docs-tutorial/main.go`).
+- **Database growth:** the copy grew to 1.02 GB. The run published 14 snapshots, mostly `versioned-dependency` revisions of commons, clicky, aichat, commons-db and captain.
+
+| Phase | Regions | Wall, inclusive | Wall, exclusive | CPU |
+| --- | ---: | ---: | ---: | ---: |
+| typecheck (`loadTyped`) | 132 | 4 m 25 s | 4 m 25 s | 803 s |
+| versioned-deps | 24 | 4 m 51 s | 1 m 48 s | 10 s |
+| extract | 132 | 1 m 41 s | 1 m 41 s | 92 s |
+| documents | 14 | 21.7 s | 21.7 s | 13.5 s |
+| verify-inputs | 23 | 9.9 s | 9.9 s | 1.1 s |
+| dependencies | 26 | 7.9 s | 7.9 s | 1.4 s |
+| snapshot-stats | 14 | 6.7 s | 6.7 s | 1.3 s |
+| symbol-deltas | 14 | 6.2 s | 6.2 s | 3.8 s |
+| discover | 26 | 2.3 s | 2.3 s | 0.3 s |
+| effective-sources | 12 | 0.14 s | 0.14 s | 0.08 s |
+| source-deltas | 14 | 0.05 s | 0.05 s | 0.02 s |
+| unchanged-check | 24 | 5 ms | 5 ms | — |
+
+**Delta calculation is not the cost.** Source deltas, symbol deltas, snapshot stats and the base-chain CTE together take about 13 s, roughly 2 % of the run. Within that, `RecordSnapshotStats` costs as much as `createSymbolDeltas`, because it re-derives `EffectiveSources` and `ActiveDocuments` that `publishSnapshot` already holds.
+
+**Repeated type-checking is the cost.**
+- **Most passes are thrown away.** There were 132 type-check and extract passes but only 14 publishes, so about 118 passes ended up `Unchanged` by context hash. That is roughly 5½ minutes of wall time.
+- **The unchanged shortcut never fires.** `unchanged-check` ran 24 times in 5 ms in total, because `reusableHead` returns early for any root with `len(root.Dependencies) > 0`. That condition was added after [Unchanged runs skip type-checking](#unchanged-runs-skip-type-checking) was measured, so the skip no longer applies to any real module.
+- **No memoization within a run.** Local dependencies are not memoized either: `commons` was type-checked about 10 times in this one run, `clicky` 6 times and `commons-db` 3 times.
+- **The whole dependency graph is fully loaded.** Inside a pass, `typedLoadMode` parses every dependency file with comments and records `TypesInfo` for the whole graph. `go/types` accounts for 296 GB of the 423 GB allocated, 126 GB of it in `recordTypeAndValue`. Only the root's own packages need syntax and type info.
+- **Versioned dependencies cost wall time outside type-checking.** The 1 m 48 s exclusive to `versioned-deps` is git and closure work, consistent with the unmemoized `versionedClosureComplete` BFS.
+
+`typed_load.go:87` also replaces `-mod=readonly` when the variant has build tags, where it should append them.
+
+### After the fixes
+
+Same base copy, same command (`reindex-all.sh cold 2`). Both targets succeed, and the run publishes 15 snapshots: 14 as before, plus `cmd/query`, which now indexes with `hack/docs-tutorial` partial.
+
+| Phase | Regions | Wall, exclusive | Before |
+| --- | ---: | ---: | ---: |
+| typecheck | 26 | 30.2 s | 4 m 25 s (132) |
+| extract | 26 | 31.0 s | 1 m 41 s (132) |
+| versioned-deps | 6 | 24.8 s | 1 m 48 s |
+| documents | 15 | 16.8 s | 21.7 s |
+| symbol-deltas | 15 | 5.3 s | 6.2 s |
+| verify-inputs | 6 | 4.2 s | 9.9 s |
+| dependencies | 7 | 3.7 s | 7.9 s |
+| snapshot-stats | 15 | 5 ms | 6.7 s |
+| **trace span** | | **2 m 08 s** | **9 m 35 s** |
+
+What changed:
+- **Run memo** (`indexer/run_memo.go`): a run indexes each local dependency once, and resolves each versioned snapshot, closure node and version tag once.
+- **Dependency-aware reuse:** `reusableHead` compares the head's `dependency_set_hash` with `dependencyHash` of the resolved dependencies, instead of refusing every root that has dependencies.
+- **Body-less parsing** (`indexer/typed_parse.go`): files under GOROOT and GOMODCACHE are parsed without comments or function bodies. Extraction output is byte-identical on a fixture and on 15 real module roots.
+- **Snapshot stats:** `RecordSnapshotStats` counts from the sources and documents the publisher already holds.
+- **Unresolved imports:** an import of an empty directory registers the go/types placeholder as an unresolved package, instead of failing the module.
+
+Extract now costs as much as type-checking. It still renders every document of a changed root, even documents whose package input hash is unchanged.
+
 ## Follow-ups
 
 These are proposed, not implemented; each lies outside this step's scope.
+
+- **Reindex hot path** (from [`reindex --all` on a real database](#reindex---all-on-a-real-database-2026-10-06)). The six items listed there landed on 2026-10-06. Still open:
+  1. Skip rendering documents whose package input hash equals the base's.
+  2. Blank dependency function bodies before parsing (as gopls's `purgeFuncBodies` does), not after. About 2.8 GB of parse allocations per commons load is spent on bodies that are then thrown away.
+  3. Let a top-level target reuse its run-memo result when an earlier target already indexed it as a local dependency.
+  4. Append build tags to `-mod=readonly` in `typed_load.go` instead of replacing it.
+  5. `pendingDocuments` loads each document's full `content` only to compare it. It could select the columns it needs.
 
 - **Content-free membership** (`storage/active_documents.go`). Select `documents` without `content` in `ActiveDocuments`, and load `content` for the selected ids only, in `query/module_index.go` (`indexContext.document`) and `symboldiff`. Partly landed with compact handles (2026-09-27): `ActiveDocuments` takes `ActiveDocumentOptions{Content}` and `symboldiff` reads membership without content, loading the documents it needs with `DocumentContents`; the query layer still passes `Content: true`.
 - **Consumed sibling shapes** (storage schema). Persist `(snapshot_id, import_path, export_shape_hash)` for each workspace-sibling import. `reusableHead` can then skip roots that import siblings, too.
