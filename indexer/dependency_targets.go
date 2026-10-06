@@ -50,9 +50,7 @@ func (indexer *Indexer) indexLocalDependencies(ctx context.Context, roots []disc
 			if active[path] {
 				return fmt.Errorf("local dependency cycle at %q escaped graph publication", path)
 			}
-			results, err := indexStep(ctx, "local dependency "+path, func() ([]ModuleResult, error) {
-				return indexer.IndexModules(ctx, ModuleOptions{Path: path, ExactLocation: path, IncludeTests: includeTests, Reason: storage.ReasonLocalDependency})
-			})
+			results, err := indexer.localDependencyResults(ctx, path, includeTests)
 			if err != nil {
 				return fmt.Errorf("index local dependency %q: %w", path, err)
 			}
@@ -78,7 +76,20 @@ func (indexer *Indexer) indexLocalDependencies(ctx context.Context, roots []disc
 	return nil
 }
 
+// localDependencyResults is the outcome of indexing the local dependency at path: the run's
+// remembered result for that location, or else an index of it as a step of the run.
+func (indexer *Indexer) localDependencyResults(ctx context.Context, path string, includeTests bool) ([]ModuleResult, error) {
+	ctx, memo := ensureRunMemo(ctx)
+	if result, found := memo.module(path, includeTests); found {
+		return []ModuleResult{result}, nil
+	}
+	return indexStep(ctx, "local dependency "+path, func() ([]ModuleResult, error) {
+		return indexer.IndexModules(ctx, ModuleOptions{Path: path, ExactLocation: path, IncludeTests: includeTests, Reason: storage.ReasonLocalDependency})
+	})
+}
+
 func (indexer *Indexer) indexVersionedDependencies(ctx context.Context, roots []discoveredRoot, includeTests bool) error {
+	ctx, _ = ensureRunMemo(ctx)
 	for rootIndex := range roots {
 		for dependencyIndex := range roots[rootIndex].Dependencies {
 			dependency := &roots[rootIndex].Dependencies[dependencyIndex]
@@ -100,17 +111,26 @@ func (indexer *Indexer) indexVersionedDependencies(ctx context.Context, roots []
 	return nil
 }
 
-// versionedSnapshot is the snapshot of modulePath at version. A stored, fully indexed snapshot whose
-// dependency closure is still complete is reused as is; anything else, a degraded snapshot or one
-// whose tag has moved or whose closure has a gap, is indexed again from a registered checkout, which
-// reuses the stored snapshot only when the new extraction is identical to it.
-func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, version string, includeTests bool) (snapshot storage.ModuleSnapshot, err error) {
+// versionedSnapshot is the snapshot of modulePath at version, resolved once per run: a later request
+// in the same run gets the same snapshot, or the same errVersionUnavailable.
+func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, version string, includeTests bool) (storage.ModuleSnapshot, error) {
+	ctx, memo := ensureRunMemo(ctx)
+	return memo.version(versionMemoKey{modulePath: modulePath, version: version, includeTests: includeTests}, func() (storage.ModuleSnapshot, error) {
+		return indexer.resolveVersionedSnapshot(ctx, memo, modulePath, version, includeTests)
+	})
+}
+
+// resolveVersionedSnapshot finds or indexes the snapshot of modulePath at version. A stored, fully
+// indexed snapshot whose dependency closure is still complete is reused as is; anything else, a
+// degraded snapshot or one whose tag has moved or whose closure has a gap, is indexed again from a
+// registered checkout, which reuses the stored snapshot only when the new extraction is identical to it.
+func (indexer *Indexer) resolveVersionedSnapshot(ctx context.Context, memo *runMemo, modulePath, version string, includeTests bool) (snapshot storage.ModuleSnapshot, err error) {
 	snapshot, found, err := indexer.storedVersionSnapshot(ctx, modulePath, version)
 	if err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	if found && snapshot.Coverage == storage.CoverageIndexed {
-		complete, err := indexer.versionedClosureComplete(ctx, snapshot.ID)
+		complete, err := indexer.versionedClosureComplete(ctx, memo, snapshot.ID)
 		if err != nil {
 			return storage.ModuleSnapshot{}, err
 		}
@@ -155,20 +175,27 @@ func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, versi
 	return indexed, nil
 }
 
-func (indexer *Indexer) versionTagMatches(ctx context.Context, modulePath, version, storedCommit string) (bool, error) {
-	var locations []storage.ModuleLocation
-	if err := indexer.database.WithContext(ctx).Table("locations AS location").Select("location.*").
-		Joins("JOIN modules AS root ON root.id = location.root_id").Where("root.root_key = ?", modulePath).
-		Order("location.canonical_path").Find(&locations).Error; err != nil {
-		return false, fmt.Errorf("find checkouts for %s@%s: %w", modulePath, version, err)
-	}
-	for _, location := range locations {
-		commit, err := versionCommit(ctx, location.CanonicalPath, version)
-		if err == nil {
-			return commit == storedCommit, nil
+// versionTagMatches reports whether version still names storedCommit in the first registered checkout
+// of modulePath that has it, or no checkout has it; the commit is looked up once per run.
+func (indexer *Indexer) versionTagMatches(ctx context.Context, memo *runMemo, modulePath, version, storedCommit string) (bool, error) {
+	tag, err := memo.tagCommit(tagMemoKey{modulePath: modulePath, version: version}, func() (tagCommit, error) {
+		var locations []storage.ModuleLocation
+		if err := indexer.database.WithContext(ctx).Table("locations AS location").Select("location.*").
+			Joins("JOIN modules AS root ON root.id = location.root_id").Where("root.root_key = ?", modulePath).
+			Order("location.canonical_path").Find(&locations).Error; err != nil {
+			return tagCommit{}, fmt.Errorf("find checkouts for %s@%s: %w", modulePath, version, err)
 		}
+		for _, location := range locations {
+			if commit, err := memo.versionCommit(ctx, location.CanonicalPath, version); err == nil {
+				return tagCommit{commit: commit, found: true}, nil
+			}
+		}
+		return tagCommit{}, nil
+	})
+	if err != nil {
+		return false, err
 	}
-	return true, nil
+	return !tag.found || tag.commit == storedCommit, nil
 }
 
 // storedVersionSnapshot is the newest clean snapshot of modulePath at version, a fully indexed one
@@ -189,7 +216,9 @@ func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, v
 	return storage.ModuleSnapshot{}, false, nil
 }
 
-func (indexer *Indexer) versionedClosureComplete(ctx context.Context, snapshotID uuid.UUID) (bool, error) {
+// versionedClosureComplete reports whether every snapshot reachable from snapshotID through dependency
+// edges is complete, reading each snapshot's node once per run.
+func (indexer *Indexer) versionedClosureComplete(ctx context.Context, memo *runMemo, snapshotID uuid.UUID) (bool, error) {
 	visited := map[uuid.UUID]bool{}
 	queue := []uuid.UUID{snapshotID}
 	for len(queue) > 0 {
@@ -199,38 +228,51 @@ func (indexer *Indexer) versionedClosureComplete(ctx context.Context, snapshotID
 			continue
 		}
 		visited[id] = true
-		var snapshot storage.ModuleSnapshot
-		if err := indexer.database.WithContext(ctx).Where("id = ?", id).Take(&snapshot).Error; err != nil {
-			return false, fmt.Errorf("load version snapshot %s: %w", id, err)
+		node, err := memo.closureNode(id, func() (closureNode, error) { return indexer.loadClosureNode(ctx, memo, id) })
+		if err != nil {
+			return false, err
 		}
-		if snapshot.DependencySetHash == nil {
+		if !node.complete {
 			return false, nil
 		}
-		if snapshot.ModuleVersion != "" {
-			var root storage.ModuleRoot
-			if err := indexer.database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
-				return false, fmt.Errorf("load root of version snapshot %s: %w", id, err)
-			}
-			matching, err := indexer.versionTagMatches(ctx, root.RootKey, snapshot.ModuleVersion, snapshot.GitCommit)
-			if err != nil {
-				return false, err
-			}
-			if !matching {
-				return false, nil
-			}
-		}
-		var edges []storage.SnapshotDependency
-		if err := indexer.database.WithContext(ctx).Where("snapshot_id = ?", id).Find(&edges).Error; err != nil {
-			return false, fmt.Errorf("load dependencies of version snapshot %s: %w", id, err)
-		}
-		for _, edge := range edges {
-			if edge.TargetSnapshotID == nil {
-				return false, nil
-			}
-			queue = append(queue, *edge.TargetSnapshotID)
-		}
+		queue = append(queue, node.targets...)
 	}
 	return true, nil
+}
+
+// loadClosureNode reads whether snapshot id is itself complete: its dependencies were captured, its
+// version, when it has one, still names its commit, and every dependency edge has a target. Snapshot
+// rows and edges never change once committed, so the node holds for the rest of the run.
+func (indexer *Indexer) loadClosureNode(ctx context.Context, memo *runMemo, id uuid.UUID) (closureNode, error) {
+	var snapshot storage.ModuleSnapshot
+	if err := indexer.database.WithContext(ctx).Where("id = ?", id).Take(&snapshot).Error; err != nil {
+		return closureNode{}, fmt.Errorf("load version snapshot %s: %w", id, err)
+	}
+	if snapshot.DependencySetHash == nil {
+		return closureNode{}, nil
+	}
+	if snapshot.ModuleVersion != "" {
+		var root storage.ModuleRoot
+		if err := indexer.database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
+			return closureNode{}, fmt.Errorf("load root of version snapshot %s: %w", id, err)
+		}
+		matching, err := indexer.versionTagMatches(ctx, memo, root.RootKey, snapshot.ModuleVersion, snapshot.GitCommit)
+		if err != nil || !matching {
+			return closureNode{}, err
+		}
+	}
+	var edges []storage.SnapshotDependency
+	if err := indexer.database.WithContext(ctx).Where("snapshot_id = ?", id).Find(&edges).Error; err != nil {
+		return closureNode{}, fmt.Errorf("load dependencies of version snapshot %s: %w", id, err)
+	}
+	targets := make([]uuid.UUID, 0, len(edges))
+	for _, edge := range edges {
+		if edge.TargetSnapshotID == nil {
+			return closureNode{}, nil
+		}
+		targets = append(targets, *edge.TargetSnapshotID)
+	}
+	return closureNode{complete: true, targets: targets}, nil
 }
 
 func versionCommit(ctx context.Context, checkout, version string) (string, error) {

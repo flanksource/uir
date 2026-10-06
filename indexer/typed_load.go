@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/tools/go/packages"
@@ -65,29 +63,12 @@ func sourceResolutionFailure(err error) bool {
 }
 
 // loadTyped loads every package of the root (and its test variants when includeTests is set) with
-// full type information for the whole dependency graph, in the root's directory and build variant.
+// type information for the whole dependency graph, in the root's directory and build variant. The
+// standard library and the module cache are checked from their declarations only (typedSources).
 func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (typedLoad, error) {
-	var mutex sync.Mutex
-	parsed := map[string]string{}
-	environment := append(os.Environ(), "GOOS="+root.Variant.GOOS, "GOARCH="+root.Variant.GOARCH, "CGO_ENABLED="+root.Variant.CGOEnabled)
-	if root.Variant.GoWorkOff {
-		environment = append(environment, "GOWORK=off")
-	}
-	config := &packages.Config{
-		Mode: typedLoadMode, Context: ctx, Dir: root.LocalPath, Env: environment, Tests: includeTests, Fset: token.NewFileSet(),
-		BuildFlags: []string{"-mod=readonly"},
-		ParseFile: func(fileSet *token.FileSet, filename string, source []byte) (*ast.File, error) {
-			mutex.Lock()
-			parsed[filename] = hashBytes(source)
-			mutex.Unlock()
-			return parser.ParseFile(fileSet, filename, source, parser.AllErrors|parser.ParseComments|parser.SkipObjectResolution)
-		},
-	}
-	if len(root.Variant.BuildTags) > 0 {
-		config.BuildFlags = []string{"-tags=" + strings.Join(root.Variant.BuildTags, ",")}
-	}
-	if root.ModFile != "" {
-		config.BuildFlags = append(config.BuildFlags, "-modfile="+root.ModFile)
+	config, sources, err := typedLoadConfig(ctx, root, includeTests)
+	if err != nil {
+		return typedLoad{}, packageLoadError{fmt.Errorf("load Go packages of %q: %w", root.RootKey, err)}
 	}
 	roots, err := loadPackages(config, "./...")
 	if err != nil {
@@ -95,11 +76,20 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 	}
 	load := typedLoad{
 		root: root, origins: map[*types.Package]packageOrigin{}, files: map[string]typedFile{},
-		ignored: map[string]bool{}, directories: map[string]bool{}, parsed: parsed,
+		ignored: map[string]bool{}, directories: map[string]bool{}, parsed: sources.parsed,
 	}
+	var partial error
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
-		load.origins[pkg.Types] = originOf(pkg)
+		origin := originOf(pkg)
+		load.origins[pkg.Types] = origin
+		if partial == nil && origin.Class == workspacePackage {
+			partial = sources.requireFull(pkg)
+		}
 	})
+	if partial != nil {
+		return typedLoad{}, partial
+	}
+	packages.Visit(roots, nil, load.addFailedImports)
 	for _, pkg := range roots {
 		if strings.HasSuffix(pkg.ID, ".test") {
 			continue
@@ -107,11 +97,34 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 		load.addRootPackage(pkg)
 	}
 	for _, file := range root.Files {
-		if _, typed := load.files[file.AbsolutePath]; typed && parsed[file.AbsolutePath] != file.ContentHash {
+		if _, typed := load.files[file.AbsolutePath]; typed && load.parsed[file.AbsolutePath] != file.ContentHash {
 			return typedLoad{}, fmt.Errorf("source %q of root %q changed: %w", file.PathKey, root.RootKey, ErrIndexInputsChanged)
 		}
 	}
 	return load, nil
+}
+
+// typedLoadConfig is the go/packages configuration of the root's load and the sources it parses.
+func typedLoadConfig(ctx context.Context, root discoveredRoot, includeTests bool) (*packages.Config, *typedSources, error) {
+	environment := append(os.Environ(), "GOOS="+root.Variant.GOOS, "GOARCH="+root.Variant.GOARCH, "CGO_ENABLED="+root.Variant.CGOEnabled)
+	if root.Variant.GoWorkOff {
+		environment = append(environment, "GOWORK=off")
+	}
+	sources, err := newTypedSources(ctx, root, environment)
+	if err != nil {
+		return nil, nil, err
+	}
+	config := &packages.Config{
+		Mode: typedLoadMode, Context: ctx, Dir: root.LocalPath, Env: environment, Tests: includeTests, Fset: token.NewFileSet(),
+		BuildFlags: []string{"-mod=readonly"}, ParseFile: sources.parse,
+	}
+	if len(root.Variant.BuildTags) > 0 {
+		config.BuildFlags = []string{"-tags=" + strings.Join(root.Variant.BuildTags, ",")}
+	}
+	if root.ModFile != "" {
+		config.BuildFlags = append(config.BuildFlags, "-modfile="+root.ModFile)
+	}
+	return config, sources, nil
 }
 
 func (load *typedLoad) addRootPackage(pkg *packages.Package) {
@@ -142,6 +155,18 @@ func originOf(pkg *packages.Package) packageOrigin {
 		return packageOrigin{Class: modulePackage, ModulePath: module.Path, Version: module.Replace.Path + "@" + module.Replace.Version}
 	default:
 		return packageOrigin{Class: modulePackage, ModulePath: module.Path, Version: module.Version}
+	}
+}
+
+// addFailedImports records as unresolved each package the type checker fabricated for an import of
+// pkg it could not use: go/packages had no package for the path, or supplied a nameless one for an
+// empty directory. Such a package is absent from the load and its scope was never completed; any
+// other package missing from the load stays an error.
+func (load *typedLoad) addFailedImports(pkg *packages.Package) {
+	for _, imported := range pkg.Types.Imports() {
+		if _, loaded := load.origins[imported]; !loaded && !imported.Complete() {
+			load.origins[imported] = packageOrigin{Class: unresolvedPackage}
+		}
 	}
 }
 
