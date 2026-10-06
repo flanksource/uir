@@ -71,8 +71,7 @@ func rebaseSnapshot(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased r
 	if updated.RowsAffected != 1 {
 		return fmt.Errorf("clear the base of snapshot %s: updated %d rows", snapshot.ID, updated.RowsAffected)
 	}
-	_, err := RecordSnapshotStats(ctx, tx, snapshot.ID)
-	return err
+	return recordDerivedSnapshotStats(ctx, tx, snapshot.ID)
 }
 
 func createRebasedDeltas(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased rebasedSnapshot) error {

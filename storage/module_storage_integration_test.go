@@ -108,7 +108,9 @@ var _ = Describe("module root storage", func() {
 		_, _, err = storage.ModuleSnapshots(ctx, database, storage.ModuleSnapshotListOptions{RootKey: root.RootKey, Location: worktree.CanonicalPath, Limit: 10})
 		Expect(err).To(MatchError(ContainSubstring("has no recorded size and change counts")), "a row without stats fails instead of listing zeros")
 		for _, snapshot := range []storage.ModuleSnapshot{first, second} {
-			_, err = storage.RecordSnapshotStats(ctx, database, snapshot.ID)
+			options, err := storage.DeriveSnapshotStatsOptions(ctx, database, snapshot.ID)
+			Expect(err).ToNot(HaveOccurred())
+			_, err = storage.RecordSnapshotStats(ctx, database, snapshot.ID, options)
 			Expect(err).ToNot(HaveOccurred())
 		}
 		snapshots, total, err := storage.ModuleSnapshots(ctx, database, storage.ModuleSnapshotListOptions{
