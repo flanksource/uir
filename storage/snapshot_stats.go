@@ -35,14 +35,36 @@ func (snapshot ModuleSnapshot) Stats() (SnapshotStats, error) {
 	}, nil
 }
 
-// RecordSnapshotStats derives a published snapshot's stats from the rows its publication wrote and
-// stores them on the snapshot row. Publication calls it inside its transaction, after every row is
-// written; the storage backfill calls it for rows published before stats were recorded.
-func RecordSnapshotStats(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (SnapshotStats, error) {
-	stats, err := deriveSnapshotStats(ctx, database, snapshotID)
-	if err != nil {
-		return SnapshotStats{}, err
+// SnapshotStatsOptions is what a snapshot's stats are counted from: the effective sources of its base
+// snapshot, empty for a snapshot without a base, and every file the snapshot serves. Publication
+// supplies what it already holds; every other caller derives them with DeriveSnapshotStatsOptions.
+type SnapshotStatsOptions struct {
+	Base  map[string]SourceRevision
+	Files map[string]SnapshotFile
+}
+
+// SnapshotFile is one path a snapshot serves: its effective source revision and the counts of the
+// document the snapshot activates for it.
+type SnapshotFile struct {
+	Source          SourceRevision
+	SymbolCount     int
+	OccurrenceCount int
+}
+
+// RecordSnapshotStats counts a published snapshot's stats from options and the symbol deltas its
+// publication wrote, and stores them on the snapshot row. Publication calls it inside its transaction,
+// after every row is written; the storage backfill and prune's rebase call it with derived options.
+func RecordSnapshotStats(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID, options SnapshotStatsOptions) (SnapshotStats, error) {
+	if options.Base == nil || options.Files == nil {
+		return SnapshotStats{}, fmt.Errorf("record stats of snapshot %s: base sources and files are required, empty when there are none", snapshotID)
 	}
+	stats := countSnapshotStats(options)
+	var symbols int64
+	ordinal := database.WithContext(ctx).Model(&ModuleSnapshot{}).Select("ordinal").Where("id = ?", snapshotID)
+	if err := database.WithContext(ctx).Model(&SymbolDelta{}).Where("snapshot_ordinal = (?)", ordinal).Count(&symbols).Error; err != nil {
+		return SnapshotStats{}, fmt.Errorf("count symbol deltas of snapshot %s: %w", snapshotID, err)
+	}
+	stats.SymbolsChanged = int(symbols)
 	updated := database.WithContext(ctx).Model(&ModuleSnapshot{}).Where("id = ?", snapshotID).Updates(map[string]any{
 		"file_count": stats.FileCount, "symbol_count": stats.SymbolCount, "occurrence_count": stats.OccurrenceCount,
 		"source_bytes": stats.SourceBytes, "files_added": stats.FilesAdded, "files_changed": stats.FilesChanged,
@@ -57,59 +79,63 @@ func RecordSnapshotStats(ctx context.Context, database *gorm.DB, snapshotID uuid
 	return stats, nil
 }
 
-func deriveSnapshotStats(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (SnapshotStats, error) {
+// DeriveSnapshotStatsOptions derives a stored snapshot's stats inputs from its rows: its active
+// documents, and its base's effective sources when it has a base.
+func DeriveSnapshotStatsOptions(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (SnapshotStatsOptions, error) {
 	documents, err := ActiveDocuments(ctx, database, snapshotID, ActiveDocumentOptions{})
 	if err != nil {
-		return SnapshotStats{}, fmt.Errorf("size of snapshot %s: %w", snapshotID, err)
+		return SnapshotStatsOptions{}, fmt.Errorf("size of snapshot %s: %w", snapshotID, err)
 	}
-	var stats SnapshotStats
-	for _, active := range documents {
-		stats.FileCount++
-		stats.SymbolCount += int64(active.Document.SymbolCount)
-		stats.OccurrenceCount += int64(active.Document.OccurrenceCount)
-		stats.SourceBytes += active.Source.SizeBytes
+	options := SnapshotStatsOptions{Base: map[string]SourceRevision{}, Files: make(map[string]SnapshotFile, len(documents))}
+	for path, active := range documents {
+		options.Files[path] = SnapshotFile{Source: active.Source, SymbolCount: active.Document.SymbolCount, OccurrenceCount: active.Document.OccurrenceCount}
 	}
 	var snapshot ModuleSnapshot
-	if err := database.WithContext(ctx).Select("id", "base_snapshot_id", "ordinal").Where("id = ?", snapshotID).Take(&snapshot).Error; err != nil {
-		return SnapshotStats{}, fmt.Errorf("load snapshot %s: %w", snapshotID, err)
+	if err := database.WithContext(ctx).Select("id", "base_snapshot_id").Where("id = ?", snapshotID).Take(&snapshot).Error; err != nil {
+		return SnapshotStatsOptions{}, fmt.Errorf("load snapshot %s: %w", snapshotID, err)
 	}
-	if err := countSourceChanges(ctx, database, snapshot, &stats); err != nil {
-		return SnapshotStats{}, err
+	if snapshot.BaseSnapshotID != nil {
+		if options.Base, err = EffectiveSources(ctx, database, *snapshot.BaseSnapshotID); err != nil {
+			return SnapshotStatsOptions{}, fmt.Errorf("base of snapshot %s: %w", snapshotID, err)
+		}
 	}
-	var symbols int64
-	if err := database.WithContext(ctx).Model(&SymbolDelta{}).Where("snapshot_ordinal = ?", snapshot.Ordinal).Count(&symbols).Error; err != nil {
-		return SnapshotStats{}, fmt.Errorf("count symbol deltas of snapshot %s: %w", snapshotID, err)
-	}
-	stats.SymbolsChanged = int(symbols)
-	return stats, nil
+	return options, nil
 }
 
-// countSourceChanges classifies the snapshot's source deltas against its base's effective sources: a
-// delete is a deleted file, and a set is a changed file when the base has the path, else an added one.
-func countSourceChanges(ctx context.Context, database *gorm.DB, snapshot ModuleSnapshot, stats *SnapshotStats) error {
-	base := map[string]SourceRevision{}
-	if snapshot.BaseSnapshotID != nil {
-		var err error
-		if base, err = EffectiveSources(ctx, database, *snapshot.BaseSnapshotID); err != nil {
-			return fmt.Errorf("base of snapshot %s: %w", snapshot.ID, err)
-		}
-	}
-	var deltas []SourceDelta
-	if err := database.WithContext(ctx).Where("snapshot_id = ?", snapshot.ID).Find(&deltas).Error; err != nil {
-		return fmt.Errorf("load source deltas of snapshot %s: %w", snapshot.ID, err)
-	}
-	for _, delta := range deltas {
-		_, existed := base[delta.PathKey]
+// countSnapshotStats sizes the snapshot from its files and classifies them against its base: a path
+// only the snapshot serves is added, one it serves at another revision is changed, and one only the
+// base serves is deleted. These are exactly the paths of the snapshot's set and delete source deltas.
+func countSnapshotStats(options SnapshotStatsOptions) SnapshotStats {
+	var stats SnapshotStats
+	for path, file := range options.Files {
+		stats.FileCount++
+		stats.SymbolCount += int64(file.SymbolCount)
+		stats.OccurrenceCount += int64(file.OccurrenceCount)
+		stats.SourceBytes += file.Source.SizeBytes
+		prior, existed := options.Base[path]
 		switch {
-		case delta.Operation == SourceDelete:
-			stats.FilesDeleted++
-		case existed:
-			stats.FilesChanged++
-		default:
+		case !existed:
 			stats.FilesAdded++
+		case prior.ID != file.Source.ID:
+			stats.FilesChanged++
 		}
 	}
-	return nil
+	for path := range options.Base {
+		if _, served := options.Files[path]; !served {
+			stats.FilesDeleted++
+		}
+	}
+	return stats
+}
+
+// recordDerivedSnapshotStats records a stored snapshot's stats from options derived from its rows.
+func recordDerivedSnapshotStats(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) error {
+	options, err := DeriveSnapshotStatsOptions(ctx, database, snapshotID)
+	if err != nil {
+		return err
+	}
+	_, err = RecordSnapshotStats(ctx, database, snapshotID, options)
+	return err
 }
 
 // backfillSnapshotStats records the stats of every snapshot published before they were recorded. A
@@ -120,7 +146,7 @@ func backfillSnapshotStats(ctx context.Context, database *gorm.DB) error {
 		return fmt.Errorf("find snapshots without stats: %w", err)
 	}
 	for _, id := range pending {
-		if _, err := RecordSnapshotStats(ctx, database, id); err != nil {
+		if err := recordDerivedSnapshotStats(ctx, database, id); err != nil {
 			return fmt.Errorf("backfill snapshot stats: %w", err)
 		}
 	}

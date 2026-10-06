@@ -20,6 +20,7 @@ const (
 	statsAChanged = "package stats\n\nfunc A() int { return 3 }\n"
 	statsB        = "package stats\n\nfunc B() int { return 2 }\n"
 	statsC        = "package stats\n\nfunc C() int { return 4 }\n"
+	statsKept     = "package kept\n\nfunc Kept() int { return 5 }\n"
 )
 
 // indexStats indexes the module at path for reason and returns its one snapshot id.
@@ -38,15 +39,19 @@ func writeStatsFile(path, content string) {
 	Expect(os.WriteFile(path, []byte(content), 0o644)).To(Succeed())
 }
 
-// statsModule publishes example.org/stats with a.go and b.go, then changes a.go, deletes b.go, and adds
-// c.go, and returns both snapshots.
-func statsModule(ctx context.Context, database *gorm.DB) (string, uuid.UUID, uuid.UUID) {
+// statsModule publishes example.org/stats with a.go, b.go, and the kept files, then changes a.go,
+// deletes b.go, and adds c.go, and returns both snapshots.
+func statsModule(ctx context.Context, database *gorm.DB, kept map[string]string) (string, uuid.UUID, uuid.UUID) {
 	GinkgoHelper()
 	module, err := filepath.EvalSymlinks(GinkgoT().TempDir())
 	Expect(err).ToNot(HaveOccurred())
 	writeStatsFile(filepath.Join(module, "go.mod"), statsManifest)
 	writeStatsFile(filepath.Join(module, "a.go"), statsA)
 	writeStatsFile(filepath.Join(module, "b.go"), statsB)
+	for name, content := range kept {
+		Expect(os.MkdirAll(filepath.Dir(filepath.Join(module, name)), 0o755)).To(Succeed())
+		writeStatsFile(filepath.Join(module, name), content)
+	}
 	first := indexStats(ctx, database, module, storage.ReasonAdd)
 	writeStatsFile(filepath.Join(module, "a.go"), statsAChanged)
 	Expect(os.Remove(filepath.Join(module, "b.go"))).To(Succeed())
@@ -72,7 +77,7 @@ var _ = Describe("snapshot stats", func() {
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			config := options()
 			database := openDB(ctx, config)
-			_, first, second := statsModule(ctx, database)
+			_, first, second := statsModule(ctx, database, nil)
 			published := recordedStats(database, first, second)
 			Expect(published[0]).To(And(HaveField("FileCount", int64(2)), HaveField("SourceBytes", int64(len(statsA)+len(statsB))),
 				HaveField("FilesAdded", 2), HaveField("FilesChanged", 0), HaveField("FilesDeleted", 0)))
@@ -91,10 +96,49 @@ var _ = Describe("snapshot stats", func() {
 		Entry("PostgreSQL", postgresOptions("uir_snapshot_stats")),
 	)
 
+	DescribeTable("records at publication the stats a full re-derivation of the published snapshot computes",
+		func(ctx SpecContext, options func() storage.DBOptions) {
+			database := openDB(ctx, options())
+			_, first, second := statsModule(ctx, database, map[string]string{"kept/kept.go": statsKept})
+			var keptDocuments int64
+			Expect(database.Model(&storage.Document{}).Where("path_key = ?", "kept/kept.go").Count(&keptDocuments).Error).To(Succeed())
+			Expect(keptDocuments).To(Equal(int64(1)), "the second snapshot reuses the first one's document for the unchanged package")
+			published := recordedStats(database, first, second)
+			Expect(published[1]).To(And(HaveField("FileCount", int64(3)), HaveField("SourceBytes", int64(len(statsAChanged)+len(statsC)+len(statsKept))),
+				HaveField("FilesAdded", 1), HaveField("FilesChanged", 1), HaveField("FilesDeleted", 1)))
+
+			rederived := make([]storage.SnapshotStats, 0, 2)
+			for _, id := range []uuid.UUID{first, second} {
+				derived, err := storage.DeriveSnapshotStatsOptions(ctx, database, id)
+				Expect(err).ToNot(HaveOccurred())
+				stats, err := storage.RecordSnapshotStats(ctx, database, id, derived)
+				Expect(err).ToNot(HaveOccurred())
+				rederived = append(rederived, stats)
+			}
+
+			Expect(published).To(Equal(rederived))
+		},
+		Entry("SQLite", sqliteOptions("rederived.db")),
+		Entry("PostgreSQL", postgresOptions("uir_snapshot_stats_rederived")),
+	)
+
+	It("refuses to record stats without base sources or files, instead of counting them as empty", func(ctx SpecContext) {
+		database := openDB(ctx, sqliteOptions("missing-inputs.db")())
+		_, _, second := statsModule(ctx, database, nil)
+		published := recordedStats(database, second)
+
+		_, withoutBase := storage.RecordSnapshotStats(ctx, database, second, storage.SnapshotStatsOptions{Files: map[string]storage.SnapshotFile{}})
+		_, withoutFiles := storage.RecordSnapshotStats(ctx, database, second, storage.SnapshotStatsOptions{Base: map[string]storage.SourceRevision{}})
+
+		Expect(withoutBase).To(MatchError(ContainSubstring("base sources and files are required")))
+		Expect(withoutFiles).To(MatchError(ContainSubstring("base sources and files are required")))
+		Expect(recordedStats(database, second)).To(Equal(published))
+	})
+
 	DescribeTable("recognises a duplicate key, and only a duplicate key, as a unique violation",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openDB(ctx, options())
-			_, first, _ := statsModule(ctx, database)
+			_, first, _ := statsModule(ctx, database, nil)
 			var head storage.ModuleLocationHead
 			Expect(database.Where("snapshot_id IN (SELECT id FROM snapshots WHERE id <> ?)", first).Take(&head).Error).To(Succeed())
 
