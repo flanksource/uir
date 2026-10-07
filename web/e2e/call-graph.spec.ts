@@ -66,8 +66,15 @@ test("the Explorer's Call graph tab expands, follows a call site into Source, ed
   const facets = page.getByRole("menu", { name: "Package exclusions" });
   await expect(facets.getByRole("textbox", { name: "Filter packages" })).toBeFocused();
   const showFmt = page.waitForRequest((request) => isGraphRequest(request) && graphParams(request).exclude !== undefined);
-  await facets.getByRole("switch", { name: "Show fmt" }).click();
+  await facets.getByRole("checkbox", { name: "Show fmt" }).click();
   expect(graphParams(await showFmt).exclude).toBe("builtin,gorm.io/...,strings");
+  await expect(facets.getByRole("checkbox", { name: "Show standard library" })).toHaveAttribute("aria-checked", "mixed");
+  const hideFolder = page.waitForRequest((request) => isGraphRequest(request) && graphParams(request).exclude?.endsWith(",github.com/...") === true);
+  await facets.getByRole("checkbox", { name: "Show github.com/..." }).click();
+  expect(graphParams(await hideFolder).exclude).toBe("builtin,gorm.io/...,strings,github.com/...");
+  await expect(facets.getByRole("checkbox", { name: `Show ${root}/query` })).not.toBeChecked();
+  await facets.getByRole("checkbox", { name: "Show github.com/..." }).click();
+  await expect(facets.getByRole("checkbox", { name: "Show github.com/..." })).toBeChecked();
   await page.keyboard.press("Escape");
 
   await page.getByRole("radio", { name: "Callees" }).click();

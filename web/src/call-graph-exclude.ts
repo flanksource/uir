@@ -7,6 +7,7 @@ export const EXCLUDE_NONE = "none";
 export const EXCLUDE_STD = "std";
 export const EXCLUDE_BUILTIN = "builtin";
 export const EXCLUDE_EXTERNAL = "external";
+const KEYWORDS = new Set([EXCLUDE_STD, EXCLUDE_BUILTIN, EXCLUDE_EXTERNAL]);
 
 /** The route's exclude value as patterns; empty is undefined, which takes the server's defaults. */
 export function parseExclude(text: string): string[] | undefined {
@@ -27,7 +28,7 @@ function withoutNone(patterns: readonly string[]): string[] {
  * A standard library package, as Go's `std` pattern tells it without a module: a package outside the
  * scope whose first path element has no dot. The builtin pseudo-package has its own keyword.
  */
-function isStdPackage(pkg: ModuleGraphPackage): boolean {
+export function isStdPackage(pkg: ModuleGraphPackage): boolean {
   return pkg.external && pkg.path !== EXCLUDE_BUILTIN && !pkg.path.split("/")[0].includes(".");
 }
 
@@ -52,16 +53,36 @@ export function excludePackage(patterns: readonly string[], path: string): strin
 }
 
 /**
- * Brings a package back. Every pattern that excludes it goes; a keyword or a /... pattern that also
- * covered other reached packages is replaced by their exact paths, so they stay excluded.
+ * Excludes a whole group: `std` or a `prefix/...` pattern. The exact and /... patterns it subsumes go,
+ * so the patterns in force stay the ones that matter; keywords stay.
  */
-export function includePackage(patterns: readonly string[], target: ModuleGraphPackage, packages: readonly ModuleGraphPackage[]): string[] {
-  if (!target.excluded) throw new Error(`Package ${target.path} is not excluded`);
+export function excludeGroup(patterns: readonly string[], pattern: string, packages: readonly ModuleGraphPackage[]): string[] {
+  if (pattern !== EXCLUDE_STD && !pattern.endsWith("/...")) throw new Error(`${pattern} is not std or a path ending in /...`);
+  const subsumes = (existing: string): boolean => {
+    if (KEYWORDS.has(existing)) return false;
+    if (pattern === EXCLUDE_STD) return packages.some((pkg) => pkg.path === existing && isStdPackage(pkg));
+    const base = pattern.slice(0, -"/...".length);
+    const path = existing.endsWith("/...") ? existing.slice(0, -"/...".length) : existing;
+    return path === base || path.startsWith(`${base}/`);
+  };
+  return [...withoutNone(patterns).filter((existing) => !subsumes(existing)), pattern];
+}
+
+/**
+ * Brings the excluded ones of these packages back; the others are already shown. Every pattern that
+ * excludes one of them goes; a keyword or a /... pattern that also covered other reached packages is
+ * replaced by their exact paths, so they stay excluded.
+ */
+export function includePackages(patterns: readonly string[], targets: readonly ModuleGraphPackage[], packages: readonly ModuleGraphPackage[]): string[] {
+  const excluded = targets.filter((target) => target.excluded);
+  if (excluded.length === 0) throw new Error(`None of ${targets.map((target) => target.path).join(", ")} is excluded`);
   const active = withoutNone(patterns);
-  const covering = active.filter((pattern) => excludesPackage(pattern, target));
-  if (covering.length === 0) throw new Error(`Package ${target.path} is reported excluded, but none of ${active.join(", ")} matches it`);
+  const uncovered = excluded.find((target) => !active.some((pattern) => excludesPackage(pattern, target)));
+  if (uncovered) throw new Error(`Package ${uncovered.path} is reported excluded, but none of ${active.join(", ")} matches it`);
+  const covering = active.filter((pattern) => excluded.some((target) => excludesPackage(pattern, target)));
   const rest = active.filter((pattern) => !covering.includes(pattern));
-  const replacements = packages.filter((pkg) => pkg.path !== target.path
+  const targetPaths = new Set(excluded.map((target) => target.path));
+  const replacements = packages.filter((pkg) => !targetPaths.has(pkg.path)
     && covering.some((pattern) => excludesPackage(pattern, pkg)) && !rest.some((pattern) => excludesPackage(pattern, pkg)));
   return [...rest, ...replacements.map((pkg) => pkg.path)];
 }

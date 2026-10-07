@@ -2,6 +2,7 @@
 // `GET /api/v1/modules/graph?selector=github.com/flanksource/uir/query.Pipeline.RunExpr` response
 // (clicky-ui playground `_call-graph/run-expr.json`), trimmed to the nodes the spec walks through and
 // extended with the `exclude` and `packages` fields the server now returns.
+import { excludesPackage } from "../src/call-graph-exclude";
 
 export const root = "github.com/flanksource/uir";
 export const location = "/checkout/uir";
@@ -73,13 +74,13 @@ export function graphResponse(exclude: string[]) {
     omitted: { beyond_depth: 4, excluded: { fmt: 3, builtin: 2, "gorm.io/gorm": 2, strings: 1 } },
     exclude,
     packages: [
-      { path: QUERY, external: false, nodes: 5, excluded: false },
-      { path: "fmt", external: true, nodes: 3, excluded: true },
-      { path: "builtin", external: true, nodes: 2, excluded: true },
-      { path: "gorm.io/gorm", external: true, nodes: 2, excluded: true },
-      { path: UUID, external: true, nodes: 1, excluded: false },
-      { path: "strings", external: true, nodes: 1, excluded: true },
-    ],
+      { path: QUERY, external: false, nodes: 5 },
+      { path: "fmt", external: true, nodes: 3 },
+      { path: "builtin", external: true, nodes: 2 },
+      { path: "gorm.io/gorm", external: true, nodes: 2 },
+      { path: UUID, external: true, nodes: 1 },
+      { path: "strings", external: true, nodes: 1 },
+    ].map((pkg) => ({ ...pkg, excluded: exclude.some((pattern) => excludesPackage(pattern, { ...pkg, excluded: false })) })),
     stages: [{ name: "scope", value: "1 snapshots" }, { name: "resolve", value: `${QUERY}.Pipeline.RunExpr` }, { name: "graph", value: "6 nodes, 5 edges" }],
     warnings: [],
     candidates: [],

@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { ModuleGraphPackage } from "./api";
 import {
   addExcludePattern,
+  excludeGroup,
   excludePackage,
   excludePatternError,
   excludesPackage,
   formatExclude,
-  includePackage,
+  includePackages,
   parseExclude,
   removeExcludePattern,
   setExternalHidden,
@@ -62,29 +63,56 @@ describe("excludePackage", () => {
   });
 });
 
-describe("includePackage", () => {
+describe("includePackages", () => {
   it("drops an exact path that excludes the package", () => {
-    expect(includePackage([...DEFAULTS, UUID.path], { ...UUID, excluded: true }, PACKAGES)).toEqual(DEFAULTS);
+    expect(includePackages([...DEFAULTS, UUID.path], [{ ...UUID, excluded: true }], PACKAGES)).toEqual(DEFAULTS);
   });
 
   it("replaces a keyword with the exact paths of the other packages it covered", () => {
-    expect(includePackage(DEFAULTS, FMT, PACKAGES)).toEqual(["builtin", "gorm.io/...", "strings"]);
+    expect(includePackages(DEFAULTS, [FMT], PACKAGES)).toEqual(["builtin", "gorm.io/...", "strings"]);
   });
 
   it("replaces a /... pattern with the exact paths of the other packages below it", () => {
-    expect(includePackage(DEFAULTS, GORM, PACKAGES)).toEqual(["std", "builtin", "gorm.io/gorm/clause"]);
+    expect(includePackages(DEFAULTS, [GORM], PACKAGES)).toEqual(["std", "builtin", "gorm.io/gorm/clause"]);
   });
 
   it("drops every pattern that covers the package, leaving out paths another remaining pattern still covers", () => {
-    expect(includePackage(["external", "std", "builtin"], FMT, PACKAGES)).toEqual(["builtin", "gorm.io/gorm", "strings", "github.com/google/uuid", "gorm.io/gorm/clause"]);
+    expect(includePackages(["external", "std", "builtin"], [FMT], PACKAGES)).toEqual(["builtin", "gorm.io/gorm", "strings", "github.com/google/uuid", "gorm.io/gorm/clause"]);
+  });
+
+  it("brings back a folder's packages covered by a keyword and an exact path, re-adding none of them and skipping the shown ones", () => {
+    expect(includePackages(["std", "builtin", "gorm.io/gorm/clause"], [FMT, GORM_CLAUSE, QUERY], PACKAGES)).toEqual(["builtin", "strings"]);
   });
 
   it("leaves none when the last pattern goes", () => {
-    expect(formatExclude(includePackage(["builtin"], BUILTIN, PACKAGES))).toBe("none");
+    expect(formatExclude(includePackages(["builtin"], [BUILTIN], PACKAGES))).toBe("none");
   });
 
   it("fails when no pattern covers a package the server reported excluded", () => {
-    expect(() => includePackage(["builtin"], FMT, PACKAGES)).toThrow('Package fmt is reported excluded, but none of builtin matches it');
+    expect(() => includePackages(["builtin"], [FMT], PACKAGES)).toThrow("Package fmt is reported excluded, but none of builtin matches it");
+  });
+
+  it("fails when none of the packages is excluded", () => {
+    expect(() => includePackages(DEFAULTS, [QUERY, UUID], PACKAGES)).toThrow(`None of ${QUERY.path}, ${UUID.path} is excluded`);
+  });
+});
+
+describe("excludeGroup", () => {
+  it("adds a /... pattern, dropping the exact and /... patterns it subsumes and keeping keywords", () => {
+    expect(excludeGroup(["std", "gorm.io", "gorm.io/gorm/clause", "gorm.io/gorm/...", "gorm.iox/driver", "external"], "gorm.io/...", PACKAGES))
+      .toEqual(["std", "gorm.iox/driver", "external", "gorm.io/..."]);
+  });
+
+  it("adds std, dropping the exact paths of reached standard library packages", () => {
+    expect(excludeGroup(["fmt", "builtin", "gorm.io/gorm"], "std", PACKAGES)).toEqual(["builtin", "gorm.io/gorm", "std"]);
+  });
+
+  it("replaces none", () => {
+    expect(excludeGroup(["none"], "github.com/google/...", PACKAGES)).toEqual(["github.com/google/..."]);
+  });
+
+  it("fails on a pattern that is not a group", () => {
+    expect(() => excludeGroup(DEFAULTS, "gorm.io/gorm", PACKAGES)).toThrow("gorm.io/gorm is not std or a path ending in /...");
   });
 });
 

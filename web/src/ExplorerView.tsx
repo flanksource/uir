@@ -17,6 +17,7 @@ import type { Route } from "./route";
 import { SymbolDetails } from "./SymbolDetails";
 import { cycleSymbolFilter, filterPackageSymbols, symbolFilterKeys, symbolFilterState } from "./symbol-filters";
 import { SymbolIcon } from "./symbol-icons";
+import { filterItems } from "./tree-filter";
 import { ErrorMessage, Field, Muted, TextInput } from "./ui";
 import { useLoad, type Load, type TimedLoad } from "./use-load";
 
@@ -33,16 +34,6 @@ function findItem<T extends { id: string; children: T[] }>(items: T[], id: strin
     const child = findItem(item.children, id);
     if (child) return child;
   }
-}
-
-function filterItems<T extends { children: T[] }>(items: T[], query: string, text: (item: T) => string): T[] {
-  if (!query.trim()) return items;
-  const needle = query.trim().toLowerCase();
-  return items.flatMap((item) => {
-    if (text(item).toLowerCase().includes(needle)) return [item];
-    const children = filterItems(item.children, query, text);
-    return children.length ? [{ ...item, children }] : [];
-  });
 }
 
 function revealPosition(editor: EditorInstance, line: number, column: number) {
