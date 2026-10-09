@@ -152,7 +152,9 @@ var _ = Describe("query symbol rendering", func() {
 		}
 		cliJSON, err := clicky.Format(result, clicky.FormatOptions{Format: "json"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(cliJSON).To(And(ContainSubstring(`"matches"`), ContainSubstring(`"operation"`)))
+		var cliRows []moduleQueryRow
+		Expect(json.Unmarshal([]byte(cliJSON), &cliRows)).To(Succeed(), "CLI JSON emits the page rows, not the envelope")
+		Expect(cliRows).To(Equal(result.Matches))
 	})
 
 	It("shows empty results, incomplete coverage, and missing-head warnings", func() {
