@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/flanksource/clicky"
+	clickytask "github.com/flanksource/clicky/task"
 	"github.com/flanksource/commons/properties"
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
@@ -121,6 +122,9 @@ func openCommandDatabase(ctx context.Context) *gorm.DB {
 	database, err := storage.UirDB(ctx, storage.DBOptions{DSN: filepath.Join(GinkgoT().TempDir(), "command.db")})
 	Expect(err).To(Succeed())
 	DeferCleanup(func() {
+		// The task-run store is process-global: a runtime that installed it over this database must not
+		// leave its writer running into the next spec, which rebinds the global properties it reads.
+		clickytask.SetStore(context.Background(), nil)
 		sqlDB, dbErr := database.DB()
 		Expect(dbErr).To(Succeed())
 		Expect(sqlDB.Close()).To(Succeed())
