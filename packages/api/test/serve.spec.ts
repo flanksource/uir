@@ -3,6 +3,16 @@ import { ApiError, addModules, applyModuleRefactor, browseModule, compareGitRevi
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("browses a historical-only location without synthesizing a current head", async () => {
+  const location = { id: "location-h", root_key: "example.org/catalog", canonical_path: "example://catalog", kind: "external", mount_path: "", primary: true };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify([location]), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const listed = await listModuleLocations(location.root_key);
+  expect(listed).toEqual([location]);
+  expect(listed[0]?.head_snapshot_id).toBeUndefined();
+  expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/locations?root=example.org%2Fcatalog", expect.objectContaining({ headers: { Accept: "application/json" } }));
+});
+
 it("loads dependency edges for the selected immutable snapshot", async () => {
   const dependencies = { captured: true, items: [{ module_path: "example.org/pricing", declared_version: "v1.0.0", target_snapshot_id: "target-1" }] };
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(dependencies), { status: 200 }));
