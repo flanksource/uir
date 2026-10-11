@@ -45,7 +45,7 @@ func (indexer *Indexer) prepareRevision(ctx context.Context, options RevisionOpt
 	if err != nil {
 		return prepared, fmt.Errorf("locate module within checkout: %w", err)
 	}
-	scratch, err := revisionWorktree(ctx, top, commit)
+	scratch, err := revisionWorktree(ctx, revisionWorktreeOptions{Repository: top, Commit: commit, Directory: options.ScratchDirectory})
 	if err != nil {
 		return prepared, err
 	}
@@ -155,8 +155,20 @@ type revisionScratch struct {
 
 // revisionWorktree adds a detached worktree of commit in a new scratch directory. Its cleanup force
 // removes the worktree, prunes the repository's worktree records, and deletes the scratch directory.
-func revisionWorktree(ctx context.Context, top, commit string) (revisionScratch, error) {
-	scratch, err := os.MkdirTemp("", "uir-revision-")
+type revisionWorktreeOptions struct {
+	Repository, Commit, Directory string
+}
+
+func revisionWorktree(ctx context.Context, options revisionWorktreeOptions) (revisionScratch, error) {
+	if options.Directory != "" {
+		if !filepath.IsAbs(options.Directory) {
+			return revisionScratch{}, errors.New("historical scratch directory must be absolute")
+		}
+		if err := os.MkdirAll(options.Directory, 0o755); err != nil {
+			return revisionScratch{}, err
+		}
+	}
+	scratch, err := os.MkdirTemp(options.Directory, "uir-revision-")
 	if err != nil {
 		return revisionScratch{}, fmt.Errorf("create historical snapshot scratch directory: %w", err)
 	}
@@ -164,14 +176,14 @@ func revisionWorktree(ctx context.Context, top, commit string) (revisionScratch,
 	if err := os.Mkdir(prepared.manifests, 0o755); err != nil {
 		return revisionScratch{}, errors.Join(fmt.Errorf("create historical manifest directory: %w", err), os.RemoveAll(scratch))
 	}
-	if _, err := revisionGit(ctx, top, "worktree", "add", "--detach", prepared.worktree, commit); err != nil {
+	if _, err := revisionGit(ctx, options.Repository, "worktree", "add", "--detach", prepared.worktree, options.Commit); err != nil {
 		return revisionScratch{}, errors.Join(err, os.RemoveAll(scratch))
 	}
 	prepared.cleanup = func() error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, removeErr := revisionGit(cleanupCtx, top, "worktree", "remove", "--force", prepared.worktree)
-		_, pruneErr := revisionGit(cleanupCtx, top, "worktree", "prune")
+		_, removeErr := revisionGit(cleanupCtx, options.Repository, "worktree", "remove", "--force", prepared.worktree)
+		_, pruneErr := revisionGit(cleanupCtx, options.Repository, "worktree", "prune")
 		return errors.Join(removeErr, pruneErr, os.RemoveAll(scratch))
 	}
 	return prepared, nil

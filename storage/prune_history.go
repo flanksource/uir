@@ -43,16 +43,16 @@ func (HistoryPrune) TableName() string { return "history_prunes" }
 // revisions no remaining delta or document names, the source blobs no remaining revision of any root
 // has, and the symbols no remaining posting or symbol delta names and no remaining symbol is owned by.
 // A prune that deletes anything advances the history_prunes epoch.
-func PruneHistory(ctx context.Context, database *gorm.DB, rootKey string, keep int) (PruneResult, error) {
+func PruneHistory(ctx context.Context, database *gorm.DB, rootKey string, options HistoryPruneOptions) (PruneResult, error) {
 	if database == nil {
 		return PruneResult{}, fmt.Errorf("prune history of %q: database is required", rootKey)
 	}
-	if keep < 1 {
-		return PruneResult{}, fmt.Errorf("prune history of %q: keep %d: at least the newest snapshot must be kept", rootKey, keep)
+	if options.Keep < 1 {
+		return PruneResult{}, fmt.Errorf("prune history of %q: keep %d: at least the newest snapshot must be kept", rootKey, options.Keep)
 	}
 	result := PruneResult{RootKey: rootKey}
 	err := database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		plan, err := planPrune(ctx, tx, rootKey, keep)
+		plan, err := planPrune(ctx, tx, rootKey, options)
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ type rebasedSnapshot struct {
 	symbols  []EffectiveSymbol
 }
 
-func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, keep int) (prunePlan, error) {
+func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, options HistoryPruneOptions) (prunePlan, error) {
 	var root ModuleRoot
 	err := tx.WithContext(ctx).Where("root_key = ?", rootKey).Take(&root).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -95,11 +95,11 @@ func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, keep int) (prun
 		return prunePlan{}, fmt.Errorf("load module root: %w", err)
 	}
 	var snapshots []ModuleSnapshot
-	if err := tx.WithContext(ctx).Select("id", "root_id", "location_id", "base_snapshot_id", "ordinal").
+	if err := tx.WithContext(ctx).Select("id", "root_id", "location_id", "base_snapshot_id", "ordinal", "reason").
 		Where("root_id = ?", root.ID).Order("ordinal DESC").Find(&snapshots).Error; err != nil {
 		return prunePlan{}, fmt.Errorf("load snapshots: %w", err)
 	}
-	kept, err := keptSnapshots(ctx, tx, root, snapshots, keep)
+	kept, err := keptSnapshots(ctx, tx, root, snapshots, options)
 	if err != nil {
 		return prunePlan{}, err
 	}
@@ -119,10 +119,17 @@ func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, keep int) (prun
 
 // keptSnapshots are the newest keep of snapshots (newest first), the root's location heads, and,
 // until none is added, every snapshot a dependency of a surviving snapshot of any root targets.
-func keptSnapshots(ctx context.Context, tx *gorm.DB, root ModuleRoot, snapshots []ModuleSnapshot, keep int) (map[uuid.UUID]bool, error) {
+func keptSnapshots(ctx context.Context, tx *gorm.DB, root ModuleRoot, snapshots []ModuleSnapshot, options HistoryPruneOptions) (map[uuid.UUID]bool, error) {
 	kept := map[uuid.UUID]bool{}
-	for _, snapshot := range snapshots[:min(keep, len(snapshots))] {
+	for _, snapshot := range snapshots[:min(options.Keep, len(snapshots))] {
 		kept[snapshot.ID] = true
+	}
+	if options.PreserveHistorical {
+		for _, snapshot := range snapshots {
+			if snapshot.Reason == ReasonHistorical {
+				kept[snapshot.ID] = true
+			}
+		}
 	}
 	var heads []uuid.UUID
 	if err := tx.WithContext(ctx).Model(&ModuleLocationHead{}).Where("root_id = ?", root.ID).Pluck("snapshot_id", &heads).Error; err != nil {

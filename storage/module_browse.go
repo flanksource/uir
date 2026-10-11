@@ -17,8 +17,8 @@ type ModuleLocationView struct {
 	Kind           string    `json:"kind"`
 	MountPath      string    `json:"mount_path"`
 	Primary        bool      `json:"primary"`
-	HeadSnapshotID uuid.UUID `json:"head_snapshot_id"`
-	HeadVersion    int64     `json:"head_version"`
+	HeadSnapshotID uuid.UUID `json:"head_snapshot_id,omitzero"`
+	HeadVersion    int64     `json:"head_version,omitempty"`
 }
 
 // SnapshotKind is what a snapshot is to its checkout: a head the checkout published (current or
@@ -95,15 +95,16 @@ func ModuleLocations(ctx context.Context, database *gorm.DB, rootKey string) ([]
 	}
 	result := make([]ModuleLocationView, 0, len(locations))
 	for _, location := range locations {
-		head, exists := byLocation[location.ID]
-		if !exists {
-			return nil, fmt.Errorf("location %s for %q has no published head", location.ID, rootKey)
-		}
-		result = append(result, ModuleLocationView{
+		head := byLocation[location.ID]
+		view := ModuleLocationView{
 			ID: location.ID, RootKey: rootKey, CanonicalPath: location.CanonicalPath,
 			Kind: location.Kind, MountPath: location.MountPath, Primary: location.ID == primary.LocationID,
-			HeadSnapshotID: head.SnapshotID, HeadVersion: head.Version,
-		})
+			HeadVersion: head.Version,
+		}
+		if head.SnapshotID != uuid.Nil {
+			view.HeadSnapshotID = head.SnapshotID
+		}
+		result = append(result, view)
 	}
 	return result, nil
 }
@@ -127,7 +128,7 @@ func ModuleSnapshots(ctx context.Context, database *gorm.DB, options ModuleSnaps
 		return nil, 0, fmt.Errorf("load location %q for %q: %w", options.Location, options.RootKey, err)
 	}
 	var head ModuleLocationHead
-	if err := database.WithContext(ctx).Where("location_id = ?", location.ID).First(&head).Error; err != nil {
+	if err := database.WithContext(ctx).Where("location_id = ?", location.ID).First(&head).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, 0, fmt.Errorf("load location head for %q: %w", options.Location, err)
 	}
 	query := database.WithContext(ctx).Model(&ModuleSnapshot{}).Where("root_id = ? AND location_id = ?", root.ID, location.ID)
@@ -175,6 +176,8 @@ func snapshotKind(snapshot ModuleSnapshot, publishedAsHead bool) SnapshotKind {
 	switch {
 	case snapshot.ModuleVersion != "":
 		return SnapshotKindVersioned
+	case snapshot.Reason == ReasonHistorical:
+		return SnapshotKindHistorical
 	case publishedAsHead:
 		return SnapshotKindHead
 	default:

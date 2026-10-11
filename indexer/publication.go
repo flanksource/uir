@@ -37,7 +37,19 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
-	unchanged := base.hasHead && !options.Force && base.snapshot.Revision == discovered.Revision &&
+	if options.Reason == storage.ReasonHistorical && !options.Force {
+		existing, found, err := matchingHistoricalSnapshot(ctx, database, location, extraction)
+		if err != nil {
+			return ModuleResult{}, storage.ModuleLocation{}, err
+		}
+		if found {
+			result.SnapshotID, result.HeadVersion = existing.ID.String(), base.head.Version
+			result.ReusedFiles, result.Unchanged = len(discovered.Files), true
+			return result, location, nil
+		}
+	}
+	unchanged := options.Reason != storage.ReasonHistorical && base.hasHead && !options.Force && base.snapshot.Revision == discovered.Revision &&
+		base.snapshot.GitCommit == discovered.GitCommit &&
 		base.snapshot.ContentSetHash == discovered.ContentSetHash &&
 		base.snapshot.ConfigurationHash == discovered.ConfigurationHash && base.snapshot.ContextHash == extraction.contextHash &&
 		base.snapshot.DependencySetHash != nil && *base.snapshot.DependencySetHash == dependencyHash(discovered.Dependencies)
@@ -53,6 +65,7 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	}
 	snapshot, err := publishSnapshot(ctx, database, snapshotPublication{
 		root: root, location: location, base: base, extraction: extraction, force: options.Force, startedAt: startedAt, reason: options.Reason,
+		preserveHead: options.Reason == storage.ReasonHistorical,
 	}, &result)
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err

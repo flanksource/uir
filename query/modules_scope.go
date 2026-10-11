@@ -46,8 +46,12 @@ type moduleScopeSelection struct {
 	warnings []MissingHeadWarning
 }
 
-func missingHeadWarning(root, location string) MissingHeadWarning {
-	return MissingHeadWarning{RootKey: root, Location: location, Message: "registered checkout has no indexed head; run `uir reindex --all`"}
+func missingHeadWarning(root string, location storage.ModuleLocation) MissingHeadWarning {
+	message := "registered checkout has no indexed head; run `uir reindex --all`"
+	if location.Kind == storage.LocationExternal {
+		message = "external location has no current head; select a historical snapshot or publish a current catalog"
+	}
+	return MissingHeadWarning{RootKey: root, Location: location.CanonicalPath, Message: message}
 }
 
 // moduleScopes selects the snapshots a query reads. A selection by root or snapshot is kept for the
@@ -157,7 +161,7 @@ func (pipeline *Pipeline) broadModuleScopes(ctx context.Context, rootKey string,
 				if head, found := byLocation[location.ID]; found {
 					heads = append(heads, head)
 				} else {
-					selection.warnings = append(selection.warnings, missingHeadWarning(root.RootKey, location.CanonicalPath))
+					selection.warnings = append(selection.warnings, missingHeadWarning(root.RootKey, location))
 				}
 			}
 			continue
@@ -175,7 +179,7 @@ func (pipeline *Pipeline) broadModuleScopes(ctx context.Context, rootKey string,
 			if err := pipeline.database.WithContext(ctx).Where("id = ? AND root_id = ?", primary.LocationID, root.ID).First(&location).Error; err != nil {
 				return moduleScopeSelection{}, lookupError(err, fmt.Sprintf("primary location for root %q", root.RootKey))
 			}
-			selection.warnings = append(selection.warnings, missingHeadWarning(root.RootKey, location.CanonicalPath))
+			selection.warnings = append(selection.warnings, missingHeadWarning(root.RootKey, location))
 			continue
 		}
 		heads = append(heads, head)

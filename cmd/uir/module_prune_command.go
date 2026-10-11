@@ -43,7 +43,7 @@ func pruneModules(ctx context.Context, database *gorm.DB, options modulePruneOpt
 	}
 	results := make([]storage.PruneResult, 0, len(roots))
 	for _, rootKey := range roots {
-		result, err := storage.PruneHistory(ctx, database, rootKey, options.Keep)
+		result, err := storage.PruneHistory(ctx, database, rootKey, storage.HistoryPruneOptions{Keep: options.Keep})
 		if err != nil {
 			return nil, err
 		}

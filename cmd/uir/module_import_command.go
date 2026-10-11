@@ -21,6 +21,9 @@ import (
 type moduleImportOptions struct {
 	File        string `args:"true"`
 	Publication string `flag:"publication" help:"Publication JSON; the field an HTTP request carries the publication in"`
+	Historical  bool   `flag:"historical" help:"Retain this commit without moving the location head"`
+	GitCommit   string `flag:"git-commit" help:"Resolved Git object ID of the producer input"`
+	Producer    string `flag:"producer" help:"Fingerprint of the producer executable and configuration"`
 }
 
 func registerImportCommand(root *cobra.Command) {
@@ -28,6 +31,9 @@ func registerImportCommand(root *cobra.Command) {
 	command = clicky.AddNamedCommandWithContext("import", root, moduleImportOptions{}, func(ctx context.Context, options moduleImportOptions) (indexer.ModuleResult, error) {
 		publication, err := readPublication(ctx, options, command.InOrStdin())
 		if err != nil {
+			return indexer.ModuleResult{}, err
+		}
+		if err := applyPublicationOptions(&publication, options); err != nil {
 			return indexer.ModuleResult{}, err
 		}
 		database, err := databaseFor(ctx)
@@ -44,6 +50,25 @@ func registerImportCommand(root *cobra.Command) {
 	command.Short = "Publish a non-Go producer's symbols and documents from a publication JSON file"
 	command.Args = cobra.MaximumNArgs(1)
 	setModuleRoute(command, "modules/import")
+}
+
+func applyPublicationOptions(publication *indexer.Publication, options moduleImportOptions) error {
+	if options.GitCommit != "" {
+		if publication.Options.GitCommit != "" && publication.Options.GitCommit != options.GitCommit {
+			return invalidPublication("--git-commit conflicts with publication.options.git_commit")
+		}
+		publication.Options.GitCommit = options.GitCommit
+	}
+	if options.Producer != "" {
+		if publication.Options.Producer != "" && publication.Options.Producer != options.Producer {
+			return invalidPublication("--producer conflicts with publication.options.producer")
+		}
+		publication.Options.Producer = options.Producer
+	}
+	if options.Historical {
+		publication.Options.Historical = true
+	}
+	return nil
 }
 
 func invalidPublication(message string) error {
