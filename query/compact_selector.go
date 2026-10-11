@@ -207,7 +207,7 @@ func (index *compactIndex) selectorKey(ctx context.Context, selector compiledSel
 		key = row.Name
 	case "func", "method", "field", "struct", "type", "var", "kind":
 		key = row.Name
-		if strings.ContainsAny(selector.Pattern, "./") {
+		if !selector.NameOnly && strings.ContainsAny(selector.Pattern, "./") {
 			name, err := index.queryName(ctx, row)
 			if err != nil {
 				return "", false, err

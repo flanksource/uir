@@ -16,6 +16,8 @@ function SiteBody({ site }: { site: ModuleGraphSite }) {
   return <>
     <span className="block font-mono text-xs text-primary">{siteLocation(site)}</span>
     {site.text && <code className="block max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded bg-muted px-1.5 py-1 font-mono text-xs" title={site.text}>{site.text}</code>}
+    {site.resolution && <span className="block text-xs">{site.resolution}{site.reference ? ` · ${site.reference}` : ""}{site.targets && site.targets.length > 1 ? ` · ${site.targets.length} candidate targets` : ""}</span>}
+    {site.props && <code className="block break-all text-xs">{JSON.stringify(site.props)}</code>}
     <span className="flex flex-wrap items-center gap-1">
       {guards.length === 0
         ? <span className="text-xs text-muted-foreground">Unconditional</span>
@@ -26,7 +28,7 @@ function SiteBody({ site }: { site: ModuleGraphSite }) {
 
 /** The edge's type as its icon, with the word it replaced as the tooltip. */
 function EdgeTypeIcon({ type }: { type: ModuleGraphEdge["type"] }) {
-  const words = type === "dispatch" ? `dispatch ${DISPATCH_LABEL}` : "call";
+  const words = type === "dispatch" ? `dispatch ${DISPATCH_LABEL}` : type;
   const Icon = type === "dispatch" ? DispatchIcon : CallIcon;
   return <span title={words} className="flex text-base leading-none"><Icon title={words} /></span>;
 }
@@ -36,12 +38,12 @@ function EdgeTypeIcon({ type }: { type: ModuleGraphEdge["type"] }) {
  * With `onReveal` each site is a button that opens its line in the Source tab.
  */
 export function EdgeSites({ edge, graph, onReveal }: { edge: ModuleGraphEdge; graph: ModuleGraph; onReveal?: (site: ModuleGraphSite) => void }) {
-  return <section className="space-y-2" aria-label="Call sites">
+  return <section className="space-y-2" aria-label={edge.kind?.includes(".") ? "Source evidence" : "Call sites"}>
     <header className="space-y-1">
       <h3 className="break-words text-sm font-semibold">{requireNode(graph, edge.from).label} → {requireNode(graph, edge.to).label}</h3>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <EdgeTypeIcon type={edge.type} />{edge.sites.length} call {edge.sites.length === 1 ? "site" : "sites"}
-        {!onReveal && <span>· the caller has no indexed source</span>}
+        <EdgeTypeIcon type={edge.type} />{edge.kind ?? edge.type} · {edge.sites.length} {edge.sites.length === 1 ? "site" : "sites"}
+        {!onReveal && <span>· no indexed source for this evidence</span>}
       </div>
     </header>
     <ol className="divide-y divide-border rounded-md border border-border">
@@ -55,7 +57,7 @@ export function EdgeSites({ edge, graph, onReveal }: { edge: ModuleGraphEdge; gr
 }
 
 function nodeStatus(node: ModuleGraphNode): string {
-  if (node.unresolved) return "Unresolved: the index has no target for this call";
+  if (node.unresolved) return "Unresolved: the index has no target for this relationship";
   if (isBuiltin(node)) return "Builtin: no source";
   if (isExternal(node)) return "External: declared outside the indexed snapshots";
   return node.location ? "Indexed" : "Package scope: calls made outside any declaration";
@@ -67,12 +69,13 @@ function Mono({ children }: { children: ReactNode }) {
 
 /** What a node is and where it is declared, with the actions that open it or re-root the graph on it. */
 export function NodeDetails({ node, graph, isRoot, onOpen, onFocus }: {
-  node: ModuleGraphNode; graph: ModuleGraph; isRoot: boolean; onOpen: () => void; onFocus: () => void;
+  node: ModuleGraphNode; graph: ModuleGraph; isRoot: boolean; onOpen: () => void; onFocus?: () => void;
 }) {
   const { module, package: pkg = node.group, type, method, signature } = node.identifier;
   const location = node.location;
   const kind = nodeKind(graph, node);
   const totals = walkedTotals(graph, node);
+  const native = graph.edges.some((edge) => edge.kind?.includes("."));
   const items: KeyValueListItem[] = [
     { key: "identifier", label: "Identifier", value: <span className="flex items-center gap-1.5">
       <span title={kind} className="flex shrink-0 text-base leading-none"><NodeGlyphIcon glyph={nodeGlyph(graph, node)} title={kind} /></span>
@@ -82,16 +85,17 @@ export function NodeDetails({ node, graph, isRoot, onOpen, onFocus }: {
     { key: "package", label: "Package", value: <Mono>{pkg}</Mono>, hidden: !pkg },
     { key: "module", label: "Module", value: module, hidden: !module },
     { key: "location", label: "Location", value: <Mono>{`${location?.path ?? "unknown file"}:${location?.line ?? "?"}`}</Mono>, hidden: !location },
-    { key: "callers", label: "Callers", value: totals.callers, hidden: totals.callers === undefined },
-    { key: "callees", label: "Callees", value: totals.callees, hidden: totals.callees === undefined },
+    { key: "callers", label: native ? "Incoming" : "Callers", value: totals.callers, hidden: totals.callers === undefined },
+    { key: "callees", label: native ? "Outgoing" : "Callees", value: totals.callees, hidden: totals.callees === undefined },
     { key: "status", label: "Status", value: nodeStatus(node) },
   ];
   return <section className="space-y-2" aria-label="Node details">
     <h3 className="break-words text-sm font-semibold">{node.label}</h3>
     <KeyValueList items={items} rowClassName="grid-cols-[5.5rem_minmax(0,1fr)] gap-density-2" valueClassName="text-xs" />
+    {node.props && <pre className="overflow-auto text-xs">{JSON.stringify(node.props, null, 2)}</pre>}
     <div className="flex flex-wrap gap-2">
       <Button type="button" size="sm" variant="outline" disabled={!location} onClick={onOpen}>Open declaration</Button>
-      <Button type="button" size="sm" variant="outline" disabled={!location || isRoot} onClick={onFocus}>Focus</Button>
+      {onFocus && <Button type="button" size="sm" variant="outline" disabled={!location || isRoot} onClick={onFocus}>Focus</Button>}
     </div>
   </section>;
 }
@@ -101,17 +105,17 @@ function LegendEntry({ mark, children }: { mark: ReactNode; children: ReactNode 
 }
 
 /** The key to the icons: one entry per icon this response draws, then the box and line styles. */
-export function Legend({ graph }: { graph: ModuleGraph }) {
+export function Legend({ graph, expandable = true }: { graph: ModuleGraph; expandable?: boolean }) {
   return <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground" aria-label="Legend">
     {usedGlyphs(graph).map((glyph) => <LegendEntry key={glyph} mark={<NodeGlyphIcon glyph={glyph} />}>{NODE_GLYPH_NAME[glyph]}</LegendEntry>)}
     {(graph.groups ?? []).length > 0 && <LegendEntry mark={<PackageIcon />}>package</LegendEntry>}
     <LegendEntry mark={<span className="inline-block h-3 w-5 rounded border border-sky-500/60 bg-sky-500/10" />}>root</LegendEntry>
     <LegendEntry mark={<span className="inline-block h-3 w-5 rounded border border-dashed border-border bg-muted" />}>no source: not expandable</LegendEntry>
-    <LegendEntry mark={<CallIcon />}>call</LegendEntry>
-    <LegendEntry mark={<span className="inline-block w-6 border-t-2 border-dashed border-muted-foreground" />}>every call site guarded</LegendEntry>
+    {graph.edges.some((edge) => edge.type === "call") && <LegendEntry mark={<CallIcon />}>call</LegendEntry>}
+    {graph.edges.some((edge) => edge.sites.some((site) => site.guards?.length)) && <LegendEntry mark={<span className="inline-block w-6 border-t-2 border-dashed border-muted-foreground" />}>every source site guarded</LegendEntry>}
     {graph.edges.some((edge) => edge.type === "dispatch") && <LegendEntry mark={<><span className="inline-block w-6 border-t-2 border-sky-500" /><DispatchIcon /></>}>{DISPATCH_LABEL}</LegendEntry>}
-    <LegendEntry mark={<span className="text-xs font-semibold">×N</span>}>call sites on one edge</LegendEntry>
-    <LegendEntry mark={<span className="text-xs font-semibold">+N</span>}>more to load</LegendEntry>
+    <LegendEntry mark={<span className="text-xs font-semibold">×N</span>}>source sites on one edge</LegendEntry>
+    {expandable && <LegendEntry mark={<span className="text-xs font-semibold">+N</span>}>more to load</LegendEntry>}
     <LegendEntry mark={<UiWarningTriangle />}>not drawn</LegendEntry>
   </ul>;
 }

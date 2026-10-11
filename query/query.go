@@ -51,6 +51,7 @@ type Filter struct {
 // Owner is the glob an Entity:Field reference matches against the name of a field's direct owner;
 // Pattern then matches the field's own name.
 type Selector struct {
+	NameOnly      bool
 	Kind          string `json:"kind"`
 	Pattern       string `json:"pattern"`
 	ModulePattern string `json:"module_pattern,omitempty"`

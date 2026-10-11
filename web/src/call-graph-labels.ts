@@ -189,7 +189,7 @@ function guardText(edge: ModuleGraphEdge, { guardLabel, truncateAt }: PillOption
  * read as if it covered every site. A dispatch edge's guard is cut shorter by the room its icon takes.
  */
 export function edgeLabel(edge: ModuleGraphEdge, options: PillOptions): string | undefined {
-  const text = [guardText(edge, options), edge.sites.length > 1 ? `×${edge.sites.length}` : ""].filter(Boolean).join(" ");
+  const text = [edge.kind ?? "", guardText(edge, options), edge.sites.length > 1 ? `×${edge.sites.length}` : ""].filter(Boolean).join(" ");
   return text === "" ? undefined : text;
 }
 

@@ -29,7 +29,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
     setSubmitted("");
     setBusy(false);
     setError("");
-  }, [route.module, route.snapshot]);
+  }, [route.module, route.snapshot, route.queryLanguage]);
   useEffect(() => () => { request.current += 1; clearTimeout(switchTimer.current); }, []);
   function changeOpen(next: boolean) {
     if (!next) {
@@ -64,7 +64,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
     const current = ++request.current;
     setBusy(true); setResult(undefined); setError("");
     try {
-      const { data } = await runModuleQuery(text, scope.root, scope.snapshot);
+      const { data } = await runModuleQuery(text, scope.root, scope.snapshot, { language: route.queryLanguage });
       if (current !== request.current) return;
       queryPaletteRows(data);
       setResult(data); setSubmitted(text); setFocusListKey(current);
@@ -100,7 +100,7 @@ export function QueryCommandPalette({ open, onOpenChange, route, onRoute, comman
       const symbol = result.symbols.find((item) => item.id === row.symbol_id);
       if (!symbol) throw new Error(`Candidate ${row.symbol_id} has no resolved symbol`);
       return { id: `candidate:${index}`, label: `Resolve ${symbol.query_name}`, description: "Open named symbol on Query page",
-        onSelect: () => { onRoute({ view: "query", expression: symbol.query_name }); changeOpen(false); } };
+        onSelect: () => { onRoute({ view: "query", expression: symbol.query_name, queryLanguage: "auto" }); changeOpen(false); } };
     }) },
     { id: "query-actions", items: [{ id: "query:full", label: "Open full results on Query page", shortcut: "↵",
       onSelect: () => { onRoute({ view: "query", expression: submitted }); changeOpen(false); } }] },

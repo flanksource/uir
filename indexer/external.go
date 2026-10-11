@@ -46,15 +46,26 @@ func publishExternal(ctx context.Context, database *gorm.DB, publication Publica
 	if err != nil {
 		return ModuleResult{}, fmt.Errorf("%w: %w", ErrInvalidPublication, err)
 	}
-	for _, kind := range publication.Kinds {
-		if _, err := storage.RegisterKind(ctx, database, kind.Name, kind.Category); err != nil {
-			return ModuleResult{}, err
-		}
+	catalog, err := storage.LoadDomainCatalog(ctx, database)
+	if err != nil {
+		return ModuleResult{}, err
+	}
+	catalog, err = publication.domainCatalog(catalog)
+	if err != nil {
+		return ModuleResult{}, fmt.Errorf("%w: %w", ErrInvalidPublication, err)
 	}
 	var result ModuleResult
 	err = storage.RetryAllocationConflicts(ctx, database, func(transaction *gorm.DB) error {
+		for _, kind := range publication.Kinds {
+			if _, err := storage.RegisterKind(ctx, transaction, kind.Name, kind.Category); err != nil {
+				return err
+			}
+		}
+		if err := storage.RegisterDomainCatalog(ctx, transaction, catalog); err != nil {
+			return err
+		}
 		var publishErr error
-		result, _, publishErr = indexModule(ctx, transaction, extraction, map[string]storage.ModuleLocation{}, ModuleOptions{Reason: storage.ReasonImport})
+		result, _, publishErr = indexModule(ctx, transaction, extraction, map[string]storage.ModuleLocation{}, ModuleOptions{Reason: publication.Options.reason()})
 		return publishErr
 	})
 	return result, err
@@ -62,6 +73,9 @@ func publishExternal(ctx context.Context, database *gorm.DB, publication Publica
 
 // validatedExtraction checks the publication without writing anything and returns its extraction.
 func (publication Publication) validatedExtraction(registered symbolhandle.Kinds, startedAt time.Time) (moduleExtraction, error) {
+	if err := publication.Options.validate(); err != nil {
+		return moduleExtraction{}, err
+	}
 	if err := publication.validate(); err != nil {
 		return moduleExtraction{}, err
 	}
@@ -80,7 +94,7 @@ func (publication Publication) validatedExtraction(registered symbolhandle.Kinds
 // the external location, its files, and per package an input hash over its documents, with every
 // document's postings and definitions derived from its content.
 func (publication Publication) extraction(kinds symbolhandle.Kinds, rows map[string]storage.Symbol, startedAt time.Time) (moduleExtraction, error) {
-	configuration := externalConfigurationHash()
+	configuration := publication.Options.configurationHash()
 	files := make([]discoveredFile, 0, len(publication.Documents))
 	byPackage := map[string][]PublishedDocument{}
 	for _, document := range publication.Documents {
@@ -91,7 +105,7 @@ func (publication Publication) extraction(kinds symbolhandle.Kinds, rows map[str
 	extraction := moduleExtraction{
 		root: discoveredRoot{
 			RootKey: publication.RootKey, Name: publication.Name, LocalPath: publication.Location.URI, Kind: storage.LocationExternal,
-			Revision: publication.Revision, WorktreeState: storage.WorktreeUnknown, LastModifiedAt: startedAt,
+			Revision: publication.Revision, GitCommit: publication.Options.GitCommit, WorktreeState: storage.WorktreeUnknown, LastModifiedAt: startedAt,
 			ContentSetHash: contentSetHash(files, nil), ConfigurationHash: configuration, Files: files,
 		},
 		indexerVersion: ExternalIndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{},

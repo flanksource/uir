@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
@@ -142,7 +143,9 @@ var _ = Describe("DecodeDocument", func() {
 		Entry("an undeclared enclosing key", func(_ *storage.Document, content *storage.DocumentContent) {
 			content.Occurrences[0].EnclosingKey = "v1:[]"
 		}, "is not declared"),
-		Entry("an unsupported format version", func(_ *storage.Document, content *storage.DocumentContent) { content.Version = storage.DocumentFormatVersion + 1 }, "format version 4"),
+		Entry("an unsupported format version", func(_ *storage.Document, content *storage.DocumentContent) {
+			content.Version = storage.DocumentFormatVersion + 1
+		}, fmt.Sprintf("format version %d", storage.DocumentFormatVersion+1)),
 	)
 
 	It("round-trips a valid typed document", func() {

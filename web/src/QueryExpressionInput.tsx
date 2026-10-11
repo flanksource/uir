@@ -5,6 +5,7 @@ import type { IDisposable, editor as MonacoEditorType } from "monaco-editor";
 import { ApiError, errorMessage } from "./api";
 import { getMonacoWorker } from "./monaco-workers";
 import { queryCompletionContext } from "./query-completion";
+import { isSQL } from "./sql-completion";
 import { queryRunnerErrorRange } from "./query-diagnostic";
 import { queryCompletionProvider, queryLanguageId, registerQueryLanguage } from "./query-language";
 import { queryScope } from "./query-model";
@@ -34,6 +35,8 @@ export function QueryExpressionInput({ draft, route, path, autoFocus = false, ru
   const [completionError, setCompletionError] = useState("");
   const [context, setContext] = useState(() => queryCompletionContext(draft, draft.length));
   scope.current = queryScope(route);
+  const language = useRef(route.queryLanguage);
+  language.current = route.queryLanguage;
   run.current = onRun;
   currentRunError.current = runError;
   useEffect(() => {
@@ -44,7 +47,9 @@ export function QueryExpressionInput({ draft, route, path, autoFocus = false, ru
     disposables.current.forEach((item) => item.dispose());
     disposables.current = [];
   }, []);
-  const hint = context.mode === "symbol" ? "Type a Go symbol; use * or ? to expand matching symbols. Exact names show indexed suggestions as you type."
+  const sql = isSQL(draft, route.queryLanguage);
+  const hint = sql ? "SELECT fields FROM a selector or navigation function; filter with WHERE, MATCH or IMATCH."
+    : context.mode === "symbol" ? "Type a Go symbol; use * or ? to expand matching symbols. Exact names show indexed suggestions as you type."
     : context.mode === "relation" ? "Choose a relation (<, >, =, :impl, :methods, ~w), set operator (&, |), or path (>>)."
     : context.mode === "filter" ? "Add -f, +pkg, or -pkg; chain another relation or combine expressions with &, |, or >>."
     : context.filter === "-f" ? "Enter a file suffix, such as _test.go."
@@ -53,7 +58,7 @@ export function QueryExpressionInput({ draft, route, path, autoFocus = false, ru
   return <div className="uir-query-expression min-w-64 flex-1 text-sm">
     <label className="mb-1 block" id={labelId}>Expression</label>
     <MonacoProvider getWorker={getMonacoWorker}>
-      <MonacoEditor value={draft} onChange={onChange} language={queryLanguageId} path={path} height="2.75rem"
+      <MonacoEditor value={draft} onChange={onChange} language={queryLanguageId} path={path} height={sql ? "7rem" : "2.75rem"}
         beforeMount={registerQueryLanguage} onMount={(editor, monaco) => {
           const currentModel = editor.getModel();
           if (!currentModel) throw new Error(`Query expression editor ${path} has no model`);
@@ -68,7 +73,7 @@ export function QueryExpressionInput({ draft, route, path, autoFocus = false, ru
           });
           editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => run.current());
           disposables.current = [
-            monaco.languages.registerCompletionItemProvider(queryLanguageId, queryCompletionProvider(monaco, { uri: path, scope: () => scope.current, reportError: setCompletionError })),
+            monaco.languages.registerCompletionItemProvider(queryLanguageId, queryCompletionProvider(monaco, { uri: path, scope: () => scope.current, language: () => language.current, reportError: setCompletionError })),
             editor.onDidFocusEditorText(() => editor.trigger("uir-query", "editor.action.triggerSuggest", {})),
             editor.onDidChangeCursorPosition((event) => {
               const model = editor.getModel();

@@ -15,7 +15,7 @@ import (
 // ExternalIndexerVersion versions how Publish turns a publication into documents and hashes: it enters
 // the configuration hash of every external snapshot and is the indexer version of every external
 // document.
-const ExternalIndexerVersion = "external-v1"
+const ExternalIndexerVersion = "external-v2"
 
 const (
 	externalConfigurationVersion = "uir-external-configuration-v1"
@@ -29,6 +29,7 @@ const (
 // parameter types cannot be recovered from it. What a root declares, references, calls, and writes
 // comes from its documents' content, exactly as for a Go module.
 type Publication struct {
+	Options PublishOptions `json:"options,omitzero"`
 	// RootKey identifies the root, as a Go module path does; any non-empty string.
 	RootKey string `json:"root_key"`
 	// Name is the root's display name when the publication registers it.
@@ -36,10 +37,11 @@ type Publication struct {
 	Location ExternalLocation `json:"location"`
 	// Revision is the producer's revision of its sources, such as a commit; it may be empty. A
 	// publication whose revision, documents, and sources equal the current head's is reported unchanged.
-	Revision  string              `json:"revision"`
-	Kinds     []KindDeclaration   `json:"kinds"`
-	Symbols   []PublishedSymbol   `json:"symbols"`
-	Documents []PublishedDocument `json:"documents"`
+	Revision      string                     `json:"revision"`
+	Kinds         []KindDeclaration          `json:"kinds"`
+	Relationships []storage.RelationshipKind `json:"relationships,omitempty"`
+	Symbols       []PublishedSymbol          `json:"symbols"`
+	Documents     []PublishedDocument        `json:"documents"`
 }
 
 // ExternalLocation is where the producer reads the root from; URI is stored as the location's
@@ -51,6 +53,7 @@ type ExternalLocation struct {
 // KindDeclaration is a custom symbol kind the publication uses, registered before its documents are
 // validated; see storage.RegisterKind.
 type KindDeclaration struct {
+	Schema   storage.JSON          `json:"schema,omitempty"`
 	Name     string                `json:"name"`
 	Category symbolhandle.Category `json:"category"`
 }
@@ -124,14 +127,6 @@ func (document PublishedDocument) validate() error {
 		return fmt.Errorf("content_hash %s is not the SHA-256 of its source", document.ContentHash)
 	}
 	return nil
-}
-
-// externalConfigurationHash is the configuration of every external snapshot: the external indexer
-// version, which decides how documents and hashes are derived.
-func externalConfigurationHash() string {
-	digest := newCanonicalHash(externalConfigurationVersion)
-	digest.text(ExternalIndexerVersion)
-	return digest.sum()
 }
 
 // externalInputHash digests (configuration_hash, package_path, sorted (path_key, content_hash, document

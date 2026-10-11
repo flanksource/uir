@@ -188,13 +188,17 @@ type selectorGlob struct {
 }
 
 func compileSelectorGlob(pattern string) (selectorGlob, error) {
-	if pattern == "" || len(pattern) > maximumSelectorPattern {
+	return compileGlob(pattern, false)
+}
+
+func compileGlob(pattern string, allowEmptySegments bool) (selectorGlob, error) {
+	if !allowEmptySegments && pattern == "" || len(pattern) > maximumSelectorPattern {
 		return selectorGlob{}, fmt.Errorf("glob length must be between 1 and %d", maximumSelectorPattern)
 	}
 	parts := strings.Split(pattern, "/")
 	glob := selectorGlob{segments: make([]*regexp.Regexp, len(parts)), stars: make([]bool, len(parts))}
 	for position, part := range parts {
-		if part == "" {
+		if part == "" && !allowEmptySegments {
 			return selectorGlob{}, fmt.Errorf("empty glob path segment")
 		}
 		if part == "**" {

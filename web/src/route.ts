@@ -1,4 +1,4 @@
-import type { ModuleGraphDirection, ModuleRoot } from "./api";
+import type { ModuleGraphDirection, ModuleRoot, QueryLanguage } from "./api";
 
 export const ALL_MODULES = "*";
 /** The depth the Explorer opens a call graph at (graph.DefaultDepth). */
@@ -22,6 +22,7 @@ export type Route = {
   symbolVisibility: string;
   symbolKinds: string;
   expression: string;
+  queryLanguage: QueryLanguage;
   compareFrom: string;
   compareTo: string;
   logCommit: string;
@@ -60,6 +61,7 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
     symbolVisibility: params.get("symbolVisibility") ?? "",
     symbolKinds: params.get("symbolKinds") ?? "",
     expression: params.get("expression") ?? "",
+    queryLanguage: params.get("language") === "sql" ? "sql" : params.get("language") === "compact" ? "compact" : "auto",
     compareFrom: params.get("compareFrom") ?? "",
     compareTo: params.get("compareTo") ?? "",
     logCommit: params.get("logCommit") ?? "",
@@ -84,6 +86,7 @@ export function routeURL(route: Route): string {
     if (route[key]) params.set(key, route[key]);
   }
   if (route.historyGroup !== "package") params.set("historyGroup", route.historyGroup);
+  if (route.queryLanguage !== "auto") params.set("language", route.queryLanguage);
   if (route.explorerMode === "symbols") params.set("explorerMode", "symbols");
   if (route.historyLayout !== "inline") params.set("historyLayout", route.historyLayout);
   if (route.explorerTab !== "source") params.set("explorerTab", route.explorerTab);

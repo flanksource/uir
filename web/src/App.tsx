@@ -34,7 +34,7 @@ const locationColumns: DataTableColumn<ModuleLocation>[] = [
   { key: "canonical_path", label: "Checkout", sortable: true, grow: true },
   { key: "kind", label: "Kind" },
   { key: "primary", label: "Primary", render: (_, row) => row.primary ? "Yes" : "" },
-  { key: "head_version", label: "Head", render: (_, row) => `v${row.head_version}` },
+  { key: "head_version", label: "Head", render: (_, row) => row.head_snapshot_id ? `v${row.head_version}` : "No current head" },
 ];
 function IndexForm({ root, defaultPath, onSuccess }: { root: string; defaultPath: string; onSuccess: (run: ModuleIndexRun) => void }) {
   const [path, setPath] = useState(defaultPath);
@@ -116,7 +116,7 @@ export function App() {
   }, [route.module, route.location, selectedRoot]);
   const selectedLocation = locations.data?.find((item) => item.canonical_path === route.location);
   useEffect(() => {
-    if (route.location && !route.snapshot && selectedLocation) setRoute({ snapshot: selectedLocation.head_snapshot_id }, true);
+    if (route.location && !route.snapshot && selectedLocation?.head_snapshot_id) setRoute({ snapshot: selectedLocation.head_snapshot_id }, true);
     // A selected checkout resolves to its current head only without an explicit snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.location, route.snapshot, selectedLocation]);
@@ -127,8 +127,8 @@ export function App() {
   const browse = useTimedLoad<ModuleBrowse>(route.snapshot && browseActive ? () => browseModule(route.snapshot) : null,
     `browse:${route.snapshot}:${browseActive ? "active" : "idle"}:${refresh}`);
   const scope = queryScope(route);
-  const query = useTimedLoad<ModuleQueryResult>(scope && route.view === "query" && route.expression ? () => runModuleQuery(route.expression, scope.root, scope.snapshot) : null,
-    `query:${route.module}:${route.snapshot}:${route.expression}:${route.view}`);
+  const query = useTimedLoad<ModuleQueryResult>(scope && route.view === "query" && route.expression ? () => runModuleQuery(route.expression, scope.root, scope.snapshot, { language: route.queryLanguage }) : null,
+    `query:${route.module}:${route.snapshot}:${route.expression}:${route.queryLanguage}:${route.view}`);
   const examples = useMemo<{ items: QueryExample[]; error?: string }>(() => {
     if (route.module && !browse.data) return { items: [] };
     try { return { items: queryExamples(route.module, browse.data?.nodes ?? []) }; } catch (error) { return { items: [], error: `Cannot build query examples: ${String(error)}` }; }
@@ -167,11 +167,11 @@ export function App() {
       <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
         <Section><Heading>Indexed module roots</Heading><Muted>Each Go module path has one root and can have multiple registered checkouts.</Muted>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(roots.data ?? []).map((item) => <Card key={item.root_key}><strong>{item.name || item.root_key}</strong><div><Muted>{item.root_key}</Muted></div><div>{item.location}</div><Muted>Primary head v{item.head_version}</Muted></Card>)}</div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(roots.data ?? []).map((item) => <Card key={item.root_key}><strong>{item.name || item.root_key}</strong><div><Muted>{item.root_key}</Muted></div><div>{item.location}</div><Muted>{item.snapshot_id ? `Primary head v${item.head_version}` : "No current head"}</Muted></Card>)}</div>
           {roots.data?.length === 0 && <p>No modules are indexed yet. Add a local directory below.</p>}
         </Section>
         {route.module && <Section><h2>Checkouts</h2><DataList rows={locations.data ?? []} loading={locations.loading} error={locations.error} columns={locationColumns}
-          onClick={(row) => setRoute({ location: row.canonical_path, snapshot: row.head_snapshot_id, source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 })} /></Section>}
+          onClick={(row) => setRoute({ location: row.canonical_path, snapshot: row.head_snapshot_id ?? "", source: "", node: "", fileSearch: "", symbolSearch: "", offset: 0 })} /></Section>}
         {route.location && <Section><h2>Snapshots for {route.location}</h2><SnapshotTable snapshots={snapshots} route={route} onRoute={setRoute} /></Section>}
         <IndexForm root={route.module} defaultPath={route.location} onSuccess={(run) => {
           setIndexRun(run.run_id);

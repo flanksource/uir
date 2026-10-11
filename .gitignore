@@ -2,7 +2,9 @@
 .bin/
 .facet/
 node_modules
-hack/
+hack/*
+!hack/snapshotbench/
+!hack/sql-domains/
 coverage.out
 coverage.html
 *.test

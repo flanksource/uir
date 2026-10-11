@@ -12,10 +12,10 @@ import (
 )
 
 // Build walks src breadth-first from roots. Callees are walked from the roots
-// and from nodes at positive depth, callers from the roots and from nodes at
-// negative depth, so a caller's other callees are not pulled in. A node reached
-// again keeps its first depth and only gains the edge, which is how a cycle
-// ends. Nodes at Options.Depth are still asked for their neighbours, to draw
+// and callers are separate walks, so a caller's other callees are not pulled in.
+// A node reached again keeps its first display depth; each direction expands it
+// once, which ends cycles without losing an overlapping walk.
+// Nodes at Options.Depth are still asked for their neighbours, to draw
 // the edges back into the graph and to count what lies beyond.
 func Build(ctx context.Context, src Source, roots []string, opts Options) (*Graph, error) {
 	if err := opts.validate(); err != nil {
@@ -24,18 +24,22 @@ func Build(ctx context.Context, src Source, roots []string, opts Options) (*Grap
 	if len(roots) == 0 {
 		return nil, errors.New("graph: at least one root is required")
 	}
-	b := &builder{src: src, opts: opts, nodes: map[string]*Node{}, edges: map[string]Edge{}, excluded: map[string]map[string]bool{}}
+	b := &builder{src: src, opts: opts, nodes: map[string]*Node{}, edges: map[string]Edge{}, excluded: map[string]map[string]bool{}, walked: map[walkSide]bool{}}
 	for _, root := range roots {
 		if err := b.addRoot(ctx, root); err != nil {
 			return nil, err
 		}
 	}
 	for len(b.queue) > 0 {
-		id := b.queue[0]
+		walk := b.queue[0]
 		b.queue = b.queue[1:]
-		if err := b.expand(ctx, b.nodes[id]); err != nil {
+		node := *b.nodes[walk.id]
+		node.Depth = walk.depth
+		if err := b.expandWalk(ctx, &node, walk.direction); err != nil {
 			return nil, err
 		}
+		b.nodes[walk.id].In = max(b.nodes[walk.id].In, node.In)
+		b.nodes[walk.id].Out = max(b.nodes[walk.id].Out, node.Out)
 	}
 	return b.graph()
 }
@@ -61,10 +65,29 @@ type builder struct {
 	nodes   map[string]*Node
 	edges   map[string]Edge
 	roots   []string
-	queue   []string
+	queue   []graphWalk
+	walked  map[walkSide]bool
 	omitted Omitted
 	// excluded holds the ids of the excluded nodes by group.
 	excluded map[string]map[string]bool
+}
+
+type graphWalk struct {
+	id               string
+	depth, direction int
+}
+type walkSide struct {
+	id        string
+	direction int
+}
+
+func (b *builder) enqueue(id string, depth, direction int) {
+	key := walkSide{id: id, direction: direction}
+	if b.walked[key] || b.nodes[id].Unresolved {
+		return
+	}
+	b.walked[key] = true
+	b.queue = append(b.queue, graphWalk{id: id, depth: depth, direction: direction})
 }
 
 func (b *builder) addRoot(ctx context.Context, id string) error {
@@ -93,15 +116,20 @@ func (b *builder) add(node Node, depth int) {
 	node.Depth, node.In, node.Out = depth, 0, 0
 	b.nodes[node.ID] = &node
 	if !node.Unresolved {
-		b.queue = append(b.queue, node.ID)
+		if depth >= 0 && b.opts.Direction != DirectionCallers {
+			b.enqueue(node.ID, depth, 1)
+		}
+		if depth <= 0 && b.opts.Direction != DirectionCallees {
+			b.enqueue(node.ID, depth, -1)
+		}
 	}
 }
 
-func (b *builder) expand(ctx context.Context, node *Node) error {
+func (b *builder) expandWalk(ctx context.Context, node *Node, direction int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if b.opts.Direction != DirectionCallers && node.Depth >= 0 {
+	if direction > 0 {
 		steps, err := b.src.Out(ctx, node.ID)
 		if err != nil {
 			return fmt.Errorf("graph: callees of %q: %w", node.ID, err)
@@ -110,7 +138,7 @@ func (b *builder) expand(ctx context.Context, node *Node) error {
 			return err
 		}
 	}
-	if b.opts.Direction != DirectionCallees && node.Depth <= 0 {
+	if direction < 0 {
 		steps, err := b.src.In(ctx, node.ID)
 		if err != nil {
 			return fmt.Errorf("graph: callers of %q: %w", node.ID, err)
@@ -143,6 +171,9 @@ func (b *builder) follow(node *Node, steps []Step, direction int) (int, error) {
 				continue
 			}
 			b.add(step.Node, node.Depth+direction)
+		}
+		if !atDepth {
+			b.enqueue(step.Node.ID, node.Depth+direction, direction)
 		}
 		b.record(step.Edge)
 	}
@@ -208,6 +239,9 @@ func (b *builder) merge(id string, steps []Step, direction int) ([]Step, error) 
 			edge.From, edge.To = edge.To, edge.From
 		}
 		edge.ID = edge.From + "|" + edge.To + "|" + string(edge.Type)
+		if edge.Kind != "" {
+			edge.ID += "|" + edge.Kind
+		}
 		if existing, ok := byEdge[edge.ID]; ok {
 			existing.Edge.Sites = append(existing.Edge.Sites, edge.Sites...)
 			if len(existing.Edge.Properties) == 0 {
@@ -268,7 +302,7 @@ func (b *builder) graph() (*Graph, error) {
 	}
 	slices.SortStableFunc(g.Nodes, func(a, b Node) int { return cmp.Compare(a.Depth, b.Depth) })
 	slices.SortFunc(g.Edges, func(a, b Edge) int {
-		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(a.To, b.To), cmp.Compare(a.Type, b.Type))
+		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(a.To, b.To), cmp.Compare(a.Type, b.Type), cmp.Compare(a.Kind, b.Kind))
 	})
 	return g, nil
 }

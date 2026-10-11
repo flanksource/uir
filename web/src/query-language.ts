@@ -1,6 +1,9 @@
 import type { Monaco } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import { suggestModuleSymbols, suggestTypedSelectors } from "./api";
+import type { QueryLanguage } from "./api";
+import { isSQL } from "./sql-completion";
+import { completeSQL } from "./sql-language";
 import {
   entityField, queryCompletionContext, querySyntaxCompletions, quoteQuerySymbol, quotedValue, selectorKinds, unquoteQueryValue,
 } from "./query-completion";
@@ -14,6 +17,9 @@ export function registerQueryLanguage(monaco: Monaco): void {
   monaco.languages.setMonarchTokensProvider(queryLanguageId, {
     tokenizer: { root: [
       [/\s+/, "white"],
+      [/--.*$|\/\*.*?\*\//, "comment"],
+      [/\b(?:SELECT|FROM|AS|WHERE|ORDER|BY|LIMIT|MATCH|IMATCH|IN|NOT|AND|OR|IS|NULL|TRUE|FALSE|ASC|DESC)\b/i, "keyword"],
+      [/'(?:''|[^'])*'/, "string"],
       [/<<[1-8]?|>>[1-8]?|[<>=&|]/, "operator"],
       [new RegExp(`[+-]?(?:${selectorKinds}):`), "keyword"],
       [new RegExp(entityField), "type"],
@@ -30,13 +36,20 @@ export function registerQueryLanguage(monaco: Monaco): void {
 }
 
 export function queryCompletionProvider(monaco: Monaco, options: {
-  uri: string; scope: () => Scope; reportError: (message: string) => void;
+  uri: string; scope: () => Scope; reportError: (message: string) => void; language?: () => QueryLanguage;
 }): monacoEditor.languages.CompletionItemProvider {
   const { uri, scope, reportError } = options;
   return {
     triggerCharacters: [".", "/", "*", "?", "<", ">", "=", ":", "~", "+", "-", "&", "|", "(", ")", " "],
     async provideCompletionItems(model, position, _context, cancellation) {
       if (model.uri.toString() !== uri) return { suggestions: [] };
+      if (isSQL(model.getValue(), options.language?.())) {
+        try {
+          const suggestions = await completeSQL(monaco, model, position, scope(), cancellation);
+          reportError("");
+          return suggestions;
+        } catch (error) { reportError(String(error)); throw error; }
+      }
       const context = queryCompletionContext(model.getValue(), model.getOffsetAt(position));
       const start = model.getPositionAt(context.start);
       const end = model.getPositionAt(context.end);

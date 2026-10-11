@@ -37,8 +37,8 @@ export type ModuleLocation = {
   kind: string;
   mount_path: string;
   primary: boolean;
-  head_snapshot_id: string;
-  head_version: number;
+  head_snapshot_id?: string;
+  head_version?: number;
 };
 
 export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local-dependency" | "versioned-dependency" | "historical" | "dependency-cycle" | "import";
@@ -149,6 +149,9 @@ export type ModuleQueryRow = {
   coverage?: string;
   dispatch?: boolean;
   depth?: number;
+  props?: Record<string, unknown>;
+  payload?: unknown;
+  relationship?: { source: string; targets: string[]; kind: string; resolution: string; reference?: string; props?: Record<string, unknown> };
 };
 export type ModuleQuerySymbol = {
   id: string;
@@ -175,9 +178,19 @@ export type ModuleQueryResult = {
   warnings: MissingHeadWarning[];
   stages: { name: string; value: string }[];
   path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
+  columns?: { name: string; field: string; type: string }[];
+  rows?: Record<string, unknown>[];
+  graph?: ModuleGraphResult;
+};
+export type QueryLanguage = "auto" | "compact" | "sql";
+export type QueryCatalog = {
+  functions: { name: string; arguments: number; options: string[] | null; terminal: boolean; depth?: number }[];
+  kinds: { name: string; category: string }[];
+  fields: Record<string, string>;
+  domains: { symbols: Record<string, unknown>; relationships: Record<string, { name: string; type: string; schema?: unknown }> };
 };
 export type ModuleGraphDirection = "callees" | "callers" | "both";
-export type ModuleGraphSite = { path?: string; line?: number; column?: number; text?: string; guards?: string[] };
+export type ModuleGraphSite = { path?: string; line?: number; column?: number; text?: string; guards?: string[]; resolution?: string; reference?: string; targets?: string[]; props?: Record<string, unknown>; location?: ModuleGraphNode["location"] };
 export type ModuleGraphNode = {
   id: string;
   identifier: ModuleNode["identifier"];
@@ -192,8 +205,9 @@ export type ModuleGraphNode = {
   tone?: string;
   icon?: string;
   properties?: Record<string, string>;
+  props?: Record<string, unknown>;
 };
-export type ModuleGraphEdge = { id: string; from: string; to: string; type: "call" | "dispatch"; kind?: string; sites: ModuleGraphSite[] };
+export type ModuleGraphEdge = { id: string; from: string; to: string; type: string; kind?: string; sites: ModuleGraphSite[]; properties?: Record<string, string>; props?: Record<string, unknown> };
 export type ModuleGraphGroup = { id: string; label: string; parent?: string };
 export type ModuleGraphOmitted = {
   node_limit?: boolean; beyond_depth?: number; unresolved?: number; unreadable_source?: string[];
@@ -341,10 +355,15 @@ export function applyModuleRefactor(refactor: ModuleRefactorRequest, previewHash
 }
 
 export type StructuredQueryOptions = {
+  language?: QueryLanguage;
   methods?: boolean; vars?: boolean; types?: boolean; modules?: boolean; packages?: boolean;
   callers?: boolean; calls?: boolean; implements?: boolean; inherits?: boolean;
   include?: string[]; exclude?: string[];
 };
+
+export function getQueryCatalog(signal?: AbortSignal): Promise<QueryCatalog> {
+  return request(moduleURL("query-catalog"), { signal });
+}
 
 export async function runModuleQuery(expression: string, root: string, snapshot: string, options: StructuredQueryOptions = {}): Promise<TimedResponse<ModuleQueryResult>> {
   const result = await timedRequest<unknown>(moduleURL("query"), { method: "POST", body: JSON.stringify({ ...(expression ? { args: [expression] } : {}), root, snapshot, ...options }) });
@@ -356,8 +375,8 @@ export async function suggestModuleSymbols(prefix: string, root: string, snapsho
   return (await request<ItemsWithWarnings<ModuleQuerySymbol>>(moduleURL("suggest", { prefix, root, snapshot }), { signal })).items;
 }
 
-export async function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<string[]> {
-  return (await request<ItemsWithWarnings<string>>(moduleURL("suggest-selectors", { prefix, root, snapshot }), { signal })).items;
+export async function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal, language?: QueryLanguage): Promise<string[]> {
+  return (await request<ItemsWithWarnings<string>>(moduleURL("suggest-selectors", { prefix, root, snapshot, ...(language ? { language } : {}) }), { signal })).items;
 }
 
 function isQueryResult(value: unknown): value is ModuleQueryResult {

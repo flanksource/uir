@@ -1,8 +1,10 @@
 import type { ModuleQueryResult, ModuleQueryRow, ModuleSource } from "./api";
 import type { Route } from "./route";
+import { isSQL } from "./sql-completion";
 
 export function searchInputMode(value: string): { mode: "search" | "expression"; value: string } {
-  return value.startsWith(">") ? { mode: "expression", value: value.slice(1).trimStart() } : { mode: "search", value };
+  if (value.startsWith(">")) return { mode: "expression", value: value.slice(1).trimStart() };
+  return isSQL(value) ? { mode: "expression", value } : { mode: "search", value };
 }
 
 export function queryPaletteRows(result: ModuleQueryResult): { matches: ModuleQueryRow[]; candidates: ModuleQueryRow[] } {

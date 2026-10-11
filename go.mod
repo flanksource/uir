@@ -3,6 +3,7 @@ module github.com/flanksource/uir
 go 1.26.1
 
 require (
+	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/flanksource/clicky v1.21.75
 	github.com/flanksource/commons v1.60.0
 	github.com/flanksource/commons-db v0.1.46
@@ -13,6 +14,7 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/pkg/diff v0.0.0-20241224192749-4e6772a4315c
 	github.com/samber/lo v1.53.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/exp v0.0.0-20260527015227-08cc5374adb3
