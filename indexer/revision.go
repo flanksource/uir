@@ -13,12 +13,13 @@ import (
 // RevisionOptions selects one commit of a registered checkout. Reason is historical for a commit
 // indexed on demand, or versioned-dependency for a selected dependency version.
 type RevisionOptions struct {
-	RootKey      string
-	Checkout     string
-	Commit       string
-	Version      string
-	IncludeTests bool
-	Reason       storage.SnapshotReason
+	RootKey          string
+	Checkout         string
+	Commit           string
+	Version          string
+	IncludeTests     bool
+	Reason           storage.SnapshotReason
+	ScratchDirectory string
 }
 
 // IndexRevision publishes a clean historical snapshot for an already registered module without

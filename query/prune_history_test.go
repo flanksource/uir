@@ -149,7 +149,7 @@ var _ = Describe("pruning a root's history", func() {
 			Expect(database.Model(&storage.Symbol{}).Where("id = ?", indexer.SymbolID(legacyRule)).Count(&legacy).Error).To(Succeed())
 			Expect(legacy).To(Equal(int64(1)), "the first revision published Legacy")
 
-			result, err := storage.PruneHistory(ctx, database, insRoot, 1)
+			result, err := storage.PruneHistory(ctx, database, insRoot, storage.HistoryPruneOptions{Keep: 1})
 			Expect(err).ToNot(HaveOccurred())
 			Expect([]any{result.RootKey, result.Kept, result.Rebased, result.Snapshots}).To(Equal([]any{insRoot, 1, 1, int64(2)}))
 
@@ -179,7 +179,7 @@ var _ = Describe("pruning a root's history", func() {
 			Expect(servedAnswers(ctx, fresh)).To(Equal(served), "a new pipeline answers as before")
 			Expect(servedAnswers(ctx, cached)).To(Equal(served), "a pipeline that read the pruned history answers as before")
 
-			again, err := storage.PruneHistory(ctx, database, insRoot, 1)
+			again, err := storage.PruneHistory(ctx, database, insRoot, storage.HistoryPruneOptions{Keep: 1})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(again).To(Equal(storage.PruneResult{RootKey: insRoot, Kept: 1}), "a pruned root has nothing more to prune")
 		},
@@ -198,7 +198,7 @@ var _ = Describe("pruning a root's history", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			publish(ctx, database, insuranceRevision("r2", false))
-			_, err = storage.PruneHistory(ctx, database, insRoot, 1)
+			_, err = storage.PruneHistory(ctx, database, insRoot, storage.HistoryPruneOptions{Keep: 1})
 			Expect(err).ToNot(HaveOccurred())
 			publish(ctx, database, insuranceRevision("r3", true))
 			republished, err := storage.SymbolHandles(ctx, database, []string{indexer.SymbolID(legacyRule)})
@@ -231,7 +231,7 @@ var _ = Describe("pruning a root's history", func() {
 			}
 			served := checkouts()
 
-			result, err := storage.PruneHistory(ctx, database, shopModule, 1)
+			result, err := storage.PruneHistory(ctx, database, shopModule, storage.HistoryPruneOptions{Keep: 1})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(MatchFields(IgnoreExtras, Fields{"Kept": Equal(2), "Rebased": Equal(2), "Snapshots": Equal(int64(1))}),
 				"the primary's first snapshot goes; both heads, each based on it, stay and are rebased")
@@ -246,7 +246,7 @@ var _ = Describe("pruning a root's history", func() {
 		func(ctx SpecContext, rootKey string, keep int, message string) {
 			database := openQueryDatabase(ctx, "sqlite")
 			publish(ctx, database, insuranceRevision("r1", false))
-			_, err := storage.PruneHistory(ctx, database, rootKey, keep)
+			_, err := storage.PruneHistory(ctx, database, rootKey, storage.HistoryPruneOptions{Keep: keep})
 			Expect(err).To(MatchError(ContainSubstring(message)))
 		},
 		Entry("keep 0", insRoot, 0, "keep 0: at least the newest snapshot must be kept"),
