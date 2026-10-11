@@ -78,12 +78,12 @@ var _ = Describe("FromResolver", func() {
 		missing := graph.UnresolvedID("function", "Function-Missing")
 
 		Expect(edges(g)).To(Equal(map[string]graph.Edge{
-			"charge|leaf|call":            {ID: "charge|leaf|call", From: "charge", To: "leaf", Type: call, Kind: "copybook"},
-			"charge|fee-a|dispatch":       {ID: "charge|fee-a|dispatch", From: "charge", To: "fee-a", Type: dispatch, Kind: "function", Properties: planA},
-			"charge|fee-b|dispatch":       {ID: "charge|fee-b|dispatch", From: "charge", To: "fee-b", Type: dispatch, Kind: "function", Properties: planB},
-			"charge|dup-1|dispatch":       {ID: "charge|dup-1|dispatch", From: "charge", To: "dup-1", Type: dispatch, Kind: "transaction", Properties: map[string]string{"status": "ambiguous"}},
-			"charge|dup-2|dispatch":       {ID: "charge|dup-2|dispatch", From: "charge", To: "dup-2", Type: dispatch, Kind: "transaction", Properties: map[string]string{"status": "ambiguous"}},
-			"charge|" + missing + "|call": {ID: "charge|" + missing + "|call", From: "charge", To: missing, Type: call, Kind: "function"},
+			"charge|leaf|call|copybook":            {ID: "charge|leaf|call|copybook", From: "charge", To: "leaf", Type: call, Kind: "copybook"},
+			"charge|fee-a|dispatch|function":       {ID: "charge|fee-a|dispatch|function", From: "charge", To: "fee-a", Type: dispatch, Kind: "function", Properties: planA},
+			"charge|fee-b|dispatch|function":       {ID: "charge|fee-b|dispatch|function", From: "charge", To: "fee-b", Type: dispatch, Kind: "function", Properties: planB},
+			"charge|dup-1|dispatch|transaction":    {ID: "charge|dup-1|dispatch|transaction", From: "charge", To: "dup-1", Type: dispatch, Kind: "transaction", Properties: map[string]string{"status": "ambiguous"}},
+			"charge|dup-2|dispatch|transaction":    {ID: "charge|dup-2|dispatch|transaction", From: "charge", To: "dup-2", Type: dispatch, Kind: "transaction", Properties: map[string]string{"status": "ambiguous"}},
+			"charge|" + missing + "|call|function": {ID: "charge|" + missing + "|call|function", From: "charge", To: missing, Type: call, Kind: "function"},
 		}))
 		Expect(g.Nodes).To(ContainElement(graph.Node{ID: missing, Kind: "function", Label: "Function-Missing", Depth: 1, In: 1, Unresolved: true}))
 		Expect(g.Edges[0].Sites).NotTo(BeEmpty(), "every edge carries its reference's sites")
@@ -93,8 +93,8 @@ var _ = Describe("FromResolver", func() {
 		g := build(graph.FromResolver(resolver), graph.DirectionCallers, 1, "fee-b")
 
 		Expect(edges(g)).To(Equal(map[string]graph.Edge{
-			"charge|fee-b|dispatch": {ID: "charge|fee-b|dispatch", From: "charge", To: "fee-b", Type: dispatch, Kind: "function", Properties: planB},
-			"other|fee-b|call":      {ID: "other|fee-b|call", From: "other", To: "fee-b", Type: call, Kind: "function"},
+			"charge|fee-b|dispatch|function": {ID: "charge|fee-b|dispatch|function", From: "charge", To: "fee-b", Type: dispatch, Kind: "function", Properties: planB},
+			"other|fee-b|call|function":      {ID: "other|fee-b|call|function", From: "other", To: "fee-b", Type: call, Kind: "function"},
 		}))
 	})
 

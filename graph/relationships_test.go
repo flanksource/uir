@@ -103,7 +103,7 @@ var _ = Describe("FromRelationships", func() {
 		g := build(source(relationships()), graph.DirectionCallees, 1, run.IdentityKey())
 
 		Expect(g.Edges[0]).To(Equal(graph.Edge{
-			ID:   run.IdentityKey() + "|" + save.IdentityKey() + "|call",
+			ID:   run.IdentityKey() + "|" + save.IdentityKey() + "|call|method-call",
 			From: run.IdentityKey(),
 			To:   save.IdentityKey(),
 			Type: uir.RelationshipTypeCall,
