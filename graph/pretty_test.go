@@ -53,6 +53,23 @@ func drawnGraph() graph.Graph {
 }
 
 var _ = Describe("Graph.Pretty", func() {
+	It("preserves namespaced kinds on parallel native relationship branches", func() {
+		service := graph.Node{ID: "service", Kind: "k8s.service", Label: "checkout"}
+		pod := graph.Node{ID: "pod", Kind: "k8s.pod", Label: "checkout-pod", Depth: 1}
+		selects := edgeOf(service, pod, uir.RelationshipTypeReference)
+		selects.Kind = "k8s.selects"
+		config := edgeOf(service, pod, uir.RelationshipTypeReference)
+		config.Kind = "k8s.uses_config"
+		g := graph.Graph{Roots: []string{service.ID}, Nodes: []graph.Node{service, pod}, Edges: []graph.Edge{config, selects}}
+
+		Expect(treeLines(g.Pretty())).To(Equal([]string{
+			"checkout",
+			"╰── outgoing",
+			"    ├── → k8s.selects checkout-pod",
+			"    ╰── → k8s.uses_config checkout-pod",
+		}))
+	})
+
 	It("draws the callers and callees of the root, each node expanded once, then what was left out", func() {
 		Expect(treeLines(drawnGraph().Pretty())).To(Equal([]string{
 			"ƒ Run app app.go:3",

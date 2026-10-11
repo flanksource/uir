@@ -16,11 +16,12 @@ import "github.com/flanksource/uir"
 | `diff/` | Structural diffing. `DiffNode` compares two nodes; `DiffTree` compares whole documents and classifies renames and moves. |
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
 | `indexer/` | Incremental Go AST indexing into immutable module-root snapshots, exposed as a context-bound Clicky task. |
-| `query/` | PEG query grammar plus module, checkout, snapshot, symbol, and call resolution. |
+| `query/` | Compact PEG grammar and Participle SQL grammar over shared snapshot, symbol, and relationship resolution. |
 | `symboldiff/` | Commit-to-commit symbol diff over two snapshots' documents, with per-symbol line counts from hash-verified Git blobs. |
 | `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
 | [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and call projection queries. |
 | [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
+| [`docs/sql-query.md`](docs/sql-query.md) | SQL navigation, typed domain properties, native relationships, and a runnable publication example. |
 | [`docs/diff.md`](docs/diff.md) | `uir diff`: commit selection, symbol classification, shape diff rendering, line attribution, and failure modes. |
 | [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
@@ -112,7 +113,7 @@ The Java port under `java/com/flanksource/uir/` is source only; no `pom.xml` or 
 
 ## Snapshot browser
 
-`uir serve` opens the saved UIR database in a local web browser. It lists Go module roots, their checkout locations and snapshots, explores sources and nodes, runs PEG queries, and adds or reindexes local directories.
+`uir serve` opens the saved UIR database in a local web browser. It lists Go module roots, their checkout locations and snapshots, explores sources and nodes, runs SQL and compact queries, and adds or reindexes local directories.
 
 ```sh
 go run ./cmd/uir --dsn "$UIR_DSN" serve --host localhost --port 8080

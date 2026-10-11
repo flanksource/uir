@@ -17,6 +17,9 @@ type moduleQueryDisplay struct {
 }
 
 func (result moduleQueryResult) Pretty() api.Text {
+	if result.Graph != nil {
+		return moduleGraphResult{GraphResult: *result.Graph}.Pretty()
+	}
 	return api.Text{}.Add(moduleQueryDisplay{result: result}.textTree())
 }
 
@@ -44,9 +47,30 @@ func (display moduleQueryDisplay) Tree() api.TreeNode {
 		count = fmt.Sprintf("%d of %d matches", len(display.result.Matches), display.result.Total)
 	}
 	root := &moduleQueryTreeNode{label: clicky.Text(count, uir.StyleBold)}
-	if display.result.Path != nil {
+	switch {
+	case display.result.Path != nil:
 		appendCallPath(root, display.result.Path)
-	} else {
+	case len(display.result.Columns) > 0:
+		for i, row := range display.result.Rows {
+			label := api.Text{}
+			for position, column := range display.result.Columns {
+				if position > 0 {
+					label = label.Append(" · ", uir.StyleMuted)
+				}
+				value := row[column.Name]
+				text := "NULL"
+				if value != nil {
+					encoded, err := json.Marshal(value)
+					if err != nil {
+						panic(err)
+					}
+					text = string(encoded)
+				}
+				label = label.Append(column.Name+"=", uir.StyleMuted).Append(text)
+			}
+			root.children = append(root.children, &moduleQueryTreeNode{label: label, key: fmt.Sprintf("row:%d", i)})
+		}
+	default:
 		for _, row := range display.result.Matches {
 			appendQueryMatch(root, display.result.groupBy, row)
 		}

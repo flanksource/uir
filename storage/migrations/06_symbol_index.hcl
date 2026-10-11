@@ -205,7 +205,7 @@ table "symbol_postings" {
     on_delete   = NO_ACTION
   }
   index "symbol_postings_symbol_idx" { columns = [column.symbol_handle, column.role, column.root_ordinal, column.document_ordinal] }
-  check "symbol_postings_role_check" { expr = "role IN (0, 1, 2, 3)" }
+  check "symbol_postings_role_check" { expr = "role IN (0, 1, 2, 3, 4, 5)" }
   check "symbol_postings_occurrence_count_check" { expr = "occurrence_count >= 1" }
 }
 

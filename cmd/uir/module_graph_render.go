@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
@@ -36,13 +37,15 @@ func missingHeadLabel(warning query.MissingHeadWarning) api.Text {
 	return api.Text{}.Add(icons.Warning).Space().Append(warning.RootKey, uir.StyleWarning).Space().Append(warning.Message, uir.StyleMuted)
 }
 
-// goNodeName draws a node with the icon and colour of its Go symbol kind.
+// goNodeName draws Go symbol icons and preserves native entity kinds.
 func goNodeName(node graph.Node) api.Text {
 	switch {
 	case node.Unresolved:
 		return clicky.Text(node.Label, uir.NodeTypeUnknown.Color())
 	case node.Kind == "builtin":
 		return clicky.Text(node.Label, uir.StyleKeyword)
+	case strings.Contains(node.Kind, "."):
+		return clicky.Text(node.Kind, uir.StyleDim).Space().Append(node.Label)
 	}
 	kind := querySymbolType(moduleQueryRow{Kind: node.Kind, identifier: node.Identifier})
 	return api.Text{}.Add(kind.Icon()).Space().Append(node.Label, kind.Color())

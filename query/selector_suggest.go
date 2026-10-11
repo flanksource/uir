@@ -33,7 +33,12 @@ func (pipeline *Pipeline) SuggestSelectors(ctx context.Context, prefix string, o
 	if err != nil {
 		return ItemsWithWarnings[string]{}, err
 	}
-	choices, err := session.selectorChoices(ctx, prefix, parts, selection.scopes)
+	var choices map[string]bool
+	if options.Language == LanguageSQL {
+		choices, err = session.sqlSelectorChoices(ctx, prefix, parts, selection.scopes)
+	} else {
+		choices, err = session.selectorChoices(ctx, prefix, parts, selection.scopes)
+	}
 	if err != nil {
 		return ItemsWithWarnings[string]{}, err
 	}

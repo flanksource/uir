@@ -48,29 +48,32 @@ func (row moduleRootRow) Row() map[string]any {
 // moduleQueryRow is one query match or declaration. Source is the display form of Path, Line, and
 // Column; the remaining fields are set by the index-backed operations.
 type moduleQueryRow struct {
-	Kind           string `json:"kind"`
-	NodeKind       string `json:"node_kind,omitempty"`
-	Root           string `json:"root"`
-	Symbol         string `json:"symbol"`
-	Location       string `json:"location"`
-	Source         string `json:"source"`
-	SnapshotID     string `json:"snapshot_id"`
-	Path           string `json:"path,omitempty"`
-	PackagePath    string `json:"package_path,omitempty"`
-	Line           *int   `json:"line,omitempty"`
-	Column         *int   `json:"column,omitempty"`
-	EndLine        *int   `json:"end_line,omitempty"`
-	EndColumn      *int   `json:"end_column,omitempty"`
-	Role           string `json:"role,omitempty"`
-	Relation       string `json:"relation,omitempty"`
-	SourceID       string `json:"source_id,omitempty"`
-	SourceName     string `json:"source_name,omitempty"`
-	SymbolID       string `json:"symbol_id,omitempty"`
-	EnclosingID    string `json:"enclosing_id,omitempty"`
-	EnclosingKey   string `json:"enclosing_key,omitempty"`
-	Coverage       string `json:"coverage,omitempty"`
-	Dispatch       bool   `json:"dispatch,omitempty"`
-	Depth          int    `json:"depth,omitempty"`
+	Kind           string                        `json:"kind"`
+	NodeKind       string                        `json:"node_kind,omitempty"`
+	Root           string                        `json:"root"`
+	Symbol         string                        `json:"symbol"`
+	Location       string                        `json:"location"`
+	Source         string                        `json:"source"`
+	SnapshotID     string                        `json:"snapshot_id"`
+	Path           string                        `json:"path,omitempty"`
+	PackagePath    string                        `json:"package_path,omitempty"`
+	Line           *int                          `json:"line,omitempty"`
+	Column         *int                          `json:"column,omitempty"`
+	EndLine        *int                          `json:"end_line,omitempty"`
+	EndColumn      *int                          `json:"end_column,omitempty"`
+	Role           string                        `json:"role,omitempty"`
+	Relation       string                        `json:"relation,omitempty"`
+	SourceID       string                        `json:"source_id,omitempty"`
+	SourceName     string                        `json:"source_name,omitempty"`
+	SymbolID       string                        `json:"symbol_id,omitempty"`
+	EnclosingID    string                        `json:"enclosing_id,omitempty"`
+	EnclosingKey   string                        `json:"enclosing_key,omitempty"`
+	Coverage       string                        `json:"coverage,omitempty"`
+	Dispatch       bool                          `json:"dispatch,omitempty"`
+	Depth          int                           `json:"depth,omitempty"`
+	Props          map[string]any                `json:"props,omitempty"`
+	Payload        any                           `json:"payload,omitempty"`
+	Relationship   *storage.DocumentRelationship `json:"relationship,omitempty"`
 	identifier     uir.Identifier
 	declaration    string
 	definitionLine *int
@@ -85,6 +88,9 @@ type moduleCallPath struct {
 // moduleQueryResult is the query envelope. JSON and YAML retain every field while human-readable
 // formats render the symbol tree.
 type moduleQueryResult struct {
+	Columns      []query.QueryColumn        `json:"columns,omitempty"`
+	Rows         []map[string]any           `json:"rows,omitempty"`
+	Graph        *query.GraphResult         `json:"graph,omitempty"`
 	Operation    query.Operation            `json:"operation"`
 	Total        int                        `json:"total"`
 	Matches      []moduleQueryRow           `json:"matches"`
@@ -94,6 +100,7 @@ type moduleQueryResult struct {
 	Warnings     []query.MissingHeadWarning `json:"warnings"`
 	Stages       []query.ResolutionStage    `json:"stages"`
 	Path         *moduleCallPath            `json:"path,omitempty"`
+	sql          bool
 	limit        int
 	groupBy      []string
 }
@@ -103,6 +110,12 @@ func (result moduleQueryResult) PageMetadata() clicky.PageInfo {
 }
 
 func (result moduleQueryResult) PageRows() any {
+	if result.sql {
+		if result.Graph != nil {
+			return result
+		}
+		return moduleQueryDisplay{result: result, rows: result}
+	}
 	if result.Path == nil {
 		return moduleQueryDisplay{result: result, rows: result.Matches}
 	}
@@ -129,31 +142,33 @@ type moduleSnapshotOptions struct {
 }
 
 type moduleQueryOptions struct {
-	Expression string   `args:"true"`
-	Methods    bool     `flag:"methods" help:"Select methods"`
-	Vars       bool     `flag:"vars" help:"Select variables"`
-	Types      bool     `flag:"types" help:"Select types"`
-	Modules    bool     `flag:"modules" help:"Select module nodes"`
-	Packages   bool     `flag:"packages" help:"Select package nodes"`
-	Callers    bool     `flag:"callers" help:"Find incoming calls"`
-	Calls      bool     `flag:"calls" help:"Find outgoing calls"`
-	Implements bool     `flag:"implements" help:"Find implementer types"`
-	Inherits   bool     `flag:"inherits" help:"Find direct embedders"`
-	Include    []string `flag:"include" help:"Include module, package, or symbol paths matching a glob"`
-	Exclude    []string `flag:"exclude" help:"Exclude module, package, or symbol paths matching a glob"`
-	GroupBy    string   `flag:"group-by" help:"Tree levels in order: module,package,file" default:"module,package,file"`
-	RootKey    string   `flag:"root" help:"Module path to query"`
-	Location   string   `flag:"location" help:"Registered checkout path"`
-	SnapshotID string   `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
-	Limit      int      `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
+	Language   query.Language `flag:"language" help:"Query language: auto, compact, or sql" default:"auto"`
+	Expression string         `args:"true"`
+	Methods    bool           `flag:"methods" help:"Select methods"`
+	Vars       bool           `flag:"vars" help:"Select variables"`
+	Types      bool           `flag:"types" help:"Select types"`
+	Modules    bool           `flag:"modules" help:"Select module nodes"`
+	Packages   bool           `flag:"packages" help:"Select package nodes"`
+	Callers    bool           `flag:"callers" help:"Find incoming calls"`
+	Calls      bool           `flag:"calls" help:"Find outgoing calls"`
+	Implements bool           `flag:"implements" help:"Find implementer types"`
+	Inherits   bool           `flag:"inherits" help:"Find direct embedders"`
+	Include    []string       `flag:"include" help:"Include module, package, or symbol paths matching a glob"`
+	Exclude    []string       `flag:"exclude" help:"Exclude module, package, or symbol paths matching a glob"`
+	GroupBy    string         `flag:"group-by" help:"Tree levels in order: module,package,file" default:"module,package,file"`
+	RootKey    string         `flag:"root" help:"Module path to query"`
+	Location   string         `flag:"location" help:"Registered checkout path"`
+	SnapshotID string         `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
+	Limit      int            `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
 }
 
 type moduleSuggestOptions struct {
-	Prefix     string `flag:"prefix" help:"Partial Go symbol spelling" required:"true"`
-	RootKey    string `flag:"root" help:"Module path to query"`
-	Location   string `flag:"location" help:"Registered checkout path"`
-	SnapshotID string `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
-	Limit      int    `flag:"limit" help:"Maximum suggestions from 1 through 100" default:"20"`
+	Language   query.Language `flag:"language" help:"Selector language: compact or sql" default:"compact"`
+	Prefix     string         `flag:"prefix" help:"Partial Go symbol spelling" required:"true"`
+	RootKey    string         `flag:"root" help:"Module path to query"`
+	Location   string         `flag:"location" help:"Registered checkout path"`
+	SnapshotID string         `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
+	Limit      int            `flag:"limit" help:"Maximum suggestions from 1 through 100" default:"20"`
 }
 
 func (moduleQueryRow) Columns() []api.ColumnDef {
@@ -209,9 +224,23 @@ func registerModuleCommands(root *cobra.Command) {
 		return queryModules(ctx, database, options)
 	})
 	queryCommand.Use = "query [expression]"
-	queryCommand.Short = "Run a compact symbol query against indexed modules"
+	queryCommand.Short = "Run a compact or SQL navigation query against indexed snapshots"
 	queryCommand.Args = cobra.MaximumNArgs(1)
 	setModuleRoute(queryCommand, "modules/query")
+	catalog := clicky.AddNamedCommandWithContext("query-catalog", root, struct{}{}, func(ctx context.Context, _ struct{}) (query.SQLCatalog, error) {
+		database, err := databaseFor(ctx)
+		if err != nil {
+			return query.SQLCatalog{}, err
+		}
+		pipeline, err := query.NewPipeline(database)
+		if err != nil {
+			return query.SQLCatalog{}, err
+		}
+		return pipeline.QueryCatalog(ctx)
+	})
+	catalog.Short = "List query functions, symbol kinds, and property schemas"
+	setModuleRoute(catalog, "modules/query-catalog")
+	catalog.Annotations["clicky/operation-method"] = http.MethodGet
 	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) (query.ItemsWithWarnings[query.ModuleSymbol], error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
@@ -240,7 +269,7 @@ func registerModuleCommands(root *cobra.Command) {
 			return query.ItemsWithWarnings[string]{}, err
 		}
 		result, err := pipeline.SuggestSelectors(ctx, options.Prefix, query.ModuleScopeOptions{
-			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
+			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit, Language: options.Language,
 		})
 		warnMissingHeads(ctx, result.Warnings)
 		return result, err
@@ -277,6 +306,10 @@ func registerModuleCommands(root *cobra.Command) {
 }
 
 func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOptions) (moduleQueryResult, error) {
+	language, err := query.DetectLanguage(options.Expression, options.Language)
+	if err != nil {
+		return moduleQueryResult{}, queryStatusError(err)
+	}
 	groups, err := parseQueryGroupBy(options.GroupBy)
 	if err != nil {
 		return moduleQueryResult{}, err
@@ -302,13 +335,9 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 			structured.Relations = append(structured.Relations, flag.name)
 		}
 	}
-	expression, err := query.ParseStructured(options.Expression, structured)
-	var result query.ModuleQueryResult
-	if err == nil {
-		result, err = pipeline.RunExpr(ctx, expression, query.ModuleScopeOptions{
-			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
-		})
-	}
+	result, err := pipeline.RunModules(ctx, options.Expression, query.ModuleScopeOptions{
+		RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit, Language: options.Language, Structured: structured,
+	})
 	if err != nil {
 		return moduleQueryResult{}, queryStatusError(err)
 	}
@@ -326,6 +355,8 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 		return moduleQueryResult{}, err
 	}
 	return moduleQueryResult{
+		sql:     language == query.LanguageSQL,
+		Columns: result.Columns, Rows: result.Rows, Graph: result.Graph,
 		Operation: result.Operation, Total: result.Total, Matches: matches,
 		Declarations: moduleQueryRows(result.Declarations), Symbols: symbols, Coverage: result.Coverage,
 		Warnings: result.Warnings, Stages: result.Stages, Path: path, limit: options.Limit, groupBy: groups,
@@ -389,6 +420,7 @@ func moduleQueryRows(matches []query.ModuleMatch) []moduleQueryRow {
 			PackagePath: match.PackagePath, Depth: match.Depth,
 			Role: match.Role, Relation: match.Relation, SourceID: match.SourceID, SourceName: match.SourceName, SymbolID: match.SymbolID, EnclosingID: match.EnclosingID, EnclosingKey: match.EnclosingKey,
 			Coverage: match.Coverage, Dispatch: match.Dispatch,
+			Props: match.Props, Payload: match.Payload, Relationship: match.Relationship,
 			identifier:  match.Identifier,
 			declaration: match.Declaration, definitionLine: match.DefinitionLine,
 		})

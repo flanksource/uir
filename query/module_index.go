@@ -228,6 +228,7 @@ func (index *indexContext) declarationMatch(posting scopedPosting, document deco
 	match.Line, match.Column, match.EndLine, match.EndColumn = rangePosition(entry.Name)
 	match.Role, match.NodeKind, match.Identifier, match.SymbolID = role, entry.Kind, entry.Identifier, *entry.ID
 	match.Declaration, match.DefinitionLine = entry.Shape, &entry.Extent[0]
+	match.Props = cloneProperties(entry.Props)
 	if len(entry.Payload) > 0 {
 		// The entry belongs to the pipeline's cached document; the caller gets its own copy.
 		match.Payload = json.RawMessage(bytes.Clone(entry.Payload))

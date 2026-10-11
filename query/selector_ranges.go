@@ -121,7 +121,7 @@ func (index *compactIndex) selectorRanges(ctx context.Context, selector compiled
 		return nil, nil
 	case selector.Kind == "pkg":
 		return index.packageRanges(ctx, modules, packageFilter(selector.Selector, selector.glob))
-	case selector.Kind != "mod" && selector.Owner == "" && strings.Contains(selector.Pattern, "/"):
+	case !selector.NameOnly && selector.Kind != "mod" && selector.Owner == "" && strings.Contains(selector.Pattern, "/"):
 		return index.packageRanges(ctx, modules, qualifiedPackageFilter(selector.Pattern))
 	case selector.within != nil && selector.within.packagesOnly():
 		return index.packageRanges(ctx, modules, selector.within.admitsPackage)

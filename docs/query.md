@@ -1,6 +1,8 @@
 # Querying indexed modules
 
-`uir query` reads the snapshot-aware symbol index using a compact Go symbol expression. It resolves canonical symbols and traverses recorded declarations, occurrences, implementations, and calls. Queries run against the primary head of each selected registered root unless `--location` or `--snapshot` selects another indexed view. The parser is generated from `query/grammar.peg` with `make query-parser`.
+`uir query` reads the snapshot-aware symbol index using SQL or a compact symbol expression. It resolves canonical symbols and traverses recorded declarations, occurrences, implementations, calls, and native relationships. Queries run against the primary head of each selected registered root unless `--location` or `--snapshot` selects another indexed view. A leading unquoted `SELECT` chooses the Participle SQL parser; `--language auto|compact|sql` overrides detection. SQL errors retain their diagnostics without retrying compact parsing. The compact parser is generated from `query/grammar.peg` with `make query-parser`.
+
+See [SQL navigation](sql-query.md) for projections, predicates, functions, custom-domain publication, and completion. The compact grammar and structured flags documented below remain available; structured navigation flags are compact-only.
 
 ## Quick start
 

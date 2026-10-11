@@ -12,10 +12,21 @@ const sources: ModuleSource[] = [
 ];
 
 describe("query palette result navigation", () => {
-  it("switches only a leading > search into an expression", () => {
+  it("switches a leading > search into an expression", () => {
     expect(searchInputMode("> store.Store.Save <")).toEqual({ mode: "expression", value: "store.Store.Save <" });
     expect(searchInputMode("store.Store.Save")).toEqual({ mode: "search", value: "store.Store.Save" });
     expect(searchInputMode("find > symbol")).toEqual({ mode: "search", value: "find > symbol" });
+  });
+
+  it.each([
+    ["SELECT * FROM func:*", "expression"],
+    ["  select", "expression"],
+    ["SELECTΣ", "search"],
+    ["SELECT1", "search"],
+    ["SELECT_name", "search"],
+    ['"SELECT"', "search"],
+  ])("recognizes a complete SELECT token in %s", (value, mode) => {
+    expect(searchInputMode(value)).toEqual({ mode, value });
   });
 
   it("uses located call sites for a path and separates unlocated candidates otherwise", () => {

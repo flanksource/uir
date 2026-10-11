@@ -18,6 +18,25 @@ func graphLines(result moduleGraphResult) []string {
 }
 
 var _ = Describe("module call graph rendering", func() {
+	It("draws SQL native entity and relationship kinds instead of inferred function icons", func() {
+		service := graph.Node{ID: "service", Kind: "k8s.service", Label: "checkout", Identifier: uir.Identifier{NodeType: uir.NodeTypeFunction}}
+		pod := graph.Node{ID: "pod", Kind: "k8s.pod", Label: "checkout-pod", Depth: 1, Identifier: uir.Identifier{NodeType: uir.NodeTypeFunction}}
+		result := moduleGraphResult{GraphResult: query.GraphResult{Graph: graph.Graph{
+			Roots: []string{service.ID}, Nodes: []graph.Node{service, pod},
+			Edges: []graph.Edge{
+				{From: service.ID, To: pod.ID, Type: uir.RelationshipTypeReference, Kind: "k8s.selects"},
+				{From: service.ID, To: pod.ID, Type: uir.RelationshipTypeReference, Kind: "k8s.uses_config"},
+			},
+		}}}
+
+		Expect(graphLines(result)).To(Equal([]string{
+			"k8s.service checkout",
+			"╰── outgoing",
+			"    ├── → k8s.selects k8s.pod checkout-pod",
+			"    ╰── → k8s.uses_config k8s.pod checkout-pod",
+		}))
+	})
+
 	It("draws the callers and the callees of the root with guards, site counts and markers", func(ctx SpecContext) {
 		result, err := graphModules(ctx, indexOrders(ctx), moduleGraphOptions{Selector: "orders.Submit", RootKey: ordersRoot})
 		Expect(err).ToNot(HaveOccurred())

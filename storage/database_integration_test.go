@@ -48,7 +48,7 @@ var _ = Describe("UirDB", func() {
 		var tableSQL, indexSQL string
 		Expect(database.Raw(`SELECT sql FROM sqlite_master WHERE name = 'symbol_postings'`).Scan(&tableSQL).Error).To(Succeed())
 		Expect(database.Raw(`SELECT sql FROM sqlite_master WHERE name = 'symbol_postings_symbol_idx'`).Scan(&indexSQL).Error).To(Succeed())
-		const current = "role IN (0, 1, 2, 3)"
+		const current = "role IN (0, 1, 2, 3, 4, 5)"
 		Expect(tableSQL).To(ContainSubstring(current))
 		Expect(database.Exec("DROP TABLE symbol_postings").Error).To(Succeed())
 		Expect(database.Exec(strings.Replace(tableSQL, current, "role IN (0, 1, 2)", 1)).Error).To(Succeed())

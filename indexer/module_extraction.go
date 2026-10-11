@@ -275,6 +275,16 @@ func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.S
 			}
 		}
 	}
+	for _, relationship := range content.Relationships {
+		if err := count(relationship.Source, storage.RoleRelationshipSource); err != nil {
+			return nil, nil, err
+		}
+		for _, target := range relationship.Targets {
+			if err := count(target, storage.RoleRelationshipTarget); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	return counts, needed, nil
 }
 

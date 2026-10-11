@@ -107,6 +107,8 @@ type graphTree struct {
 	nodes    map[string]Node
 	out, in  map[string][]Edge
 	expanded map[string]bool
+	depths   map[string]int
+	native   bool
 }
 
 func newGraphTree(g Graph, opts TreeOptions) *graphTree {
@@ -117,6 +119,7 @@ func newGraphTree(g Graph, opts TreeOptions) *graphTree {
 	for _, edge := range g.Edges {
 		tree.out[edge.From] = append(tree.out[edge.From], edge)
 		tree.in[edge.To] = append(tree.in[edge.To], edge)
+		tree.native = tree.native || strings.Contains(edge.Kind, ".")
 	}
 	return tree
 }
@@ -131,12 +134,17 @@ func (tree *graphTree) root(id string) *TreeNode {
 		label = label.Space().Append(fmt.Sprintf("%s:%d", node.Location.Path, node.Location.Line), uir.StyleDim)
 	}
 	root := &TreeNode{Label: label}
+	incoming, outgoing := "callers", "callees"
+	if tree.native {
+		incoming, outgoing = "incoming", "outgoing"
+	}
 	for _, side := range []struct {
 		heading string
 		edges   map[string][]Edge
 		step    int
-	}{{"callers", tree.in, -1}, {"callees", tree.out, 1}} {
+	}{{incoming, tree.in, -1}, {outgoing, tree.out, 1}} {
 		tree.expanded = map[string]bool{id: true}
+		tree.depths = directionalDepths(id, side.edges, side.step)
 		if children := tree.children(node, side.edges, side.step); len(children) > 0 {
 			root.Children = append(root.Children, &TreeNode{Label: api.Text{Content: side.heading, Style: uir.StyleBold}, Children: children})
 		}
@@ -144,11 +152,32 @@ func (tree *graphTree) root(id string) *TreeNode {
 	return root
 }
 
+func directionalDepths(root string, edges map[string][]Edge, step int) map[string]int {
+	depths := map[string]int{root: 0}
+	queue := []string{root}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, edge := range edges[id] {
+			neighbour := edge.To
+			if step < 0 {
+				neighbour = edge.From
+			}
+			if _, seen := depths[neighbour]; seen {
+				continue
+			}
+			depths[neighbour] = depths[id] + 1
+			queue = append(queue, neighbour)
+		}
+	}
+	return depths
+}
+
 // children are the neighbours of parent over edges, in the order of their first call site.
 func (tree *graphTree) children(parent Node, edges map[string][]Edge, step int) []*TreeNode {
 	drawn := slices.Clone(edges[parent.ID])
 	slices.SortStableFunc(drawn, func(left, right Edge) int {
-		return cmp.Or(compareFirstSites(left, right), cmp.Compare(left.Type, right.Type))
+		return cmp.Or(compareFirstSites(left, right), cmp.Compare(left.Type, right.Type), cmp.Compare(left.Kind, right.Kind))
 	})
 	children := make([]*TreeNode, 0, len(drawn))
 	for _, edge := range drawn {
@@ -158,7 +187,7 @@ func (tree *graphTree) children(parent Node, edges map[string][]Edge, step int) 
 		}
 		child := &TreeNode{Label: tree.edgeLabel(parent, neighbour, edge)}
 		switch {
-		case !tree.expanded[neighbour.ID] && neighbour.Depth == parent.Depth+step:
+		case !tree.expanded[neighbour.ID] && tree.depths[neighbour.ID] == tree.depths[parent.ID]+1:
 			tree.expanded[neighbour.ID] = true
 			child.Children = tree.children(neighbour, edges, step)
 		case len(edges[neighbour.ID]) > 0:
@@ -196,6 +225,8 @@ func (tree *graphTree) edgeLabel(parent, neighbour Node, edge Edge) api.Text {
 		if edge.Kind != "" {
 			label = label.Append(edge.Kind, uir.StyleDim).Space()
 		}
+	case strings.Contains(edge.Kind, "."):
+		label = label.Add(icons.ArrowRight).Space().Append(edge.Kind, uir.StyleDim).Space()
 	case edge.Type == uir.RelationshipTypeDispatch:
 		label = label.Add(edge.Type.Pretty()).Space()
 	}

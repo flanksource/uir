@@ -158,7 +158,7 @@ function distinctSites(sites: ModuleGraphSite[]): ModuleGraphSite[] {
 /**
  * Merges a `symbol=<id>&depth=1` expansion into the held graph. The expansion is rooted at a held node,
  * so its depths are re-signed from that node's depth. Held nodes keep their place; edges are keyed by
- * `from|to|type` and gain the call sites they did not hold; the held response's other fields stay.
+ * `from|to|type|kind` and gain the sites they did not hold; the held response's other fields stay.
  */
 export function mergeGraph<T extends ModuleGraph>(held: T, expansion: ModuleGraph): T {
   const [rootId] = expansion.roots;
@@ -166,10 +166,11 @@ export function mergeGraph<T extends ModuleGraph>(held: T, expansion: ModuleGrap
   if (rootId === undefined || !base) throw new Error(`call graph: expansion root "${rootId}" is not in the held graph`);
   const heldIds = new Set(held.nodes.map((node) => node.id));
   const added = expansion.nodes.filter((node) => !heldIds.has(node.id)).map((node) => ({ ...node, depth: base.depth + node.depth }));
-  const incoming = new Map(expansion.edges.map((edge) => [`${edge.from}|${edge.to}|${edge.type}`, edge]));
+  const edgeKey = (edge: ModuleGraphEdge) => `${edge.from}|${edge.to}|${edge.type}|${edge.kind ?? ""}`;
+  const incoming = new Map(expansion.edges.map((edge) => [edgeKey(edge), edge]));
   const edges = held.edges.map((edge) => {
-    const more = incoming.get(`${edge.from}|${edge.to}|${edge.type}`);
-    incoming.delete(`${edge.from}|${edge.to}|${edge.type}`);
+    const more = incoming.get(edgeKey(edge));
+    incoming.delete(edgeKey(edge));
     return more ? { ...edge, sites: distinctSites([...edge.sites, ...more.sites]) } : edge;
   });
   const groupIds = new Set((held.groups ?? []).map((group) => group.id));
@@ -222,6 +223,7 @@ export function graphRoot(pinned: string, selected: Pick<ModuleNode, "id" | "sou
 
 /** Whether a site of the edge can be opened: its caller, whose body holds it, has a source. */
 export function canRevealSites(graph: ModuleGraph, edge: ModuleGraphEdge): boolean {
+  if (edge.sites.length > 0 && edge.sites.every((site) => site.location)) return true;
   return Boolean(requireNode(graph, edge.from).location);
 }
 
@@ -230,6 +232,11 @@ export function canRevealSites(graph: ModuleGraph, edge: ModuleGraphEdge): boole
  * The selection is kept unless the caller is in another snapshot, where it selects the caller instead.
  */
 export function siteRevealPatch(graph: ModuleGraph, edge: ModuleGraphEdge, site: ModuleGraphSite, snapshot: string): GraphRevealPatch {
+  if (site.location) {
+    const { checkout_path, snapshot_id, source_id, path } = site.location;
+    if (!checkout_path || !snapshot_id || !source_id || path !== site.path) throw new Error(`relationship site ${site.path}:${site.line} has an incomplete source location`);
+    return { location: checkout_path, snapshot: snapshot_id, source: source_id, line: site.line ?? 0, column: Math.max(1, site.column ?? 1), explorerTab: "source", node: "", fileSearch: "", symbolSearch: "" };
+  }
   const caller = requireNode(graph, edge.from);
   const location = requireLocation(caller);
   if (site.path !== location.path) throw new Error(`call site ${site.path}:${site.line} is not in ${location.path}, the file of its caller ${caller.label}`);

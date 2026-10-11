@@ -17,6 +17,8 @@ const (
 )
 
 type ModuleScopeOptions struct {
+	Structured StructuredOptions
+	Language   Language
 	RootKey    string
 	Location   string
 	SnapshotID string
@@ -24,28 +26,30 @@ type ModuleScopeOptions struct {
 }
 
 type ModuleMatch struct {
-	Kind         string         `json:"kind"`
-	NodeKind     string         `json:"node_kind,omitempty"`
-	RootKey      string         `json:"root_key"`
-	Location     string         `json:"location"`
-	SnapshotID   string         `json:"snapshot_id"`
-	Path         string         `json:"path"`
-	PackagePath  string         `json:"package_path,omitempty"`
-	Line         *int           `json:"line,omitempty"`
-	Column       *int           `json:"column,omitempty"`
-	Identifier   uir.Identifier `json:"identifier"`
-	EndLine      *int           `json:"end_line,omitempty"`
-	EndColumn    *int           `json:"end_column,omitempty"`
-	Role         string         `json:"role,omitempty"`
-	Relation     string         `json:"relation,omitempty"`
-	SourceID     string         `json:"source_id,omitempty"`
-	SourceName   string         `json:"source_name,omitempty"`
-	SymbolID     string         `json:"symbol_id,omitempty"`
-	EnclosingID  string         `json:"enclosing_id,omitempty"`
-	EnclosingKey string         `json:"enclosing_key,omitempty"`
-	Coverage     string         `json:"coverage,omitempty"`
-	Dispatch     bool           `json:"dispatch,omitempty"`
-	Depth        int            `json:"depth,omitempty"`
+	Relationship *storage.DocumentRelationship `json:"relationship,omitempty"`
+	Props        map[string]any                `json:"props,omitempty"`
+	Kind         string                        `json:"kind"`
+	NodeKind     string                        `json:"node_kind,omitempty"`
+	RootKey      string                        `json:"root_key"`
+	Location     string                        `json:"location"`
+	SnapshotID   string                        `json:"snapshot_id"`
+	Path         string                        `json:"path"`
+	PackagePath  string                        `json:"package_path,omitempty"`
+	Line         *int                          `json:"line,omitempty"`
+	Column       *int                          `json:"column,omitempty"`
+	Identifier   uir.Identifier                `json:"identifier"`
+	EndLine      *int                          `json:"end_line,omitempty"`
+	EndColumn    *int                          `json:"end_column,omitempty"`
+	Role         string                        `json:"role,omitempty"`
+	Relation     string                        `json:"relation,omitempty"`
+	SourceID     string                        `json:"source_id,omitempty"`
+	SourceName   string                        `json:"source_name,omitempty"`
+	SymbolID     string                        `json:"symbol_id,omitempty"`
+	EnclosingID  string                        `json:"enclosing_id,omitempty"`
+	EnclosingKey string                        `json:"enclosing_key,omitempty"`
+	Coverage     string                        `json:"coverage,omitempty"`
+	Dispatch     bool                          `json:"dispatch,omitempty"`
+	Depth        int                           `json:"depth,omitempty"`
 	// Payload is the producer's payload on a declaration row's symbol (storage.DocumentSymbol.Payload),
 	// as stored; occurrence rows and declarations without one carry none.
 	Payload        json.RawMessage `json:"payload,omitempty"`
@@ -63,6 +67,9 @@ type CallPath struct {
 }
 
 type ModuleQueryResult struct {
+	Columns      []QueryColumn        `json:"columns,omitempty"`
+	Rows         []map[string]any     `json:"rows,omitempty"`
+	Graph        *GraphResult         `json:"graph,omitempty"`
 	Operation    Operation            `json:"operation"`
 	Matches      []ModuleMatch        `json:"matches"`
 	Stages       []ResolutionStage    `json:"stages"`
@@ -81,11 +88,21 @@ type moduleScope struct {
 }
 
 func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options ModuleScopeOptions) (ModuleQueryResult, error) {
-	parsed, err := Parse(input)
+	language, err := DetectLanguage(input, options.Language)
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	return pipeline.RunExpr(ctx, parsed.Expr, options)
+	if language == LanguageSQL {
+		if len(options.Structured.Kinds)+len(options.Structured.Include)+len(options.Structured.Exclude)+len(options.Structured.Relations) > 0 {
+			return ModuleQueryResult{}, &InvalidQueryError{Message: "structured navigation flags are compact-only", Hint: "Express SQL navigation in FROM and filtering in WHERE."}
+		}
+		return pipeline.runSQL(ctx, input, options)
+	}
+	expression, err := ParseStructured(input, options.Structured)
+	if err != nil {
+		return ModuleQueryResult{}, err
+	}
+	return pipeline.RunExpr(ctx, expression, options)
 }
 
 func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options ModuleScopeOptions) (ModuleQueryResult, error) {

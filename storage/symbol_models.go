@@ -54,9 +54,11 @@ const (
 	RoleReference  PostingRole = 1
 	RoleImplements PostingRole = 2
 	RoleEmbeds     PostingRole = 3
+	RoleRelationshipSource PostingRole = 4
+	RoleRelationshipTarget PostingRole = 5
 )
 
-var postingRoleNames = [...]string{"definition", "reference", "implements", "embeds"}
+var postingRoleNames = [...]string{"definition", "reference", "implements", "embeds", "relationship_source", "relationship_target"}
 
 func ParsePostingRole(name string) (PostingRole, error) {
 	for code, known := range postingRoleNames {

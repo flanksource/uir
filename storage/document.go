@@ -11,7 +11,7 @@ import (
 )
 
 // DocumentFormatVersion is the version of DocumentContent written to documents.content.
-const DocumentFormatVersion = 3
+const DocumentFormatVersion = 4
 
 // Range is [start_line, start_utf16_column, end_line, end_utf16_column], one-based.
 type Range [4]int
@@ -22,6 +22,7 @@ type ByteSpan [2]int
 // DocumentContent is the JSON object stored in documents.content; see docs/symbol-index-storage.md.
 // Excluded states why an excluded document holds no facts.
 type DocumentContent struct {
+	Relationships []DocumentRelationship `json:"relationships,omitempty"`
 	Version     int                  `json:"version"`
 	PackagePath string               `json:"package_path"`
 	Symbols     []DocumentSymbol     `json:"symbols"`
@@ -34,6 +35,7 @@ type DocumentContent struct {
 // projection; a typed-only declaration (a variable, constant, interface method, or field of a literal
 // struct) has an identifier but no child slot or payload, and the explorer does not list it.
 type DocumentSymbol struct {
+	Props        map[string]any `json:"props,omitempty"`
 	ID           *string        `json:"id"`
 	Key          string         `json:"key"`
 	Kind         string         `json:"kind"`
@@ -150,13 +152,16 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 			return fmt.Errorf("diagnostic %d: %w", index, err)
 		}
 	}
+	if err := validateRelationships(content); err != nil {
+		return err
+	}
 	switch document.Coverage {
 	case CoverageSyntax:
 		return validateSyntaxContent(content, kinds)
 	case CoverageIndexed, CoveragePartial:
 		return validateTypedContent(content, document.Coverage == CoveragePartial, kinds)
 	case CoverageExcluded:
-		if len(content.Symbols) > 0 || len(content.Occurrences) > 0 {
+		if len(content.Symbols) > 0 || len(content.Occurrences) > 0 || len(content.Relationships) > 0 {
 			return errors.New("an excluded document has no symbols or occurrences")
 		}
 		return nil

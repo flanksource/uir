@@ -29,6 +29,7 @@ type Graph struct {
 }
 
 type Node struct {
+	Props map[string]any `json:"props,omitempty"`
 	// ID is defined by the Source: a symbol id, or Identifier.IdentityKey().
 	ID         string         `json:"id"`
 	Identifier uir.Identifier `json:"identifier"`
@@ -71,7 +72,8 @@ type Location struct {
 
 // Edge is every call from one node to another of one type.
 type Edge struct {
-	// ID is from|to|type.
+	Props map[string]any `json:"props,omitempty"`
+	// ID is from|to|type, with |kind appended when a native kind is present.
 	ID   string `json:"id"`
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -91,9 +93,14 @@ type Edge struct {
 }
 
 type Site struct {
-	Path   string `json:"path,omitempty"`
-	Line   int    `json:"line,omitempty"`
-	Column int    `json:"column,omitempty"`
+	Location   *Location      `json:"location,omitempty"`
+	Resolution string         `json:"resolution,omitempty"`
+	Reference  string         `json:"reference,omitempty"`
+	Targets    []string       `json:"targets,omitempty"`
+	Props      map[string]any `json:"props,omitempty"`
+	Path       string         `json:"path,omitempty"`
+	Line       int            `json:"line,omitempty"`
+	Column     int            `json:"column,omitempty"`
 	// Text is the call as written.
 	Text string `json:"text,omitempty"`
 	// Guards are the conditions that must hold to reach the site, outermost
