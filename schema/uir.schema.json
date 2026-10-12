@@ -354,7 +354,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment"
+          "anyOf": [
+            {
+              "const": "assignment"
+            },
+            {
+              "pattern": "^assignment:"
+            }
+          ]
         },
         "target": {
           "$ref": "#/$defs/ScopedVariableRef"
@@ -459,7 +466,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:binary"
+          "anyOf": [
+            {
+              "const": "assignment:binary"
+            },
+            {
+              "pattern": "^assignment:binary:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -518,7 +532,17 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:block"
+          "anyOf": [
+            {
+              "const": "control:block"
+            },
+            {
+              "pattern": "^control:block:"
+            },
+            {
+              "const": "doc"
+            }
+          ]
         },
         "variables": {
           "description": "Defines the variable declared in the block's scope",
@@ -578,7 +602,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:break"
+          "anyOf": [
+            {
+              "const": "control:break"
+            },
+            {
+              "pattern": "^control:break:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -634,7 +665,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:cast"
+          "anyOf": [
+            {
+              "const": "assignment:cast"
+            },
+            {
+              "pattern": "^assignment:cast:"
+            }
+          ]
         },
         "targetType": {
           "type": "string"
@@ -744,7 +782,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:condition"
+          "anyOf": [
+            {
+              "const": "control:condition"
+            },
+            {
+              "pattern": "^control:condition:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -826,7 +871,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "decl:const"
+          "anyOf": [
+            {
+              "const": "decl:const"
+            },
+            {
+              "pattern": "^decl:const:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -879,7 +931,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:continue"
+          "anyOf": [
+            {
+              "const": "control:continue"
+            },
+            {
+              "pattern": "^control:continue:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -974,7 +1033,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:destructure"
+          "anyOf": [
+            {
+              "const": "assignment:destructure"
+            },
+            {
+              "pattern": "^assignment:destructure:"
+            }
+          ]
         },
         "value": {
           "description": "The source expression being destructured",
@@ -988,15 +1054,8 @@
       "type": "object",
       "properties": {
         "Method": {
-          "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Method is encoded under the \"Method\" key, as a node slot, by the codec of the call statement that embeds it.",
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -1069,7 +1128,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "dispatch_call"
+          "anyOf": [
+            {
+              "const": "dispatch_call"
+            },
+            {
+              "pattern": "^dispatch_call:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1131,7 +1197,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "doc"
+          "anyOf": [
+            {
+              "const": "doc"
+            },
+            {
+              "pattern": "^doc:"
+            }
+          ]
         },
         "style": {
           "type": "string"
@@ -1228,7 +1301,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "call:api"
+          "anyOf": [
+            {
+              "const": "call:api"
+            },
+            {
+              "pattern": "^call:api:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1348,7 +1428,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:expression"
+          "anyOf": [
+            {
+              "const": "assignment:expression"
+            },
+            {
+              "pattern": "^assignment:expression:"
+            }
+          ]
         },
         "tuple": {
           "$ref": "#/$defs/TupleStmt"
@@ -1578,7 +1665,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:loop:foreach"
+          "anyOf": [
+            {
+              "const": "control:loop:foreach"
+            },
+            {
+              "pattern": "^control:loop:foreach:"
+            }
+          ]
         },
         "variable": {
           "$ref": "#/$defs/AssignmentStmt"
@@ -1643,7 +1737,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:loop:for"
+          "anyOf": [
+            {
+              "const": "control:loop:for"
+            },
+            {
+              "pattern": "^control:loop:for:"
+            }
+          ]
         },
         "update": {
           "$ref": "#/$defs/ExprStmt"
@@ -1702,7 +1803,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "decl:func"
+          "anyOf": [
+            {
+              "const": "decl:func"
+            },
+            {
+              "pattern": "^decl:func:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1881,7 +1989,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:if"
+          "anyOf": [
+            {
+              "const": "control:if"
+            },
+            {
+              "pattern": "^control:if:"
+            }
+          ]
         },
         "then": {
           "$ref": "#/$defs/BlockStmt"
@@ -1976,7 +2091,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:literal"
+          "anyOf": [
+            {
+              "const": "assignment:literal"
+            },
+            {
+              "pattern": "^assignment:literal:"
+            }
+          ]
         },
         "value": {
           "type": "string"
@@ -1988,15 +2110,8 @@
       "type": "object",
       "properties": {
         "Method": {
-          "description": "Method is encoded under the \"Method\" key by the codec of the call statement that embeds it.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Method is encoded under the \"Method\" key, as a node slot, by the codec of the call statement that embeds it.",
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -2066,7 +2181,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "call"
+          "anyOf": [
+            {
+              "const": "call"
+            },
+            {
+              "pattern": "^call:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -2239,40 +2361,148 @@
     "Node": {
       "anyOf": [
         {
-          "$ref": "#/$defs/ModuleNode"
+          "type": "object",
+          "required": [
+            "$module"
+          ],
+          "properties": {
+            "$module": {
+              "$ref": "#/$defs/ModuleNode"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/PackageNode"
+          "type": "object",
+          "required": [
+            "$package"
+          ],
+          "properties": {
+            "$package": {
+              "$ref": "#/$defs/PackageNode"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/TypedNode"
+          "type": "object",
+          "required": [
+            "$class"
+          ],
+          "properties": {
+            "$class": {
+              "$ref": "#/$defs/TypedNode"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/MethodNode"
+          "type": "object",
+          "required": [
+            "$method"
+          ],
+          "properties": {
+            "$method": {
+              "$ref": "#/$defs/MethodNode"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ASTRecord"
+          "type": "object",
+          "required": [
+            "$record"
+          ],
+          "properties": {
+            "$record": {
+              "$ref": "#/$defs/ASTRecord"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ASTEndpoint"
+          "type": "object",
+          "required": [
+            "$endpoint"
+          ],
+          "properties": {
+            "$endpoint": {
+              "$ref": "#/$defs/ASTEndpoint"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordField"
+          "type": "object",
+          "required": [
+            "$record_field"
+          ],
+          "properties": {
+            "$record_field": {
+              "$ref": "#/$defs/RecordField"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordTable"
+          "type": "object",
+          "required": [
+            "$table"
+          ],
+          "properties": {
+            "$table": {
+              "$ref": "#/$defs/RecordTable"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordColumn"
+          "type": "object",
+          "required": [
+            "$column"
+          ],
+          "properties": {
+            "$column": {
+              "$ref": "#/$defs/RecordColumn"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordIndex"
+          "type": "object",
+          "required": [
+            "$index"
+          ],
+          "properties": {
+            "$index": {
+              "$ref": "#/$defs/RecordIndex"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordForeignKey"
+          "type": "object",
+          "required": [
+            "$foreign_key"
+          ],
+          "properties": {
+            "$foreign_key": {
+              "$ref": "#/$defs/RecordForeignKey"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/NodeRef"
+          "type": "object",
+          "required": [
+            "$ref"
+          ],
+          "properties": {
+            "$ref": {
+              "$ref": "#/$defs/NodeRef"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -2415,7 +2645,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:object"
+          "anyOf": [
+            {
+              "const": "assignment:object"
+            },
+            {
+              "pattern": "^assignment:object:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -2592,7 +2829,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "raw"
+          "anyOf": [
+            {
+              "const": "raw"
+            },
+            {
+              "pattern": "^raw:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3009,15 +3253,8 @@
       "type": "object",
       "properties": {
         "Record": {
-          "description": "Record is encoded under the \"Record\" key by the read/write codecs.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Record is encoded under the \"Record\" key, as a node slot, by the read/write codecs.",
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -3086,7 +3323,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "call:read:record"
+          "anyOf": [
+            {
+              "const": "call:read:record"
+            },
+            {
+              "pattern": "^call:read:record:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3304,15 +3548,8 @@
       "type": "object",
       "properties": {
         "Record": {
-          "description": "Record is encoded under the \"Record\" key by the read/write codecs.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Node"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Record is encoded under the \"Record\" key, as a node slot, by the read/write codecs.",
+          "$ref": "#/$defs/Node"
         },
         "annotations": {
           "type": "array",
@@ -3381,7 +3618,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "call:write:record"
+          "anyOf": [
+            {
+              "const": "call:write:record"
+            },
+            {
+              "pattern": "^call:write:record:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3434,7 +3678,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:return"
+          "anyOf": [
+            {
+              "const": "control:return"
+            },
+            {
+              "pattern": "^control:return:"
+            }
+          ]
         },
         "value": {
           "$ref": "#/$defs/ExprStmt"
@@ -3486,7 +3737,14 @@
         "statement_type": {
           "description": "The kind uir's registry stamps under statement_type so a polymorphic slot can be decoded.",
           "type": "string",
-          "const": "ref:var"
+          "anyOf": [
+            {
+              "const": "ref:var"
+            },
+            {
+              "pattern": "^ref:var:"
+            }
+          ]
         },
         "type": {
           "description": "The type, class, table, API group the node belongs to",
@@ -3526,112 +3784,436 @@
     "Statement": {
       "anyOf": [
         {
-          "$ref": "#/$defs/AssignmentStmt"
+          "type": "object",
+          "required": [
+            "$assignment"
+          ],
+          "properties": {
+            "$assignment": {
+              "$ref": "#/$defs/AssignmentStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/BinaryStmt"
+          "type": "object",
+          "required": [
+            "$assignment:binary"
+          ],
+          "properties": {
+            "$assignment:binary": {
+              "$ref": "#/$defs/BinaryStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/BlockStmt"
+          "type": "object",
+          "required": [
+            "$control:block"
+          ],
+          "properties": {
+            "$control:block": {
+              "$ref": "#/$defs/BlockStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/BreakStmt"
+          "type": "object",
+          "required": [
+            "$control:break"
+          ],
+          "properties": {
+            "$control:break": {
+              "$ref": "#/$defs/BreakStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/CastStmt"
+          "type": "object",
+          "required": [
+            "$assignment:cast"
+          ],
+          "properties": {
+            "$assignment:cast": {
+              "$ref": "#/$defs/CastStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ConditionStmt"
+          "type": "object",
+          "required": [
+            "$control:condition"
+          ],
+          "properties": {
+            "$control:condition": {
+              "$ref": "#/$defs/ConditionStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ConstDeclStmt"
+          "type": "object",
+          "required": [
+            "$decl:const"
+          ],
+          "properties": {
+            "$decl:const": {
+              "$ref": "#/$defs/ConstDeclStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ContinueStmt"
+          "type": "object",
+          "required": [
+            "$control:continue"
+          ],
+          "properties": {
+            "$control:continue": {
+              "$ref": "#/$defs/ContinueStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/EndpointCallStmt"
+          "type": "object",
+          "required": [
+            "$call:api"
+          ],
+          "properties": {
+            "$call:api": {
+              "$ref": "#/$defs/EndpointCallStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ExprStmt"
+          "type": "object",
+          "required": [
+            "$assignment:expression"
+          ],
+          "properties": {
+            "$assignment:expression": {
+              "$ref": "#/$defs/ExprStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ForStmt"
+          "type": "object",
+          "required": [
+            "$control:loop:for"
+          ],
+          "properties": {
+            "$control:loop:for": {
+              "$ref": "#/$defs/ForStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ForEachStmt"
+          "type": "object",
+          "required": [
+            "$control:loop:foreach"
+          ],
+          "properties": {
+            "$control:loop:foreach": {
+              "$ref": "#/$defs/ForEachStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/FunctionDeclStmt"
+          "type": "object",
+          "required": [
+            "$decl:func"
+          ],
+          "properties": {
+            "$decl:func": {
+              "$ref": "#/$defs/FunctionDeclStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/IfStmt"
+          "type": "object",
+          "required": [
+            "$control:if"
+          ],
+          "properties": {
+            "$control:if": {
+              "$ref": "#/$defs/IfStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/LiteralStmt"
+          "type": "object",
+          "required": [
+            "$assignment:literal"
+          ],
+          "properties": {
+            "$assignment:literal": {
+              "$ref": "#/$defs/LiteralStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/MethodCallStmt"
+          "type": "object",
+          "required": [
+            "$call"
+          ],
+          "properties": {
+            "$call": {
+              "$ref": "#/$defs/MethodCallStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/DispatchCallStmt"
+          "type": "object",
+          "required": [
+            "$dispatch_call"
+          ],
+          "properties": {
+            "$dispatch_call": {
+              "$ref": "#/$defs/DispatchCallStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordReadStmt"
+          "type": "object",
+          "required": [
+            "$call:read:record"
+          ],
+          "properties": {
+            "$call:read:record": {
+              "$ref": "#/$defs/RecordReadStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RecordWriteStmt"
+          "type": "object",
+          "required": [
+            "$call:write:record"
+          ],
+          "properties": {
+            "$call:write:record": {
+              "$ref": "#/$defs/RecordWriteStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ReturnStmt"
+          "type": "object",
+          "required": [
+            "$control:return"
+          ],
+          "properties": {
+            "$control:return": {
+              "$ref": "#/$defs/ReturnStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/SwitchStmt"
+          "type": "object",
+          "required": [
+            "$control:switch"
+          ],
+          "properties": {
+            "$control:switch": {
+              "$ref": "#/$defs/SwitchStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ThrowStmt"
+          "type": "object",
+          "required": [
+            "$control:throw"
+          ],
+          "properties": {
+            "$control:throw": {
+              "$ref": "#/$defs/ThrowStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/TryStmt"
+          "type": "object",
+          "required": [
+            "$control:try"
+          ],
+          "properties": {
+            "$control:try": {
+              "$ref": "#/$defs/TryStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/TupleStmt"
+          "type": "object",
+          "required": [
+            "$assignment:tuple"
+          ],
+          "properties": {
+            "$assignment:tuple": {
+              "$ref": "#/$defs/TupleStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ObjectLiteralStmt"
+          "type": "object",
+          "required": [
+            "$assignment:object"
+          ],
+          "properties": {
+            "$assignment:object": {
+              "$ref": "#/$defs/ObjectLiteralStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/TypeDeclStmt"
+          "type": "object",
+          "required": [
+            "$decl:type"
+          ],
+          "properties": {
+            "$decl:type": {
+              "$ref": "#/$defs/TypeDeclStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/UnaryStmt"
+          "type": "object",
+          "required": [
+            "$assignment:unary"
+          ],
+          "properties": {
+            "$assignment:unary": {
+              "$ref": "#/$defs/UnaryStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/VariableDeclStmt"
+          "type": "object",
+          "required": [
+            "$decl:var"
+          ],
+          "properties": {
+            "$decl:var": {
+              "$ref": "#/$defs/VariableDeclStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/VariableStmt"
+          "type": "object",
+          "required": [
+            "$assignment:variable"
+          ],
+          "properties": {
+            "$assignment:variable": {
+              "$ref": "#/$defs/VariableStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/WhileStmt"
+          "type": "object",
+          "required": [
+            "$control:loop:while"
+          ],
+          "properties": {
+            "$control:loop:while": {
+              "$ref": "#/$defs/WhileStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/DocStmt"
+          "type": "object",
+          "required": [
+            "$doc"
+          ],
+          "properties": {
+            "$doc": {
+              "$ref": "#/$defs/DocStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/TestStmt"
+          "type": "object",
+          "required": [
+            "$test"
+          ],
+          "properties": {
+            "$test": {
+              "$ref": "#/$defs/TestStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/RawStmt"
+          "type": "object",
+          "required": [
+            "$raw"
+          ],
+          "properties": {
+            "$raw": {
+              "$ref": "#/$defs/RawStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/DestructuringStmt"
+          "type": "object",
+          "required": [
+            "$assignment:destructure"
+          ],
+          "properties": {
+            "$assignment:destructure": {
+              "$ref": "#/$defs/DestructuringStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/TemplateLiteralStmt"
+          "type": "object",
+          "required": [
+            "$assignment:template"
+          ],
+          "properties": {
+            "$assignment:template": {
+              "$ref": "#/$defs/TemplateLiteralStmt"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/ScopedVariableRef"
+          "type": "object",
+          "required": [
+            "$ref:var"
+          ],
+          "properties": {
+            "$ref:var": {
+              "$ref": "#/$defs/ScopedVariableRef"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -3764,7 +4346,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:switch"
+          "anyOf": [
+            {
+              "const": "control:switch"
+            },
+            {
+              "pattern": "^control:switch:"
+            }
+          ]
         },
         "value": {
           "$ref": "#/$defs/ExprStmt"
@@ -3827,7 +4416,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:template"
+          "anyOf": [
+            {
+              "const": "assignment:template"
+            },
+            {
+              "pattern": "^assignment:template:"
+            }
+          ]
         },
         "strings": {
           "description": "Alternating string parts and expression parts Strings[0] + Expressions[0] + Strings[1] + Expressions[1] + ... + Strings[n]",
@@ -3907,7 +4503,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "test"
+          "anyOf": [
+            {
+              "const": "test"
+            },
+            {
+              "pattern": "^test:"
+            }
+          ]
         },
         "variables": {
           "description": "Defines the variable declared in the block's scope",
@@ -3970,7 +4573,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:throw"
+          "anyOf": [
+            {
+              "const": "control:throw"
+            },
+            {
+              "pattern": "^control:throw:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4029,7 +4639,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:try"
+          "anyOf": [
+            {
+              "const": "control:try"
+            },
+            {
+              "pattern": "^control:try:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4088,7 +4705,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:tuple"
+          "anyOf": [
+            {
+              "const": "assignment:tuple"
+            },
+            {
+              "pattern": "^assignment:tuple:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4144,7 +4768,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "decl:type"
+          "anyOf": [
+            {
+              "const": "decl:type"
+            },
+            {
+              "pattern": "^decl:type:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4526,7 +5157,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:unary"
+          "anyOf": [
+            {
+              "const": "assignment:unary"
+            },
+            {
+              "pattern": "^assignment:unary:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4689,7 +5327,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "decl:var"
+          "anyOf": [
+            {
+              "const": "decl:var"
+            },
+            {
+              "pattern": "^decl:var:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4745,7 +5390,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "assignment:variable"
+          "anyOf": [
+            {
+              "const": "assignment:variable"
+            },
+            {
+              "pattern": "^assignment:variable:"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -4815,7 +5467,14 @@
         "statement_type": {
           "description": "Type is a cache of the concrete statement kind, not its source of truth — GetStatementType is. MarshalStatement stamps the encoded statement_type from there, so a literal that leaves this unset still round-trips.",
           "type": "string",
-          "const": "control:loop:while"
+          "anyOf": [
+            {
+              "const": "control:loop:while"
+            },
+            {
+              "pattern": "^control:loop:while:"
+            }
+          ]
         }
       },
       "additionalProperties": false

@@ -23,6 +23,7 @@ STATEMENTS = [
     EndpointCallStmt(type=ASTStatementType.HTTP_CALL, id="getUser"),
     RecordReadStmt(id="users", expression="id = 1"),
     BlockStmt(type=ASTStatementType.DOC),
+    BlockStmt(children=[MethodCallStmt(type=ASTStatementType.CALL_PACKAGE, package="billing", method="Invoice")]),
 ]
 
 # A type that does not refine the statement's kind cannot be decoded as that

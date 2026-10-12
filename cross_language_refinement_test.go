@@ -49,6 +49,12 @@ func TestPythonRefinedStatementsDecode(t *testing.T) {
 		if got := cmp.Or(typed.Refinement, typed.Kind); got != c.Want {
 			t.Errorf("decoded %s as %q, want %q", c.Statement, got, c.Want)
 		}
+		if block, ok := stmt.(*BlockStmt); ok && len(block.Children) > 0 {
+			call, isCall := block.Children[0].(*MethodCallStmt)
+			if !isCall || call.Type != ASTStatementTypeCallPackage || call.Method == nil {
+				t.Errorf("%s: a tagged child decoded as %#v, want a call:package with its method", c.Want, block.Children[0])
+			}
+		}
 	}
 }
 

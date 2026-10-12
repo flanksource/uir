@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 
@@ -116,8 +117,13 @@ func TestEveryRegisteredTypeIsDescribed(t *testing.T) {
 				t.Errorf("%s has no %q property, so it cannot be told apart in a %s", member.typ.Name(), union.key, union.name)
 				continue
 			}
-			if property.Const != member.value {
-				t.Errorf("%s pins %s to %q, but its marshaler stamps %q", member.typ.Name(), union.key, property.Const, member.value)
+			if pinned := pinnedKind(property); pinned != member.value {
+				t.Errorf("%s pins %s to %q, but its marshaler stamps %q", member.typ.Name(), union.key, pinned, member.value)
+			}
+			if !slices.ContainsFunc(branches(schema.Defs[union.name]), func(branch *Schema) bool {
+				return slices.Equal(branch.Required, []string{uir.SlotKey(member.value)})
+			}) {
+				t.Errorf("%s union has no slot branch keyed %q", union.name, uir.SlotKey(member.value))
 			}
 		}
 	}
@@ -192,6 +198,8 @@ func TestSchemaAcceptsMarshaledDocument(t *testing.T) {
 // wrongly: inline-embedded bases, a polymorphic statement body, a map field and
 // a table alongside a record.
 func document() *uir.UIR {
+	refined := uir.NewMethodCall("Println", uir.Identifier{Package: "fmt"}).Build()
+	refined.Type = uir.ASTStatementTypeCallPackage
 	method := uir.NewMethod("CreateOrder").
 		WithPackage("com.example.orders").
 		WithType("OrderService").
@@ -199,6 +207,7 @@ func document() *uir.UIR {
 		WithReturnType(uir.TypeReference{Name: "Order"}).
 		WithBody(uir.NewBlock().
 			WithStatement(uir.NewMethodCall("validate").WithPositionalArg(uir.VarExpr("customerId")).Build()).
+			WithStatement(refined).
 			WithStatement(uir.NewIf(uir.VarExpr("valid")).
 				WithThen(uir.NewBlock().WithStatement(uir.NewReturn(uir.VarExpr("order"))).Build()).
 				Build()).
@@ -339,12 +348,31 @@ func sameKind(schema *Schema, value any) bool {
 	}
 }
 
-// discriminated finds the branch whose definition declares the type stamped on
-// the document, so a mismatch is reported against the right definition.
+// pinnedKind is the kind a discriminator property pins: its const, or the const
+// heading the kind-or-refinement choice.
+func pinnedKind(property *Schema) string {
+	if property.Const != "" || len(property.AnyOf) == 0 {
+		return property.Const
+	}
+	return property.AnyOf[0].Const
+}
+
+// discriminated finds the branch that names the document — by its slot key, or
+// by the type stamped on it — so a mismatch is reported against the right
+// definition.
 func discriminated(value any, schema *Schema, defs map[string]*Schema) *Schema {
 	object, ok := value.(map[string]any)
 	if !ok {
 		return nil
+	}
+	if len(object) == 1 {
+		for _, branch := range branches(schema) {
+			for key := range object {
+				if _, named := branch.Properties[key]; named {
+					return branch
+				}
+			}
+		}
 	}
 	for _, key := range []string{statementDiscriminator, nodeDiscriminator} {
 		stamped, ok := object[key].(string)
@@ -356,7 +384,7 @@ func discriminated(value any, schema *Schema, defs map[string]*Schema) *Schema {
 			if resolved == nil {
 				continue
 			}
-			if property := resolved.Properties[key]; property != nil && property.Const == stamped {
+			if property := resolved.Properties[key]; property != nil && pinnedKind(property) == stamped {
 				return branch
 			}
 		}

@@ -7,6 +7,7 @@ require (
 	github.com/flanksource/clicky v1.21.75
 	github.com/flanksource/commons v1.60.0
 	github.com/flanksource/commons-db v0.1.46
+	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936
 	github.com/google/uuid v1.6.0

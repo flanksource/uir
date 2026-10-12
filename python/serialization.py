@@ -21,27 +21,46 @@ def _pop_present(d: dict, moves: dict) -> dict:
     return {new: d.pop(old) for old, new in moves.items() if old in d}
 
 
+# An interface-typed slot — a block child, a Node field — holds its value under
+# its kind, {"$<kind>": <value>}, as Go's codec writes it (uir.SlotKey).
+SLOT_KEY_PREFIX = "$"
+
+
+def _node_slot(kind: str, node: dict) -> dict:
+    return {SLOT_KEY_PREFIX + kind: {"node_kind": kind, **node}}
+
+
+def _statement_slot(stmt: dict) -> dict:
+    """Hold an encoded statement in a block's children: under its registered kind,
+    carrying its own Type (a refinement, when it has one) under statement_type."""
+    kind = stmt["statement_type"]
+    refined = stmt.pop("statement_refinement", None)
+    if refined:
+        stmt["statement_type"] = refined
+    return {SLOT_KEY_PREFIX + kind: stmt}
+
+
 # Go's statements name the node they call, read or write through a Node-typed
-# field, encoded as a node object stamped with its node_kind; these dataclasses
-# keep those fields flat, so the encoder regroups them into the Go shape.
+# field, encoded as a node slot; these dataclasses keep those fields flat, so the
+# encoder regroups them into the Go shape.
 def _method_call_wire(d: dict) -> dict:
     ref = _pop_present(d, {"module": "module", "package": "package", "type": "type", "method": "method"})
     if ref:
-        d["Method"] = {"node_kind": "ref", **ref}
+        d["Method"] = _node_slot("ref", ref)
     return d
 
 
 def _endpoint_call_wire(d: dict) -> dict:
     endpoint = _pop_present(d, {"environment": "module", "id": "method", "endpointType": "endpointType"})
     if endpoint:
-        d["endpoint"] = {"node_kind": "endpoint", "node_type": "endpoint", **endpoint}
+        d["endpoint"] = _node_slot("endpoint", {"node_type": "endpoint", **endpoint})
     return d
 
 
 def _record_access_wire(d: dict) -> dict:
     record = _pop_present(d, {"environment": "module", "id": "type"})
     if record:
-        d["Record"] = {"node_kind": "ref", "node_type": "record", **record}
+        d["Record"] = _node_slot("ref", {"node_type": "record", **record})
     expression = _pop_present(d, {"expressionType": "type", "expression": "expression"})
     if expression:
         d["expression"] = expression
@@ -119,6 +138,8 @@ class UIREncoder(json.JSONEncoder):
             shape = _WIRE_SHAPES.get(type(value).__name__)
             if shape:
                 d = shape(d)
+            if isinstance(d.get("children"), list):
+                d["children"] = [_statement_slot(child) for child in d["children"]]
             return _stamp_statement_type(d, kind, carried) if kind else d
         if isinstance(value, list):
             return [self._encode(item) for item in value]

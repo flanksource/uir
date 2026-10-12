@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 	"time"
 
@@ -45,7 +46,9 @@ type Schema struct {
 	Format               string             `json:"format,omitempty"`
 	Ref                  string             `json:"$ref,omitempty"`
 	Const                string             `json:"const,omitempty"`
+	Pattern              string             `json:"pattern,omitempty"`
 	Enum                 []string           `json:"enum,omitempty"`
+	Required             []string           `json:"required,omitempty"`
 	OneOf                []*Schema          `json:"oneOf,omitempty"`
 	AnyOf                []*Schema          `json:"anyOf,omitempty"`
 	Items                *Schema            `json:"items,omitempty"`
@@ -109,16 +112,17 @@ func (g *generator) build(root reflect.Type) (*Schema, error) {
 		return nil, err
 	}
 	unions := []struct {
-		name       string
-		key        string
-		refinement string
-		members    []unionMember
+		name           string
+		key            string
+		refinement     string
+		crossHierarchy map[string][]string
+		members        []unionMember
 	}{
-		{nodeUnion, nodeDiscriminator, uir.NodeMarshaler.RefinementField(), nodes},
-		{statementUnion, statementDiscriminator, uir.StatementMarshaler.RefinementField(), statements},
+		{nodeUnion, nodeDiscriminator, uir.NodeMarshaler.RefinementField(), uir.NodeMarshaler.CrossHierarchy(), nodes},
+		{statementUnion, statementDiscriminator, uir.StatementMarshaler.RefinementField(), uir.StatementMarshaler.CrossHierarchy(), statements},
 	}
 	for _, u := range unions {
-		union, err := g.union(u.key, u.refinement, u.members)
+		union, err := g.union(u.key, u.refinement, u.crossHierarchy, u.members)
 		if err != nil {
 			return nil, fmt.Errorf("%s union: %w", u.name, err)
 		}
@@ -157,8 +161,13 @@ type unionMember struct {
 // kinds.
 //
 // A registry that accepts refinements stamps a refined kind under refinement
-// beside the discriminator, so every member declares that field too.
-func (g *generator) union(key, refinement string, members []unionMember) (*Schema, error) {
+// beside the discriminator in a concrete field, so every member declares that
+// field too. In a slot the member carries its own Type under the discriminator —
+// its kind or a refinement of it — since the slot key names the kind.
+//
+// Every branch is the tagged slot {"$<kind>": <member>}: exactly one key, which
+// names the member.
+func (g *generator) union(key, refinement string, crossHierarchy map[string][]string, members []unionMember) (*Schema, error) {
 	refs := make([]*Schema, 0, len(members))
 	for _, member := range members {
 		r, err := g.define(member.typ)
@@ -176,7 +185,7 @@ func (g *generator) union(key, refinement string, members []unionMember) (*Schem
 		if def.Properties == nil {
 			def.Properties = map[string]*Schema{}
 		}
-		def.Properties[key] = &Schema{Description: description, Type: "string", Const: member.value}
+		def.Properties[key] = discriminatorSchema(description, member.value, refinement != "", crossHierarchy[member.value])
 		if refinement != "" {
 			if _, declared := def.Properties[refinement]; declared {
 				return nil, fmt.Errorf("%s declares %s, which its registry stamps itself", member.typ.Name(), refinement)
@@ -186,9 +195,29 @@ func (g *generator) union(key, refinement string, members []unionMember) (*Schem
 				Type:        "string",
 			}
 		}
-		refs = append(refs, r)
+		slotKey := uir.SlotKey(member.value)
+		refs = append(refs, &Schema{
+			Type:                 "object",
+			Properties:           map[string]*Schema{slotKey: r},
+			Required:             []string{slotKey},
+			AdditionalProperties: false,
+		})
 	}
 	return &Schema{AnyOf: refs}, nil
+}
+
+// discriminatorSchema pins a member's discriminator to its kind, or — for a
+// registry that accepts refinements — to its kind or any refinement of it: one
+// below it in the ':'-hierarchy, or one it accepts from outside it.
+func discriminatorSchema(description, kind string, refines bool, crossHierarchy []string) *Schema {
+	if !refines {
+		return &Schema{Description: description, Type: "string", Const: kind}
+	}
+	accepted := []*Schema{{Const: kind}, {Pattern: "^" + regexp.QuoteMeta(kind+":")}}
+	for _, refinement := range crossHierarchy {
+		accepted = append(accepted, &Schema{Const: refinement})
+	}
+	return &Schema{Description: description, Type: "string", AnyOf: accepted}
 }
 
 // define registers t under its own name and returns a reference to it. The

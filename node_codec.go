@@ -1,7 +1,6 @@
 package uir
 
 import (
-	"encoding/json"
 	"fmt"
 )
 
@@ -46,228 +45,59 @@ func UnmarshalNode(data []byte) (Node, error) {
 	return NodeMarshaler.UnmarshalByType(data)
 }
 
-// encodeNodeField and UnmarshalNode are the one way a Node-typed struct field
-// crosses JSON. A nil node is omitted; a typed nil pointer is refused, since it
-// would come back as no node at all.
-func encodeNodeField(n Node) (json.RawMessage, error) {
-	if n == nil {
-		return nil, nil
-	}
-	return MarshalNode(n)
-}
-
 // Each type below holds a Node-typed field, which encoding/json can neither stamp
-// nor decode. The shadow field at depth 0 takes the node's key from the promoted
-// one, so every other field still encodes and decodes through the alias.
+// nor decode. Both directions go through the streaming codec (MarshalJSONTo,
+// UnmarshalJSONFrom), which writes and reads each node under its node_kind.
 
 func (s MethodCallStmt) MarshalJSON() ([]byte, error) {
-	type alias MethodCallStmt
-	method, err := encodeNodeField(s.Method)
-	if err != nil {
-		return nil, fmt.Errorf("MethodCallStmt.Method: %w", err)
-	}
-	return json.Marshal(struct {
-		alias
-		Method json.RawMessage `json:"Method,omitempty"`
-	}{alias(s), method})
+	return Marshal(s)
 }
 
 func (s *MethodCallStmt) UnmarshalJSON(data []byte) error {
-	type alias MethodCallStmt
-	aux := struct {
-		*alias
-		Method json.RawMessage `json:"Method,omitempty"`
-	}{alias: (*alias)(s)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	method, err := UnmarshalNode(aux.Method)
-	if err != nil {
-		return fmt.Errorf("MethodCallStmt.Method: %w", err)
-	}
-	s.Method = method
-	return nil
+	return Unmarshal(data, s)
 }
 
 // DispatchCallStmt encodes its target under "Method" as MethodCallStmt does, and
 // each candidate as a node. A nil candidate is refused in both directions: it
 // names nothing a call could dispatch to.
 func (s DispatchCallStmt) MarshalJSON() ([]byte, error) {
-	type alias DispatchCallStmt
-	method, err := encodeNodeField(s.Method)
-	if err != nil {
-		return nil, fmt.Errorf("DispatchCallStmt.Method: %w", err)
-	}
-	var candidates json.RawMessage
-	if len(s.Candidates) > 0 {
-		if candidates, err = MarshalNodes(s.Candidates); err != nil {
-			return nil, fmt.Errorf("DispatchCallStmt.Candidates: %w", err)
-		}
-	}
-	return json.Marshal(struct {
-		alias
-		Method     json.RawMessage `json:"Method,omitempty"`
-		Candidates json.RawMessage `json:"candidates,omitempty"`
-	}{alias(s), method, candidates})
+	return Marshal(s)
 }
 
 func (s *DispatchCallStmt) UnmarshalJSON(data []byte) error {
-	type alias DispatchCallStmt
-	aux := struct {
-		*alias
-		Method     json.RawMessage   `json:"Method,omitempty"`
-		Candidates []json.RawMessage `json:"candidates,omitempty"`
-	}{alias: (*alias)(s)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	method, err := UnmarshalNode(aux.Method)
-	if err != nil {
-		return fmt.Errorf("DispatchCallStmt.Method: %w", err)
-	}
-	s.Method = method
-	s.Candidates = nil
-	for i, raw := range aux.Candidates {
-		if isJSONNull(raw) {
-			return fmt.Errorf("DispatchCallStmt.candidates[%d] is null", i)
-		}
-		candidate, err := UnmarshalNode(raw)
-		if err != nil {
-			return fmt.Errorf("DispatchCallStmt.candidates[%d]: %w", i, err)
-		}
-		s.Candidates = append(s.Candidates, candidate)
-	}
-	return nil
+	return Unmarshal(data, s)
 }
 
 func (s EndpointCallStmt) MarshalJSON() ([]byte, error) {
-	type alias EndpointCallStmt
-	endpoint, err := encodeNodeField(s.Endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("EndpointCallStmt.Endpoint: %w", err)
-	}
-	return json.Marshal(struct {
-		alias
-		Endpoint json.RawMessage `json:"endpoint,omitempty"`
-	}{alias(s), endpoint})
+	return Marshal(s)
 }
 
 func (s *EndpointCallStmt) UnmarshalJSON(data []byte) error {
-	type alias EndpointCallStmt
-	aux := struct {
-		*alias
-		Endpoint json.RawMessage `json:"endpoint,omitempty"`
-	}{alias: (*alias)(s)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	endpoint, err := UnmarshalNode(aux.Endpoint)
-	if err != nil {
-		return fmt.Errorf("EndpointCallStmt.Endpoint: %w", err)
-	}
-	s.Endpoint = endpoint
-	return nil
+	return Unmarshal(data, s)
 }
 
 func (s RecordReadStmt) MarshalJSON() ([]byte, error) {
-	type alias RecordReadStmt
-	record, err := encodeNodeField(s.Record)
-	if err != nil {
-		return nil, fmt.Errorf("RecordReadStmt.Record: %w", err)
-	}
-	return json.Marshal(struct {
-		alias
-		Record json.RawMessage `json:"Record,omitempty"`
-	}{alias(s), record})
+	return Marshal(s)
 }
 
 func (s *RecordReadStmt) UnmarshalJSON(data []byte) error {
-	type alias RecordReadStmt
-	aux := struct {
-		*alias
-		Record json.RawMessage `json:"Record,omitempty"`
-	}{alias: (*alias)(s)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	record, err := UnmarshalNode(aux.Record)
-	if err != nil {
-		return fmt.Errorf("RecordReadStmt.Record: %w", err)
-	}
-	s.Record = record
-	return nil
+	return Unmarshal(data, s)
 }
 
 func (s RecordWriteStmt) MarshalJSON() ([]byte, error) {
-	type alias RecordWriteStmt
-	record, err := encodeNodeField(s.Record)
-	if err != nil {
-		return nil, fmt.Errorf("RecordWriteStmt.Record: %w", err)
-	}
-	return json.Marshal(struct {
-		alias
-		Record json.RawMessage `json:"Record,omitempty"`
-	}{alias(s), record})
+	return Marshal(s)
 }
 
 func (s *RecordWriteStmt) UnmarshalJSON(data []byte) error {
-	type alias RecordWriteStmt
-	aux := struct {
-		*alias
-		Record json.RawMessage `json:"Record,omitempty"`
-	}{alias: (*alias)(s)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	record, err := UnmarshalNode(aux.Record)
-	if err != nil {
-		return fmt.Errorf("RecordWriteStmt.Record: %w", err)
-	}
-	s.Record = record
-	return nil
+	return Unmarshal(data, s)
 }
 
 func (r UIRRelationship) MarshalJSON() ([]byte, error) {
-	type alias UIRRelationship
-	from, err := encodeNodeField(r.GetFrom())
-	if err != nil {
-		return nil, fmt.Errorf("UIRRelationship.From: %w", err)
-	}
-	to, err := encodeNodeField(r.To)
-	if err != nil {
-		return nil, fmt.Errorf("UIRRelationship.To: %w", err)
-	}
-	return json.Marshal(struct {
-		alias
-		From json.RawMessage `json:"from,omitempty"`
-		To   json.RawMessage `json:"to,omitempty"`
-	}{alias(r), from, to})
+	return Marshal(r)
 }
 
 // UnmarshalJSON leaves From nil when the relationship has no source, as
 // NewRelationship builds it.
 func (r *UIRRelationship) UnmarshalJSON(data []byte) error {
-	type alias UIRRelationship
-	aux := struct {
-		*alias
-		From json.RawMessage `json:"from,omitempty"`
-		To   json.RawMessage `json:"to,omitempty"`
-	}{alias: (*alias)(r)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	from, err := UnmarshalNode(aux.From)
-	if err != nil {
-		return fmt.Errorf("UIRRelationship.From: %w", err)
-	}
-	to, err := UnmarshalNode(aux.To)
-	if err != nil {
-		return fmt.Errorf("UIRRelationship.To: %w", err)
-	}
-	r.From = nil
-	if from != nil {
-		r.From = &from
-	}
-	r.To = to
-	return nil
+	return Unmarshal(data, r)
 }

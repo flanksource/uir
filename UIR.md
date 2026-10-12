@@ -22,10 +22,11 @@ It is written for two audiences:
 ### Root vs node documents
 
 - `UIR` is the root aggregate. It carries neither `node_kind` nor `node_type`.
-- `node_kind` is the node discriminator. It is the kind the node's concrete Go type is registered under in `NodeMarshaler`: the node's static `GetType()` (`package`, `class`, `method`, `record_field`, …) for every registered node, and `ref` for a `NodeRef`. The codec stamps it whenever a node crosses an interface-typed (`Node`) slot — every element of the flat node array (`MarshalNodes` / `UnmarshalJSON`) and the `Node`-typed statement fields (`MethodCallStmt.Method`, `EndpointCallStmt.endpoint`, `RecordReadStmt.Record`, `RecordWriteStmt.Record`). A node nested through a concrete field (`UIR.packages`, `TypedNode.methods`, …) carries no `node_kind`, because its Go type is already known. Decoding a `Node` slot whose document has no `node_kind`, or one nothing is registered under, is an error rather than a guess.
+- An interface-typed slot holds its value under its kind: `{"$<kind>": <value>}` (`uir.SlotKey`). The slots are every block child (`BlockStmt.children`), every element of the flat node array (`MarshalNodes` / `UnmarshalJSON`), and the `Node`-typed statement and relationship fields (`MethodCallStmt.Method`, `DispatchCallStmt.Method` / `candidates`, `EndpointCallStmt.endpoint`, `RecordReadStmt.Record`, `RecordWriteStmt.Record`, `UIRRelationship.from` / `to`). Because the kind precedes the value, `uir.Unmarshal` (and every `UnmarshalJSON`, which delegates to it) decodes in one pass over the document without buffering a subtree to find its discriminator. A slot is a single key; an unknown kind, or a slot holding two kinds, is refused. A slot whose first key does not start with `$` is the legacy inline layout — the value itself, stamped with its discriminator, as the Python and Java producers and documents written before the tagged layout carry it — and still decodes. `UIR.ToMap` / `AssertionEnv` (and `uir.UnwrapSlots`) present every slot inline, so assertions see one shape whichever layout a document uses.
+- `node_kind` is the node discriminator. It is the kind the node's concrete Go type is registered under in `NodeMarshaler`: the node's static `GetType()` (`package`, `class`, `method`, `record_field`, …) for every registered node, and `ref` for a `NodeRef`. It names a `Node` slot (`{"$ref": …}`) and is stamped inside the slot's value too. A node nested through a concrete field (`UIR.packages`, `TypedNode.methods`, …) carries no `node_kind`, because its Go type is already known. Decoding a `Node` slot without a kind, or with one nothing is registered under, is an error rather than a guess.
 - `node_type` is `Identifier` data, not a discriminator. A `MethodNode` may carry `node_type: "constructor"`, and a `NodeRef` carries the `node_type` of the node it points at, so `{"node_kind": "ref", "node_type": "method", "method": "GetUser"}` decodes as a reference to a method, never as a `MethodNode`. Stamping the concrete kind over `node_type` would change the node's identity, which is why the discriminator has a key of its own.
 - Concrete statements are identified by `statement_type`, which the codec stamps from the concrete type's registered kind rather than from the embedded `Type` field.
-- A statement whose `Type` is refined past its registered kind keeps `statement_type` at the kind and carries the refined value in `statement_refinement`, e.g. `{"statement_type": "call", "statement_refinement": "call:package"}`. A refinement is accepted when its longest registered `:`-prefix is the statement's own kind, or when the kind lists it explicitly (a `control:block` may be refined to `doc`); anything else is refused on encode and decode.
+- A statement whose `Type` is refined past its registered kind keeps `statement_type` at the kind and carries the refined value in `statement_refinement`, e.g. `{"statement_type": "call", "statement_refinement": "call:package"}`. In a block child the slot key already names the kind, so the value carries its own `Type` instead: `{"$call": {"statement_type": "call:package", …}}`. A refinement is accepted when its longest registered `:`-prefix is the statement's own kind, or when the kind lists it explicitly (a `control:block` may be refined to `doc`); anything else is refused on encode and decode.
 - `MethodNode.body` is always a `BlockStmt`, even when the body object omits `statement_type` in current Go builder output.
 
 ### Shared embedding model
@@ -1110,11 +1111,13 @@ Examples below are trimmed for readability. Real Go JSON may include empty `sour
       "body": {
         "children": [
           {
-            "statement_type": "control:return",
-            "value": {
-              "statement_type": "assignment:expression",
-              "variable": {
-                "name": "user"
+            "$control:return": {
+              "statement_type": "control:return",
+              "value": {
+                "statement_type": "assignment:expression",
+                "variable": {
+                  "name": "user"
+                }
               }
             }
           }
@@ -1155,37 +1158,43 @@ Examples below are trimmed for readability. Real Go JSON may include empty `sour
 {
   "children": [
     {
-      "statement_type": "assignment",
-      "target": {
-        "name": "price"
-      },
-      "value": {
-        "statement_type": "assignment:expression",
-        "cast": {
-          "statement_type": "assignment:cast",
-          "expr": {
-            "statement_type": "assignment:expression",
-            "variable": {
-              "name": "priceStr"
-            }
-          },
-          "targetType": "float"
-        }
-      },
-      "op": "="
+      "$assignment": {
+        "statement_type": "assignment",
+        "target": {
+          "name": "price"
+        },
+        "value": {
+          "statement_type": "assignment:expression",
+          "cast": {
+            "statement_type": "assignment:cast",
+            "expr": {
+              "statement_type": "assignment:expression",
+              "variable": {
+                "name": "priceStr"
+              }
+            },
+            "targetType": "float"
+          }
+        },
+        "op": "="
+      }
     },
     {
-      "statement_type": "control:return",
-      "value": {
-        "statement_type": "assignment:expression",
-        "variable": {
-          "name": "price"
+      "$control:return": {
+        "statement_type": "control:return",
+        "value": {
+          "statement_type": "assignment:expression",
+          "variable": {
+            "name": "price"
+          }
         }
       }
     }
   ]
 }
 ```
+
+`value` and `cast` are concrete fields, so their statements stay inline; only the block children are slots.
 
 ### Hierarchy graph fragment
 

@@ -55,9 +55,9 @@ func (method MethodCallStmt) GetSignature() string {
 
 type methodBase struct {
 	statementBase `json:",inline"`
-	// Method is encoded under the "Method" key by the codec of the call statement
-	// that embeds it.
-	Method   Node      `json:",inline"`
+	// Method is encoded under the "Method" key, as a node slot, by the codec of the
+	// call statement that embeds it.
+	Method   Node      `json:"Method,omitempty"`
 	Receiver *ExprStmt `json:"receiver,omitempty"` // nil if function call
 }
 
@@ -123,8 +123,9 @@ func (args Arguments) GetSignature() string {
 
 type recordBase struct {
 	statementBase `json:",inline"`
-	// Record is encoded under the "Record" key by the read/write codecs.
-	Record Node `json:",inline"`
+	// Record is encoded under the "Record" key, as a node slot, by the read/write
+	// codecs.
+	Record Node `json:"Record,omitempty"`
 	// RecordType is the kind of record read or written (table, view, ...), which a
 	// Record held as a bare NodeRef cannot say.
 	RecordType RecordType `json:"recordType,omitempty"`
