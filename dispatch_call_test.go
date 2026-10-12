@@ -27,11 +27,11 @@ var _ = Describe("DispatchCallStmt", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(data).To(MatchJSON(`{
 			"statement_type": "dispatch_call",
-			"Method": {"node_kind": "ref", "type": "Handler", "method": "Run"},
+			"Method": {"$ref": {"node_kind": "ref", "type": "Handler", "method": "Run"}},
 			"arguments": [{"value": {"statement_type": "assignment:expression", "variable": {"name": "order"}}}],
 			"candidates": [
-				{"node_kind": "ref", "type": "A", "method": "Run"},
-				{"node_kind": "ref", "type": "B", "method": "Run"}
+				{"$ref": {"node_kind": "ref", "type": "A", "method": "Run"}},
+				{"$ref": {"node_kind": "ref", "type": "B", "method": "Run"}}
 			]
 		}`))
 

@@ -92,6 +92,12 @@ func (s statementBase) GetStatementType() StatementType {
 	return s.Type
 }
 
+// carriedType and setCarriedType expose the Type field to the slot decoder
+// (checkSlotType), which concrete statements' GetStatementType overrides hide.
+func (s statementBase) carriedType() StatementType { return s.Type }
+
+func (s *statementBase) setCarriedType(t StatementType) { s.Type = t }
+
 func (s statementBase) GetLocation() Location {
 	return s.Location
 }

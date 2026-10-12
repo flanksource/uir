@@ -155,13 +155,12 @@ func (m MethodNode) Marshal() (json.RawMessage, error) {
 	return data, nil
 }
 
-// UnmarshalJSON decodes every field through encoding/json: Body is a *BlockStmt,
-// whose own decoder rebuilds its interface-typed children and refuses a body
-// stamped as anything but a block, and a null body stays nil. It is declared so
-// MethodNode satisfies PersistentBodyMixin.
+// UnmarshalJSON decodes through the streaming codec (MethodNode.UnmarshalJSONFrom):
+// Body is a *BlockStmt, whose own decoder rebuilds its interface-typed children and
+// refuses a body stamped as anything but a block, and a null body stays nil. It is
+// declared so MethodNode satisfies PersistentBodyMixin.
 func (m *MethodNode) UnmarshalJSON(data []byte) error {
-	type alias MethodNode
-	return json.Unmarshal(data, (*alias)(m))
+	return Unmarshal(data, m)
 }
 
 func (m MethodNode) LineCount() int {

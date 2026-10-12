@@ -68,49 +68,30 @@ func (r *Registry[T]) KindOf(v T) (string, error) {
 	return kind, nil
 }
 
-// Marshal encodes v with its kind stamped under the discriminator field.
+// Marshal encodes v in one pass with its kind stamped under the discriminator
+// field.
 func (r *Registry[T]) Marshal(v T) ([]byte, error) {
 	kind, err := r.KindOf(v)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
+	value := concreteValue(v)
+	typed, ok := value.Addr().Interface().(carriedTyped)
+	if !ok {
+		return Marshal(stamped(value, r.field, kind))
 	}
-	fields := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, err
-	}
-	if err := r.stamp(fields, kind); err != nil {
-		return nil, err
-	}
-	return json.Marshal(fields)
-}
-
-// stamp writes kind under the discriminator field. A document that already
-// carries a different kind there — a statement whose Type was refined past its
-// kind — keeps that value under the refinement field when it refines kind, and is
-// refused otherwise, since overwriting it would lose it silently.
-func (r *Registry[T]) stamp(fields map[string]json.RawMessage, kind string) error {
-	if existing, ok := fields[r.field]; ok {
-		var carried string
-		if err := json.Unmarshal(existing, &carried); err != nil {
-			return fmt.Errorf("%s: %w", r.field, err)
+	// A statement whose Type was refined past its kind keeps that Type under the
+	// refinement field when it refines kind, and is refused otherwise, since
+	// overwriting it would lose it silently.
+	var refinement string
+	if carried := typed.carriedType(); carried != "" && string(carried) != kind {
+		if err := r.checkRefinement(kind, string(carried)); err != nil {
+			return nil, err
 		}
-		if carried != "" && carried != kind {
-			if err := r.checkRefinement(kind, carried); err != nil {
-				return err
-			}
-			fields[r.refinementField] = existing
-		}
+		refinement = string(carried)
 	}
-	encoded, err := json.Marshal(kind)
-	if err != nil {
-		return err
-	}
-	fields[r.field] = encoded
-	return nil
+	typed.setCarriedType(StatementType(kind))
+	return Marshal(stamped(value, r.refinementField, refinement))
 }
 
 // UnmarshalByType decodes a document into the concrete type its discriminator

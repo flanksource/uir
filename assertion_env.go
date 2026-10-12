@@ -24,8 +24,51 @@ func (uir UIR) ToMap() (map[string]any, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, fmt.Errorf("json unmarshal: %w", err)
 	}
+	m = UnwrapSlots(m).(map[string]any)
 	addCELAliases(m)
 	return m, nil
+}
+
+// UnwrapSlots rewrites a generic JSON value of UIR so every tagged interface
+// slot, {"$<kind>": <value>}, reads as the inline value it holds, stamped as the
+// legacy layout stamps it: statement_type is the registered kind and a refined
+// Type travels under statement_refinement. Assertions and other map walkers see
+// one shape whichever layout the JSON was written in.
+func UnwrapSlots(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		if kind, inner, ok := taggedSlot(val); ok {
+			if carried, isString := inner[statementTypeField].(string); isString && carried != kind {
+				inner[statementRefinementField] = carried
+				inner[statementTypeField] = kind
+			}
+			return UnwrapSlots(inner)
+		}
+		for k, child := range val {
+			val[k] = UnwrapSlots(child)
+		}
+		return val
+	case []any:
+		for i, item := range val {
+			val[i] = UnwrapSlots(item)
+		}
+		return val
+	}
+	return v
+}
+
+func taggedSlot(m map[string]any) (string, map[string]any, bool) {
+	if len(m) != 1 {
+		return "", nil, false
+	}
+	for key, value := range m {
+		kind, tagged := strings.CutPrefix(key, slotKeyPrefix)
+		inner, isObject := value.(map[string]any)
+		if tagged && isObject {
+			return kind, inner, true
+		}
+	}
+	return "", nil, false
 }
 
 // AssertionEnv returns a CEL assertion environment with stable UIR lookup helpers.
