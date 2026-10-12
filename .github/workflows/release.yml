@@ -11,11 +11,41 @@ concurrency:
 
 jobs:
   version:
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
       pull-requests: write
-    uses: flanksource/action-workflows/.github/workflows/create-release.yml@v1
+    outputs:
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+      tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      # semantic-release only sees tags reachable from the branch. When history is
+      # rewritten after a release, the existing tag drops out of main and the next run
+      # tries to re-create it ("tag already exists"). Merging the highest tag with the
+      # ours strategy changes no files; it only makes the tag an ancestor, so the next
+      # version follows it.
+      - name: Reconnect latest release tag
+        run: |
+          latest=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
+          if [ -n "$latest" ] && ! git merge-base --is-ancestor "$latest" HEAD; then
+            echo "::warning::$latest is not reachable from $GITHUB_REF_NAME; merging it with the ours strategy before versioning"
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              merge -s ours --no-edit -m "chore(release): reconnect $latest" "$latest"
+          fi
+
+      - name: Create release with semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@16ca923e6ccbb50770c415a0ccd43709a8c5f7a4 # v4.2.2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   binaries:
     needs: version
