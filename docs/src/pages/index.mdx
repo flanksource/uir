@@ -1,0 +1,30 @@
+import { OverviewDiagram } from '../components/Diagrams'
+
+# UIR
+
+Universal Intermediate Representation is a language-agnostic model for describing code: modules, packages, types, methods, records, tables, endpoints, and the statements inside method bodies. Extractors emit UIR; generators and analysers consume it.
+
+The Go package is the canonical model, with parallel Python and Java ports. The CLI indexes Go modules into immutable snapshots so you can navigate symbols, trace call relationships, and compare revisions.
+
+<OverviewDiagram />
+
+## Start here
+
+- [Getting started](/getting-started): install the CLI and index a local module.
+- [Module indexing](/module-indexing): manage module roots, snapshots, and non-Go publications.
+- [Compact queries](/query) and [SQL navigation](/sql-query): find symbols and follow relationships.
+- [Call graphs](/graph): explore callers, callees, and the guards around calls.
+- [Symbol diffs](/diff): compare code structure across Git commits.
+- [Browser and API](/serve): browse saved snapshots and use the HTTP endpoints.
+
+## Use the model
+
+```go
+import "github.com/flanksource/uir"
+```
+
+The [model reference](/model) covers nodes, statements, builders, identifiers, and serialization. [Symbols and references](/symbols) explains identity and reference resolution; [storage](/storage) describes persisted snapshots and the database schema.
+
+## Design and performance
+
+[Benchmarks](/benchmarks) records measured indexing and query performance. Additional [design records](https://github.com/flanksource/uir/tree/main/docs) live in the repository and retain their original implementation or proposal status.

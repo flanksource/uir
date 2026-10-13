@@ -8,6 +8,17 @@ The Go types in the root `uir` package are the canonical model. `UIR.md` is the 
 import "github.com/flanksource/uir"
 ```
 
+## Documentation site
+
+The Vocs site in [`docs/`](docs/README.md) publishes the existing guides and model reference with navigation and search. Start it locally:
+
+```bash
+pnpm --dir docs install --frozen-lockfile
+make docs-dev
+```
+
+Run `make docs-check` to type-check and test the documentation tooling, and `make docs-build` to produce the static site in `docs/dist/public`.
+
 ## What's here
 
 | Path | What it is |

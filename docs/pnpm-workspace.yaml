@@ -1,0 +1,9 @@
+packages:
+  - .
+
+enablePrePostScripts: true
+
+allowBuilds:
+  esbuild: true
+  es5-ext: true
+  vue-demi: true
