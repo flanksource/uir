@@ -1,0 +1,41 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'UIR.md'
+      - 'uir-api.md'
+      - 'storage/README.md'
+      - 'package.json'
+      - 'Makefile'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'UIR.md'
+      - 'uir-api.md'
+      - 'storage/README.md'
+      - 'package.json'
+      - 'Makefile'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install documentation dependencies
+        run: pnpm --dir docs install --frozen-lockfile
+      - name: Check documentation tooling
+        run: make docs-check
+      - name: Build documentation site
+        run: make docs-build

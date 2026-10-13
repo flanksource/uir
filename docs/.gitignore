@@ -1,0 +1,6 @@
+.vocs/
+.waku/
+dist/
+.facet-node_modules
+src/pages/*.md
+src/pages/module-indexing.mdx

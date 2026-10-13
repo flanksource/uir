@@ -1,0 +1,54 @@
+# Getting started
+
+UIR provides a Go model library and a CLI for indexing, querying, and comparing code.
+
+## Install the CLI
+
+Build from a checkout with Go, Node.js, and pnpm available:
+
+```bash
+git clone https://github.com/flanksource/uir.git
+cd uir
+pnpm --dir web install --frozen-lockfile
+make build
+```
+
+The CLI is written to `.bin/uir`. Run `make install` to install it into your Go binary directory with the browser assets embedded.
+
+## Index a Go module
+
+From the repository root, index a module directory:
+
+```bash
+.bin/uir add /path/to/module --no-workspace-uses
+.bin/uir list
+```
+
+`--no-workspace-uses` keeps discovery within the selected directory. Use `--include-workspace-uses` when you also want the modules referenced by an enclosing `go.work`. See [module indexing](/module-indexing) for checkout discovery, snapshots, and reindexing.
+
+## Query symbols
+
+Select a function by name, then follow its references. Replace `Run` with a name in the indexed module:
+
+```bash
+.bin/uir query 'func:Run'
+.bin/uir query 'func:Run <'
+```
+
+The [query guide](/query) explains selectors and relation operators. [SQL navigation](/sql-query) provides an alternative syntax for navigating code and custom domains.
+
+## Open the browser
+
+```bash
+.bin/uir serve
+```
+
+Open the local URL printed by the server to explore saved snapshots, source files, and symbols. The same server exposes a structured HTTP API; see [browser and API](/serve).
+
+## Use UIR in Go
+
+```bash
+go get github.com/flanksource/uir
+```
+
+Use the root package for node types and builders, `diff` for structural comparison, and `render` for tree output. The [model reference](/model) describes the shared JSON contract and the node and statement hierarchy.
