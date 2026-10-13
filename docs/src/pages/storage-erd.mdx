@@ -1,0 +1,61 @@
+---
+outline: false
+content:
+  width: full
+---
+
+import { StorageERD } from '../components/StorageERD'
+
+# Storage ERD
+
+**Proposed end state, revised 2026-10-08.** This ERD visualizes the [symbol-reference storage proposal](https://github.com/flanksource/uir/blob/main/docs/symbol-reference-storage.md). The existing 64-bit handle becomes `symbols.id`, the sole symbol ID, and `symbol_postings` is replaced by `symbol_locations` and `symbol_references`. Rich document facts remain. See [Storage](/storage) for the implemented schema.
+
+Primary keys are marked **PK** and foreign keys **FK**. Connector labels show cardinality or compound key constraints. Each diagram can be scrolled horizontally to inspect the full schema.
+
+[Modules](#modules-and-publication) · [Files](#files-and-extraction-versions) · [Locations](#symbol-declaration-locations) · [References](#symbol-references) · [Membership](#snapshot-membership) · [ID allocation](#permanent-symbol-id-allocation) · [Deltas](#snapshot-symbol-deltas)
+
+## Modules and publication
+
+Module paths identify modules; canonical checkout paths identify locations. Each location has independent immutable snapshots and one published head, tied to a snapshot of that same location. A snapshot row exists only once its publication commits; its context hash triggers re-extraction when dependencies change.
+
+<StorageERD section="modules" label="Module roots, checkout locations, snapshots, and published heads" />
+
+## Files and extraction versions
+
+A source revision identifies file bytes. A document identifies extraction under one package input hash; its ordinal is the proposed tables' `version_id`. Snapshots derive active versions through source changes and package coverage. Format-4 JSON encodes symbol IDs as decimal strings, preserving 64-bit precision. Every version has a complete projection status, even when empty.
+
+<StorageERD section="documents" label="Source revisions, source deltas, documents, and projection status" />
+
+## Symbol declaration locations
+
+Each saved declaration entry has a location, including unproven entries with no symbol ID. All symbol foreign keys reference `symbols.id`, including `owner_id`. The unique `canonical_key` identifies complete metadata. File paths and hashes come from `source_revisions`. Lines and UTF-16 columns are one-based; range ends are exclusive. Byte spans are zero-based and half-open. Root and source ownership must match the version.
+
+<StorageERD section="locations" label="Saved declaration locations and their symbol, version, source, and module keys" />
+
+## Symbol references
+
+Each occurrence retains its source extraction version, enclosing symbol ID, target symbol ID, kind, and exact site. Multiple calls between the same symbols remain separate rows. File scope has no enclosing ID; unresolved targets retain their locator and note. Selected snapshots supply target declaration versions. Locations and references answer graph and position queries without full-document decoding.
+
+<StorageERD section="references" label="Reference occurrences and their enclosing symbols, targets, versions, and modules" />
+
+Kind codes: `0` definition, `1` reference, `2` call, `3` write, `4` type, `5` import, `6` implements, `7` embeds. Implements and embeds require both IDs and use the declaring symbol's name range. Version foreign keys cascade on deletion; symbol foreign keys restrict it. The primary key preserves occurrence order and duplicates.
+
+## Snapshot membership
+
+Effective source revisions plus package input hashes select versions by `(root_id, path_key, input_hash)`. Exact paired lookups use a covering metadata index. The document box is a derived selection rather than a stored snapshot-to-document foreign key. Shared versions reuse reference and location rows across snapshots and checkouts.
+
+<StorageERD section="membership" label="Package coverage and the selected snapshot's active document versions" />
+
+## Permanent symbol ID allocation
+
+IDs retain the H64b layout: `0 | module 11 | package 16 | visibility 1 | kind 6 | local 29`. Storage resolves owners and complete natural keys, then allocates only missing symbols. Producers submit metadata and publication-local references. Committed mappings and allocation registries survive pruning and reindexing; conflicting packed metadata is an error.
+
+<StorageERD section="allocation" label="Permanent module numbers, package numbers, kind codes, and symbol IDs" />
+
+## Snapshot symbol deltas
+
+Symbol deltas record which symbols a snapshot defines, redefines, or stops defining. Their `symbol_id` values retain the existing handles; the base chain folds `set` and `delete` operations into the selected symbol set. Registry presence alone does not make a symbol active. Pruning removes dead versions and projections while retaining symbol IDs and owner mappings.
+
+<StorageERD section="deltas" label="Snapshot symbol membership deltas and their module and symbol keys" />
+
+PostgreSQL uses UUID, JSONB, and TIMESTAMPTZ. SQLite projects portable HCL to text UUIDs, validated JSON text, and datetime. The [detailed proposal](https://github.com/flanksource/uir/blob/main/docs/symbol-reference-storage.md) defines the new keys, constraints, indexes, ID migration, reader cutover, API counter changes, and validation gates.

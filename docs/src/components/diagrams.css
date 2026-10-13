@@ -1,0 +1,43 @@
+@layer vocs_theme, theme, base, vocs_base, vocs_components, components, vocs_utilities, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+@source "../../node_modules/@flanksource/facet/dist/components/diagram";
+@source "./Diagrams.tsx";
+@source "../../uir-gorm-erd.tsx";
+
+.uir-diagram {
+  margin-block: 1.5rem;
+}
+
+.uir-diagram-scroll {
+  overflow-x: auto;
+  border-radius: 0.75rem;
+  scrollbar-width: thin;
+}
+
+.uir-diagram-canvas {
+  width: max-content;
+  min-height: 210px;
+  line-height: 1.5;
+}
+
+.uir-erd {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.uir-erd-canvas {
+  width: max-content;
+  min-height: 210px;
+  padding-inline: 1.5rem;
+  line-height: 1.5;
+}
+
+.uir-diagram figcaption {
+  margin-top: 0.75rem;
+  color: var(--vocs-text-color-secondary);
+  font-size: 0.875rem;
+}
