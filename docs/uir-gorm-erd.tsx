@@ -1,33 +1,38 @@
 // @live
 import React from 'react';
-import { Arrow, BoxNode, COLORS, Diagram, Page, Section } from '@flanksource/facet';
+import Arrow from '@flanksource/facet/diagram/Arrow';
+import BoxNode from '@flanksource/facet/diagram/BoxNode';
+import { COLORS } from '@flanksource/facet/diagram/colors';
+import Diagram from '@flanksource/facet/diagram/Diagram';
+import Page from '@flanksource/facet/Page';
+import Section from '@flanksource/facet/Section';
 
 type Field = { name: string; type: string; pk?: boolean; fk?: boolean };
 
 function FieldRow({ name, type, pk, fk }: Field) {
   return <div className="flex items-center gap-1.5 py-0.5">
-    {pk && <span className="rounded px-1 text-[6pt] font-bold text-white" style={{ backgroundColor: COLORS.pk }}>PK</span>}
-    {fk && <span className="rounded px-1 text-[6pt] font-bold text-white" style={{ backgroundColor: COLORS.fk }}>FK</span>}
+    {pk && <span className="rounded px-1 text-[7.5pt] font-bold text-white" style={{ backgroundColor: COLORS.pk }}>PK</span>}
+    {fk && <span className="rounded px-1 text-[7.5pt] font-bold text-white" style={{ backgroundColor: COLORS.fk }}>FK</span>}
     {!pk && !fk && <span className="w-[14pt]" />}
-    <span className="text-[7.5pt] font-semibold" style={{ color: COLORS.accent }}>{name}</span>
-    <span className="ml-auto text-[7pt]" style={{ color: COLORS.muted }}>{type}</span>
+    <span className="text-[9.75pt] font-semibold" style={{ color: COLORS.accent }}>{name}</span>
+    <span className="ml-auto text-[9pt]" style={{ color: COLORS.muted }}>{type}</span>
   </div>;
 }
 
 function Entity({ id, title, detail, fields, indexes = [], minWidth = '250px', accent = COLORS.primary }: {
   id: string; title: string; detail: string; fields: Field[]; indexes?: string[]; minWidth?: string; accent?: string;
 }) {
-  return <BoxNode id={id} title={title} headerColor={accent} bodyColor={COLORS.background} borderColor={accent} compact minWidth={minWidth}>
-    <div className="mb-2 text-[7pt]" style={{ color: COLORS.muted }}>{detail}</div>
+  return <BoxNode id={id} title={<span className="text-base">{title}</span>} headerColor={accent} bodyColor={COLORS.background} borderColor={accent} compact minWidth={minWidth}>
+    <div className="mb-2 text-[9pt]" style={{ color: COLORS.muted }}>{detail}</div>
     <div className="flex flex-col">{fields.map((field) => <FieldRow key={field.name} {...field} />)}</div>
-    {indexes.length > 0 && <div className="mt-3 flex flex-col gap-1 border-t pt-2 text-[7pt]" style={{ borderColor: COLORS.muted, color: COLORS.muted }}>
+    {indexes.length > 0 && <div className="mt-3 flex flex-col gap-1 border-t pt-2 text-[9pt]" style={{ borderColor: COLORS.muted, color: COLORS.muted }}>
       {indexes.map((index) => <span key={index} className="whitespace-pre-line">INDEX {index}</span>)}
     </div>}
   </BoxNode>;
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <span className="rounded px-1 text-[6pt] font-semibold" style={{ backgroundColor: COLORS.background, color: COLORS.muted }}>{children}</span>;
+  return <span className="rounded px-1 text-[8.25pt] font-semibold" style={{ backgroundColor: COLORS.background, color: COLORS.muted }}>{children}</span>;
 }
 
 function SymbolRef({ id, detail }: { id: string; detail: string }) {
@@ -52,9 +57,9 @@ function RootRef({ id }: { id: string }) {
   ]} />;
 }
 
-function ModulesAndPublication() {
+export function ModulesAndPublication() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-center justify-center gap-16 mb-16">
+    <div className="flex items-center justify-center gap-24 mb-16">
       <Entity id={id('module')} title="modules" detail="One logical Go module path" accent={COLORS.accent} fields={[
         { name: 'id', type: 'uuid', pk: true },
         { name: 'root_key', type: 'text · unique' },
@@ -111,9 +116,9 @@ function ModulesAndPublication() {
   </>}</Diagram>;
 }
 
-function FilesAndDocuments() {
+export function FilesAndDocuments() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-center justify-center gap-20 mb-16">
+    <div className="flex items-center justify-center gap-32 mb-16">
       <Entity id={id('revision')} title="source_revisions" detail="Content-addressed byte identity of one file version" accent={COLORS.accent} fields={[
         { name: 'id', type: 'uuid', pk: true },
         { name: 'root_id', type: 'uuid', fk: true },
@@ -135,7 +140,7 @@ function FilesAndDocuments() {
         { name: 'base_snapshot_id', type: 'uuid?', fk: true },
       ]} />
     </div>
-    <div className="flex items-center justify-center gap-20">
+    <div className="flex items-center justify-center gap-32">
       <Entity id={id('document')} title="documents" detail="Extraction version; format-4 JSON retains rich facts" accent={COLORS.primary} fields={[
         { name: 'id', type: 'uuid', pk: true },
         { name: 'root_id', type: 'uuid', fk: true },
@@ -167,7 +172,7 @@ function FilesAndDocuments() {
   </>}</Diagram>;
 }
 
-function SymbolLocations() {
+export function SymbolLocations() {
   return <Diagram className="relative py-8">{(id) => <>
     <div className="flex items-center justify-center gap-24">
       <div className="flex flex-col items-center gap-8">
@@ -233,9 +238,9 @@ function SymbolLocations() {
   </>}</Diagram>;
 }
 
-function SymbolReferences() {
+export function SymbolReferences() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-center justify-center gap-24">
+    <div className="flex items-center justify-center gap-32">
       <Entity id={id('reference')} title="symbol_references" detail="Proposed: each occurrence and declared relationship retains its site" minWidth="410px" accent={COLORS.fk} fields={[
         { name: 'version_id', type: 'bigint', pk: true, fk: true },
         { name: 'reference_index', type: 'integer ≥ 0', pk: true },
@@ -274,9 +279,9 @@ function SymbolReferences() {
   </>}</Diagram>;
 }
 
-function SnapshotMembership() {
+export function SnapshotMembership() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-center justify-center gap-20">
+    <div className="flex items-center justify-center gap-32">
       <Entity id={id('coverage')} title="package_coverage" detail="Per-snapshot package input and export shape" accent={COLORS.outputBorder} fields={[
         { name: 'snapshot_id', type: 'uuid', pk: true, fk: true },
         { name: 'package_path', type: 'text', pk: true },
@@ -299,9 +304,9 @@ function SnapshotMembership() {
   </>}</Diagram>;
 }
 
-function SymbolAllocation() {
+export function SymbolAllocation() {
   return <Diagram className="relative py-8">{(id) => <>
-    <div className="flex items-center justify-center gap-20 mb-12">
+    <div className="flex items-center justify-center gap-32 mb-12">
       <Entity id={id('symbol-module')} title="symbol_modules" detail="Numbers the 11-bit module field; '' is 0, std is 1" accent={COLORS.accent} fields={[
         { name: 'number', type: 'integer · 0–2047', pk: true },
         { name: 'module_key', type: 'text · unique' },
@@ -312,7 +317,7 @@ function SymbolAllocation() {
         { name: 'package_path', type: 'text · unique per module' },
       ]} />
     </div>
-    <div className="flex items-center justify-center gap-20">
+    <div className="flex items-center justify-center gap-32">
       <Entity id={id('layout')} title="symbol_layout" detail="Retained layout; incompatible changes require an upgrade" accent={COLORS.outputBorder} fields={[
         { name: 'id', type: 'integer · always 1', pk: true },
         { name: 'layout', type: 'text · H64b' },
@@ -334,12 +339,12 @@ function SymbolAllocation() {
   </>}</Diagram>;
 }
 
-function SymbolDeltas() {
+export function SymbolDeltas() {
   return <Diagram className="relative py-8">{(id) => <>
     <div className="flex items-center justify-center mb-16">
       <SymbolRef id={id('symbol-ref')} detail="Sole bigint ID; mappings survive all version pruning" />
     </div>
-    <div className="flex items-start justify-center gap-20">
+    <div className="flex items-start justify-center gap-32">
       <Entity id={id('module-ref')} title="modules" detail="Module reference" fields={[
         { name: 'id', type: 'uuid', pk: true },
         { name: 'ordinal', type: 'integer · unique' },

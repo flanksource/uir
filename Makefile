@@ -60,6 +60,19 @@ install: web-build ## Install the UIR CLI with embedded browser assets
 web-build: ## Build embedded browser assets
 	VITE_UIR_VERSION=$(VERSION) pnpm --dir web run build
 
+.PHONY: docs-dev
+docs-dev: ## Start the Vocs documentation site
+	pnpm --dir docs run dev
+
+.PHONY: docs-build
+docs-build: ## Build the static documentation site
+	pnpm --dir docs run build
+
+.PHONY: docs-check
+docs-check: ## Type-check and test documentation tooling
+	pnpm --dir docs run lint
+	pnpm --dir docs run test
+
 .PHONY: schema
 schema: ## Regenerate schema/uir.schema.json and python/statement_kinds.py from the Go model
 	go run ./cmd/genschema
