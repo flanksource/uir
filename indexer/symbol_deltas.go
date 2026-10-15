@@ -20,27 +20,24 @@ type definition struct {
 
 // appendDefinition adds a proven declaration (one with a canonical id) to definitions; an unproven or
 // syntax declaration has no id and is skipped, since it has no handle.
-func appendDefinition(definitions []definition, id *string, shapeHash, bodyHash string) ([]definition, error) {
-	if id == nil {
+func appendDefinition(definitions []definition, symbol storage.DocumentSymbol) ([]definition, error) {
+	if symbol.ID == nil {
 		return definitions, nil
 	}
-	shape, err := storage.SymbolFingerprint(shapeHash)
+	fingerprints, err := symbol.Fingerprints()
 	if err != nil {
-		return nil, fmt.Errorf("shape of symbol %s: %w", *id, err)
+		return nil, fmt.Errorf("symbol %s: %w", *symbol.ID, err)
 	}
-	body, err := storage.SymbolFingerprint(bodyHash)
-	if err != nil {
-		return nil, fmt.Errorf("body of symbol %s: %w", *id, err)
-	}
-	return append(definitions, definition{id: *id, fingerprints: storage.SymbolFingerprints{Shape: shape, Body: body}}), nil
+	return append(definitions, definition{id: *symbol.ID, fingerprints: fingerprints}), nil
 }
 
 // declaredContent is the part of a stored document's content that symbol deltas read.
 type declaredContent struct {
 	Symbols []struct {
-		ID        *string `json:"id"`
-		ShapeHash string  `json:"shape_hash"`
-		BodyHash  string  `json:"body_hash"`
+		ID          *string `json:"id"`
+		PublicHash  string  `json:"public_hash"`
+		PrivateHash string  `json:"private_hash"`
+		ContentHash string  `json:"content_hash"`
 	} `json:"symbols"`
 }
 
@@ -196,7 +193,8 @@ func (collected declarations) addStored(document storage.Document, after declara
 	var definitions []definition
 	for _, symbol := range content.Symbols {
 		var err error
-		if definitions, err = appendDefinition(definitions, symbol.ID, symbol.ShapeHash, symbol.BodyHash); err != nil {
+		declared := storage.DocumentSymbol{ID: symbol.ID, PublicHash: symbol.PublicHash, PrivateHash: symbol.PrivateHash, ContentHash: symbol.ContentHash}
+		if definitions, err = appendDefinition(definitions, declared); err != nil {
 			return fmt.Errorf("base document for %q: %w", document.PathKey, err)
 		}
 	}
@@ -228,7 +226,8 @@ func deltaRows(ctx context.Context, database *gorm.DB, key storage.SymbolDelta, 
 	for id, fingerprints := range after {
 		if prior, found := before[id]; !found || prior != fingerprints {
 			set := key
-			set.SymbolHandle, set.Operation, set.ShapeFP, set.BodyFP = handleOf(id), storage.SourceSet, &fingerprints.Shape, &fingerprints.Body
+			set.SymbolHandle, set.Operation = handleOf(id), storage.SourceSet
+			set.PublicFP, set.PrivateFP, set.ContentFP = &fingerprints.Public, &fingerprints.Private, &fingerprints.Content
 			rows = append(rows, set)
 		}
 	}

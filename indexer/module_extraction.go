@@ -220,7 +220,7 @@ func withSymbolFacts(document extractedDocument, rows map[string]storage.Symbol)
 		return left.symbolID < right.symbolID || (left.symbolID == right.symbolID && left.role < right.role)
 	})
 	for _, symbol := range content.Symbols {
-		if document.definitions, err = appendDefinition(document.definitions, symbol.ID, symbol.ShapeHash, symbol.BodyHash); err != nil {
+		if document.definitions, err = appendDefinition(document.definitions, symbol); err != nil {
 			return extractedDocument{}, err
 		}
 	}

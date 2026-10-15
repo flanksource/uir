@@ -52,11 +52,9 @@ func (snapshot typedSnapshot) definedFingerprints() map[string]storage.SymbolFin
 			if symbol.ID == nil {
 				continue
 			}
-			shape, err := storage.SymbolFingerprint(symbol.ShapeHash)
+			fingerprints, err := symbol.Fingerprints()
 			Expect(err).ToNot(HaveOccurred())
-			body, err := storage.SymbolFingerprint(symbol.BodyHash)
-			Expect(err).ToNot(HaveOccurred())
-			declarations[*symbol.ID] = append(declarations[*symbol.ID], storage.SymbolFingerprints{Shape: shape, Body: body})
+			declarations[*symbol.ID] = append(declarations[*symbol.ID], fingerprints)
 		}
 	}
 	defined := make(map[string]storage.SymbolFingerprints, len(declarations))
@@ -79,7 +77,7 @@ func expectEffectiveSymbols(ctx context.Context, database *gorm.DB, snapshot typ
 	Expect(err).ToNot(HaveOccurred())
 	expected := make([]storage.EffectiveSymbol, 0, len(defined))
 	for id, fingerprints := range defined {
-		expected = append(expected, storage.EffectiveSymbol{Handle: handles[id], ShapeFP: &fingerprints.Shape, BodyFP: &fingerprints.Body})
+		expected = append(expected, storage.EffectiveSymbol{Handle: handles[id], PublicFP: &fingerprints.Public, PrivateFP: &fingerprints.Private, ContentFP: &fingerprints.Content})
 	}
 	slices.SortFunc(expected, func(left, right storage.EffectiveSymbol) int { return cmp.Compare(left.Handle, right.Handle) })
 	actual, err := storage.EffectiveSymbols(ctx, database, uuid.MustParse(snapshot.id))
@@ -128,15 +126,15 @@ var _ = Describe("symbol deltas", func() {
 			writeFile(moneyPath, moneySource(moneyAmount, reordered, moneyScale, moneyUnit, moneyZero))
 			_, bodied := publishAndLoad(ctx, database, engine, workspace)
 			Expect(operations(bodied)).To(Equal(map[string]storage.SourceOperation{add.ID: storage.SourceSet}), "a body edit")
-			Expect(*bodied[add.ID].ShapeFP).To(Equal(*deltas[add.ID].ShapeFP))
-			Expect(*bodied[add.ID].BodyFP).ToNot(Equal(*deltas[add.ID].BodyFP))
+			Expect([]int64{*bodied[add.ID].PublicFP, *bodied[add.ID].PrivateFP}).To(Equal([]int64{*deltas[add.ID].PublicFP, *deltas[add.ID].PrivateFP}))
+			Expect(*bodied[add.ID].ContentFP).ToNot(Equal(*deltas[add.ID].ContentFP))
 
 			pointerUnit := "func Unit() *Amount { return &Amount{Cents: 1} }\n"
 			writeFile(moneyPath, moneySource(moneyAmount, reordered, moneyScale, pointerUnit, moneyZero))
 			signature, resigned := publishAndLoad(ctx, database, engine, workspace)
 			Expect(operations(resigned)).To(Equal(map[string]storage.SourceOperation{unit.ID: storage.SourceSet}),
 				"a signature edit re-extracts the importing book package, whose symbols keep their fingerprints")
-			Expect(*resigned[unit.ID].ShapeFP).ToNot(Equal(*deltas[unit.ID].ShapeFP))
+			Expect(*resigned[unit.ID].PublicFP).ToNot(Equal(*deltas[unit.ID].PublicFP))
 			Expect(signature.documents["book/book.go"].ID).ToNot(Equal(initial.documents["book/book.go"].ID))
 
 			half := "func Half(a Amount) Amount { return Amount{Cents: a.Cents / 2, Currency: a.Currency} }\n"
@@ -148,7 +146,7 @@ var _ = Describe("symbol deltas", func() {
 			writeFile(moneyPath, moneySource(moneyAmount, reordered, pointerUnit, moneyZero, half))
 			_, removed := publishAndLoad(ctx, database, engine, workspace)
 			Expect(operations(removed)).To(Equal(map[string]storage.SourceOperation{scale.ID: storage.SourceDelete}))
-			Expect(removed[scale.ID].ShapeFP).To(BeNil())
+			Expect([]*int64{removed[scale.ID].PublicFP, removed[scale.ID].PrivateFP, removed[scale.ID].ContentFP}).To(HaveEach(BeNil()))
 
 			writeFile(filepath.Join(workspace, "book", "book.go"), bookSource)
 			writeFile(filepath.Join(workspace, "book", "count.go"), "package book\n\n"+countSource)
@@ -206,15 +204,16 @@ var _ = Describe("symbol deltas", func() {
 			edited, rebodied := publishAndLoad(ctx, database, engine, workspace)
 			Expect(edited.documents["boot/u.go"].ID).ToNot(Equal(initial.documents["boot/u.go"].ID), "u.go's bytes did not change, its document did")
 			Expect(operations(rebodied)).To(Equal(map[string]storage.SourceOperation{initFunc.ID: storage.SourceSet}))
-			Expect(*rebodied[initFunc.ID].ShapeFP).To(Equal(*deltas[initFunc.ID].ShapeFP), "every init has the same shape")
-			Expect(*rebodied[initFunc.ID].BodyFP).ToNot(Equal(*deltas[initFunc.ID].BodyFP))
+			Expect([]int64{*rebodied[initFunc.ID].PublicFP, *rebodied[initFunc.ID].PrivateFP}).
+				To(Equal([]int64{*deltas[initFunc.ID].PublicFP, *deltas[initFunc.ID].PrivateFP}), "every init has the same shape")
+			Expect(*rebodied[initFunc.ID].ContentFP).ToNot(Equal(*deltas[initFunc.ID].ContentFP))
 
 			writeFile(filepath.Join(workspace, "boot", "a.go"), bootANoInit)
 			remaining, narrowed := publishAndLoad(ctx, database, engine, workspace)
 			Expect(declarationsOf(remaining, initFunc.ID)).To(Equal(1))
 			Expect(operations(narrowed)).To(Equal(map[string]storage.SourceOperation{initFunc.ID: storage.SourceSet}),
 				"init is still declared in u.go, so it is set to u.go's fingerprints, not deleted")
-			Expect(storage.SymbolFingerprints{Shape: *narrowed[initFunc.ID].ShapeFP, Body: *narrowed[initFunc.ID].BodyFP}).
+			Expect(storage.SymbolFingerprints{Public: *narrowed[initFunc.ID].PublicFP, Private: *narrowed[initFunc.ID].PrivateFP, Content: *narrowed[initFunc.ID].ContentFP}).
 				To(Equal(remaining.definedFingerprints()[initFunc.ID]))
 
 			writeFile(filepath.Join(workspace, "boot", "u.go"), bootUNoInit)

@@ -154,17 +154,36 @@ func (encoder *typeEncoder) iface(iface *types.Interface) {
 	encoder.out.WriteString("}")
 }
 
-func shapeHash(shape string) string {
-	digest := newCanonicalHash(shapeHashVersion)
-	digest.text(shape)
-	return digest.sum()
+// opaqueLine stands, in a public shape, for the members a consumer outside the package cannot name:
+// they still decide comparability and whether an unkeyed literal compiles.
+const opaqueLine = "opaque"
+
+// symbolShapes are a declaration's two shape layers. Private is the full declared structure: every
+// field with its tag and embedding, every method. Public is what a consumer outside the package
+// observes: a struct's exported fields and an interface's exported methods, each with an opaque line
+// when unexported members exist. A declaration without members has one shape in both layers.
+type symbolShapes struct{ Public, Private string }
+
+func sameShapes(shape string) symbolShapes { return symbolShapes{Public: shape, Private: shape} }
+
+// layerHashes digests the shapes as the layers nest: public_hash is the public shape's digest and
+// private_hash digests public_hash and the private shape, so a public change is a private change too.
+func layerHashes(shapes symbolShapes) (public, private string) {
+	publicDigest := newCanonicalHash(publicHashVersion)
+	publicDigest.text(shapes.Public)
+	public = publicDigest.sum()
+	privateDigest := newCanonicalHash(privateHashVersion)
+	privateDigest.text(public)
+	privateDigest.text(shapes.Private)
+	return public, privateDigest.sum()
 }
 
-// shape renders an object's declared type in the canonical layout: one line per signature, one
-// gofmt-aligned line per struct field or interface method, and type (and value) for vars and consts.
-func (resolver *symbolResolver) shape(object types.Object) (string, error) {
+// shapes renders an object's declared type in the canonical layout, in both layers: one line per
+// signature, one gofmt-aligned line per struct field or interface method, and type (and value) for vars
+// and consts.
+func (resolver *symbolResolver) shapes(object types.Object) (symbolShapes, error) {
 	if !validDeclaration(object) {
-		return "", errUnprovenType
+		return symbolShapes{}, errUnprovenType
 	}
 	qualifier := func(pkg *types.Package) string {
 		if pkg == object.Pkg() {
@@ -174,18 +193,18 @@ func (resolver *symbolResolver) shape(object types.Object) (string, error) {
 	}
 	switch object := object.(type) {
 	case *types.Func:
-		return functionShape(object, qualifier), nil
+		return sameShapes(functionShape(object, qualifier)), nil
 	case *types.Var:
 		if object.IsField() {
-			return fieldLine(object, resolver.memberIndex(object.Pkg())[object].tag, qualifier), nil
+			return sameShapes(fieldLine(object, resolver.memberIndex(object.Pkg())[object].tag, qualifier)), nil
 		}
-		return "var " + object.Name() + " " + types.TypeString(object.Type(), qualifier), nil
+		return sameShapes("var " + object.Name() + " " + types.TypeString(object.Type(), qualifier)), nil
 	case *types.Const:
-		return "const " + object.Name() + " " + types.TypeString(object.Type(), qualifier) + " = " + object.Val().ExactString(), nil
+		return sameShapes("const " + object.Name() + " " + types.TypeString(object.Type(), qualifier) + " = " + object.Val().ExactString()), nil
 	case *types.TypeName:
-		return typeShape(object, qualifier)
+		return typeShapes(object, qualifier)
 	}
-	return "", fmt.Errorf("render shape of %s: unsupported object type %T", object.Name(), object)
+	return symbolShapes{}, fmt.Errorf("render shape of %s: unsupported object type %T", object.Name(), object)
 }
 
 func validDeclaration(object types.Object) bool {
@@ -230,40 +249,68 @@ func fieldLine(field *types.Var, tag string, qualifier types.Qualifier) string {
 	return line
 }
 
-func typeShape(object *types.TypeName, qualifier types.Qualifier) (string, error) {
+func typeShapes(object *types.TypeName, qualifier types.Qualifier) (symbolShapes, error) {
 	if object.IsAlias() {
 		alias := object.Type().(*types.Alias)
-		return "type " + object.Name() + typeParameterList(alias.TypeParams(), qualifier) + " = " + types.TypeString(alias.Rhs(), qualifier), nil
+		return sameShapes("type " + object.Name() + typeParameterList(alias.TypeParams(), qualifier) + " = " + types.TypeString(alias.Rhs(), qualifier)), nil
 	}
 	named, ok := object.Type().(*types.Named)
 	if !ok {
-		return "", fmt.Errorf("render shape of type %s: %T is not a named type", object.Name(), object.Type())
+		return symbolShapes{}, fmt.Errorf("render shape of type %s: %T is not a named type", object.Name(), object.Type())
 	}
 	header := "type " + object.Name() + typeParameterList(named.TypeParams(), qualifier)
-	var lines []string
+	var members memberLines
 	switch underlying := named.Underlying().(type) {
 	case *types.Struct:
 		for i := range underlying.NumFields() {
-			lines = append(lines, fieldLine(underlying.Field(i), underlying.Tag(i), qualifier))
+			members.add(fieldLine(underlying.Field(i), underlying.Tag(i), qualifier), underlying.Field(i).Exported())
 		}
-		return formatBlock(header+" struct", lines)
+		return members.format(header + " struct")
 	case *types.Interface:
 		for i := range underlying.NumMethods() {
 			method := underlying.Method(i)
 			var line bytes.Buffer
 			line.WriteString(method.Name())
 			types.WriteSignature(&line, method.Signature(), qualifier)
-			lines = append(lines, line.String())
+			members.add(line.String(), method.Exported())
 		}
 		for i := range underlying.NumEmbeddeds() {
 			if embedded := underlying.EmbeddedType(i); !types.IsInterface(embedded) {
-				lines = append(lines, types.TypeString(embedded, qualifier))
+				members.add(types.TypeString(embedded, qualifier), true)
 			}
 		}
-		return formatBlock(header+" interface", lines)
+		return members.format(header + " interface")
 	default:
-		return header + " " + types.TypeString(underlying, qualifier), nil
+		return sameShapes(header + " " + types.TypeString(underlying, qualifier)), nil
 	}
+}
+
+// memberLines collects a struct's or interface's member lines for both layers.
+type memberLines struct {
+	public, private []string
+	hidden          bool
+}
+
+func (members *memberLines) add(line string, exported bool) {
+	members.private = append(members.private, line)
+	if exported {
+		members.public = append(members.public, line)
+	} else {
+		members.hidden = true
+	}
+}
+
+func (members memberLines) format(header string) (symbolShapes, error) {
+	public := members.public
+	if members.hidden {
+		public = append(public, opaqueLine)
+	}
+	publicShape, err := formatBlock(header, public)
+	if err != nil {
+		return symbolShapes{}, err
+	}
+	privateShape, err := formatBlock(header, members.private)
+	return symbolShapes{Public: publicShape, Private: privateShape}, err
 }
 
 func typeParameterList(parameters *types.TypeParamList, qualifier types.Qualifier) string {
