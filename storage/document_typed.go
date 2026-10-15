@@ -17,7 +17,7 @@ func declarable(kinds symbolhandle.Kinds, kind string) bool {
 }
 
 // validateTypedContent checks an indexed or partial document. Every declared symbol has a canonical
-// id, a shape hash, and interface ids it implements; a partial document may also keep a declaration
+// id, a public shape, public and private hashes, and interface ids it implements; a partial document may also keep a declaration
 // it could not prove with only its syntax facts and a null id. Every occurrence has a role, a symbol
 // or a note saying why it has none, and an enclosing symbol declared in the same document; a call
 // also carries its call locator.
@@ -32,10 +32,13 @@ func validateTypedContent(content DocumentContent, partial bool, kinds symbolhan
 		switch {
 		case !declarable(kinds, symbol.Kind):
 			return fmt.Errorf("%s: a file cannot declare a %q symbol", subject, symbol.Kind)
-		case symbol.ID == nil && (!partial || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || len(symbol.Embeds) > 0):
-			return fmt.Errorf("%s: only a partial document keeps an unproven declaration, without shape_hash or implements", subject)
-		case symbol.ID != nil && (len(*symbol.ID) != 64 || len(symbol.ShapeHash) != 64):
-			return fmt.Errorf("%s: a typed symbol requires a 64-character id and shape_hash", subject)
+		case symbol.ID == nil && (!partial || symbol.PublicHash != "" || symbol.PrivateHash != "" || symbol.PublicShape != "" ||
+			len(symbol.Implements) > 0 || len(symbol.Embeds) > 0):
+			return fmt.Errorf("%s: only a partial document keeps an unproven declaration, without public_hash, private_hash, public_shape, or implements", subject)
+		case symbol.ID != nil && (len(*symbol.ID) != 64 || len(symbol.PublicHash) != 64 || len(symbol.PrivateHash) != 64):
+			return fmt.Errorf("%s: a typed symbol requires a 64-character id, public_hash, and private_hash", subject)
+		case symbol.ID != nil && symbol.PublicShape == "":
+			return fmt.Errorf("%s: a typed symbol requires a public_shape", subject)
 		}
 		if _, err := TypeForm(content.Version, symbol); err != nil {
 			return fmt.Errorf("%s: %w", subject, err)

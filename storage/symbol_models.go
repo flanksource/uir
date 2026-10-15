@@ -50,10 +50,10 @@ func (Document) TableName() string { return "documents" }
 type PostingRole int32
 
 const (
-	RoleDefinition PostingRole = 0
-	RoleReference  PostingRole = 1
-	RoleImplements PostingRole = 2
-	RoleEmbeds     PostingRole = 3
+	RoleDefinition         PostingRole = 0
+	RoleReference          PostingRole = 1
+	RoleImplements         PostingRole = 2
+	RoleEmbeds             PostingRole = 3
 	RoleRelationshipSource PostingRole = 4
 	RoleRelationshipTarget PostingRole = 5
 )
@@ -106,15 +106,16 @@ type SymbolPackage struct {
 func (SymbolPackage) TableName() string { return "symbol_packages" }
 
 // SymbolDelta is one change of a snapshot's defined-symbol set against its base: a set with the
-// symbol's shape and body fingerprints, or a delete tombstone without them. It shares the set/delete
-// vocabulary of source deltas, and is keyed by the snapshot's and root's ordinals.
+// symbol's public, private, and content fingerprints, or a delete tombstone without them. It shares the
+// set/delete vocabulary of source deltas, and is keyed by the snapshot's and root's ordinals.
 type SymbolDelta struct {
 	SnapshotOrdinal int64           `gorm:"column:snapshot_ordinal;primaryKey;autoIncrement:false"`
 	RootOrdinal     int32           `gorm:"column:root_ordinal"`
 	SymbolHandle    int64           `gorm:"column:symbol_handle;primaryKey;autoIncrement:false"`
 	Operation       SourceOperation `gorm:"column:operation"`
-	ShapeFP         *int64          `gorm:"column:shape_fp"`
-	BodyFP          *int64          `gorm:"column:body_fp"`
+	PublicFP        *int64          `gorm:"column:public_fp"`
+	PrivateFP       *int64          `gorm:"column:private_fp"`
+	ContentFP       *int64          `gorm:"column:content_fp"`
 }
 
 func (SymbolDelta) TableName() string { return "symbol_deltas" }

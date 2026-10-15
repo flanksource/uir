@@ -45,18 +45,18 @@ var _ = Describe("symbol fingerprints", func() {
 	)
 
 	It("keeps a single declaration's fingerprints unchanged", func() {
-		single := storage.SymbolFingerprints{Shape: 7, Body: -3}
+		single := storage.SymbolFingerprints{Public: 7, Private: 11, Content: -3}
 		Expect(storage.FoldDeclarations([]storage.SymbolFingerprints{single})).To(Equal(single))
 	})
 
-	It("folds several declarations of one id order-independently, shape and body apart", func() {
-		first, second := storage.SymbolFingerprints{Shape: 5, Body: 9}, storage.SymbolFingerprints{Shape: 5, Body: 2}
+	It("folds several declarations of one id order-independently, each layer apart", func() {
+		first, second := storage.SymbolFingerprints{Public: 5, Private: 6, Content: 9}, storage.SymbolFingerprints{Public: 5, Private: 6, Content: 2}
 		folded := storage.FoldDeclarations([]storage.SymbolFingerprints{first, second, first})
-		Expect(folded).To(Equal(storage.SymbolFingerprints{Shape: firstEight(5, 5), Body: firstEight(2, 9)}),
-			"distinct pairs sorted by shape then body; every func init shares one shape, so a body edit keeps the folded shape")
+		Expect(folded).To(Equal(storage.SymbolFingerprints{Public: firstEight(5, 5), Private: firstEight(6, 6), Content: firstEight(2, 9)}),
+			"distinct triples sorted by public, private, then content; every func init shares one shape, so a body edit keeps the folded shape layers")
 		Expect(storage.FoldDeclarations([]storage.SymbolFingerprints{second, first})).To(Equal(folded))
-		edited := storage.FoldDeclarations([]storage.SymbolFingerprints{first, {Shape: 5, Body: 4}})
-		Expect(edited.Shape).To(Equal(folded.Shape))
-		Expect(edited.Body).ToNot(Equal(folded.Body))
+		edited := storage.FoldDeclarations([]storage.SymbolFingerprints{first, {Public: 5, Private: 6, Content: 4}})
+		Expect([]int64{edited.Public, edited.Private}).To(Equal([]int64{folded.Public, folded.Private}))
+		Expect(edited.Content).ToNot(Equal(folded.Content))
 	})
 })

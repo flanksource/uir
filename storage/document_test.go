@@ -15,7 +15,7 @@ const workerPackage = "example.org/acme/worker"
 
 func documentSymbol(identifier uir.Identifier, kind string, name storage.ByteSpan, extent storage.ByteSpan) storage.DocumentSymbol {
 	return storage.DocumentSymbol{
-		Key: identifier.IdentityKey(), Kind: kind, Visibility: "exported", Shape: kind + " shape", BodyHash: digest(kind),
+		Key: identifier.IdentityKey(), Kind: kind, Visibility: "exported", Shape: kind + " shape", ContentHash: digest(kind),
 		Name: storage.Range{3, 1, 3, 5}, NameBytes: name, Extent: storage.Range{2, 1, 9, 2}, ExtentBytes: extent,
 		Identifier: identifier, ChildSlot: kind + "s", Payload: storage.JSON(`{}`), SemanticHash: digest("semantic " + kind),
 	}
@@ -49,17 +49,19 @@ func workerDocument() (storage.Document, storage.SourceRevision, storage.Documen
 }
 
 // typedWorkerDocument turns the syntax fixture into a valid indexed document: every declaration has
-// an id and shape hash, the call names its symbol and enclosing method, and the type implements an
-// interface declared elsewhere.
+// an id, a public shape, and public and private hashes, the call names its symbol and enclosing
+// method, and the type implements an interface declared elsewhere.
 func typedWorkerDocument() (storage.Document, storage.SourceRevision, storage.DocumentContent) {
 	document, source, content := workerDocument()
 	document.Coverage = storage.CoverageIndexed
 	for index := range content.Symbols {
-		id := digest("symbol " + content.Symbols[index].Kind)
-		content.Symbols[index].ID, content.Symbols[index].ShapeHash = &id, digest("shape "+content.Symbols[index].Kind)
+		symbol := &content.Symbols[index]
+		id := digest("symbol " + symbol.Kind)
+		symbol.ID, symbol.PublicShape = &id, symbol.Shape
+		symbol.PublicHash, symbol.PrivateHash = digest("public "+symbol.Kind), digest("private "+symbol.Kind)
 	}
 	content.Symbols[0].TypeForm = "struct"
-	content.Symbols[0].Shape = "type Service struct{}"
+	content.Symbols[0].Shape, content.Symbols[0].PublicShape = "type Service struct{}", "type Service struct{}"
 	content.Symbols[0].Implements = []string{digest("interface")}
 	target, method := digest("Stop"), *content.Symbols[2].ID
 	content.Occurrences[0].Symbol, content.Occurrences[0].Enclosing = &target, &method
@@ -139,6 +141,15 @@ var _ = Describe("DecodeDocument", func() {
 			id := digest("typed")
 			content.Symbols[0].ID = &id
 		}, "has no id"),
+		Entry("a syntax symbol with a public hash", func(_ *storage.Document, content *storage.DocumentContent) {
+			content.Symbols[0].PublicHash = digest("public")
+		}, "has no id, public_hash, private_hash"),
+		Entry("a syntax symbol with a public shape", func(_ *storage.Document, content *storage.DocumentContent) {
+			content.Symbols[0].PublicShape = "type shape"
+		}, "public_shape"),
+		Entry("a symbol without a content hash", func(_ *storage.Document, content *storage.DocumentContent) {
+			content.Symbols[1].ContentHash = ""
+		}, "64-character content_hash are required"),
 		Entry("a key that is not the identifier key", func(_ *storage.Document, content *storage.DocumentContent) { content.Symbols[0].Key = "v1:[]" }, "does not match identifier key"),
 		Entry("an undeclared enclosing key", func(_ *storage.Document, content *storage.DocumentContent) {
 			content.Occurrences[0].EnclosingKey = "v1:[]"
@@ -171,7 +182,19 @@ var _ = Describe("DecodeDocument", func() {
 			Expect(err).To(MatchError(ContainSubstring(message)))
 		},
 		Entry("an unproven declaration in an indexed document", storage.CoverageIndexed, func(content *storage.DocumentContent) {
-			content.Symbols[1].ID, content.Symbols[1].ShapeHash = nil, ""
+			content.Symbols[1].ID, content.Symbols[1].PublicHash, content.Symbols[1].PrivateHash, content.Symbols[1].PublicShape = nil, "", "", ""
+		}, "only a partial document keeps an unproven declaration"),
+		Entry("a typed symbol without a private hash", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Symbols[1].PrivateHash = ""
+		}, "requires a 64-character id, public_hash, and private_hash"),
+		Entry("a typed symbol without a public hash", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Symbols[2].PublicHash = digest("public")[:63]
+		}, "requires a 64-character id, public_hash, and private_hash"),
+		Entry("a typed symbol without a public shape", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Symbols[2].PublicShape = ""
+		}, "requires a public_shape"),
+		Entry("an unproven declaration with a public shape in a partial document", storage.CoveragePartial, func(content *storage.DocumentContent) {
+			content.Symbols[1].ID, content.Symbols[1].PublicHash, content.Symbols[1].PrivateHash = nil, "", ""
 		}, "only a partial document keeps an unproven declaration"),
 		Entry("a type form that disagrees with its shape", storage.CoverageIndexed, func(content *storage.DocumentContent) {
 			content.Symbols[0].TypeForm = "interface"

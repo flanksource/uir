@@ -54,6 +54,8 @@ func OpenReadOnly(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 		return nil, errors.Join(errors.New("database predates compact symbol handles; open it read-write once or run uir reindex"), closeDatabase(database))
 	case generationH64a:
 		return nil, errors.Join(fmt.Errorf("database predates symbol handle layout %s; open it read-write once or run uir reindex", symbolhandle.Layout), closeDatabase(database))
+	case generationTwoLayer:
+		return nil, errors.Join(errors.New("database predates layered symbol fingerprints; open it read-write once or run uir reindex"), closeDatabase(database))
 	}
 	var count int
 	if err := database.WithContext(ctx).Raw("SELECT COUNT(*) FROM symbols WHERE 1 = 0").Scan(&count).Error; err != nil {
