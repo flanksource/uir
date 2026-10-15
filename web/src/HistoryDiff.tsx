@@ -48,7 +48,7 @@ function DiffTree({ diff, group, onOpen }: { diff: SymbolDiff; group: Route["his
   if (countChanges(diff) === 0) return <div className="rounded-md border border-border bg-card p-4 text-sm">No symbol changes in this range.</div>;
   if (group === "change") {
     const rows = diff.packages.flatMap((pkg) => pkg.files.flatMap((file) => file.rows.map((row) => ({ pkg: pkg.path, file: file.path, row }))));
-    return <div className="rounded-md border border-border bg-card p-3">{(["added", "removed", "signature", "body", "moved"] as const).map((kind) => {
+    return <div className="rounded-md border border-border bg-card p-3">{(["added", "removed", "signature", "structure", "body", "moved"] as const).map((kind) => {
       const matching = rows.filter(({ row }) => row.class === kind);
       return matching.length ? <details key={kind} open className="border-b border-border last:border-0">
         <summary className="cursor-pointer py-2 text-sm font-semibold capitalize">{kind} <span className="font-normal text-muted-foreground">{matching.length}</span></summary>

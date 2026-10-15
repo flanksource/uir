@@ -59,6 +59,9 @@ func DiffCommit(ctx context.Context, database *gorm.DB, options CommitOptions) (
 	if err != nil {
 		return Result{}, err
 	}
+	if scope.external {
+		return Result{}, scope.errExternal("its revisions have no Git parent; compare two published revisions with uir diff")
+	}
 	commit, err := scope.resolveCommit(ctx, options.Commit)
 	if err != nil {
 		return Result{}, err
@@ -92,6 +95,9 @@ func ListHistory(ctx context.Context, database *gorm.DB, rootKey, location strin
 	}
 	if len(scope.locations) == 0 {
 		return History{}, fmt.Errorf("root %q has no registered checkout", rootKey)
+	}
+	if scope.external {
+		return History{}, scope.errExternal("it has no Git history; compare two published revisions with uir diff")
 	}
 	if location != "" {
 		if scope, err = scope.preferring(location); err != nil {

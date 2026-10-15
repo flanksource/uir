@@ -2,8 +2,10 @@ package symboldiff
 
 import (
 	"context"
+	"fmt"
 	"go/scanner"
 	"go/token"
+	"regexp"
 	"strings"
 
 	"github.com/flanksource/clicky/api"
@@ -26,15 +28,35 @@ type Token struct {
 	Text string `json:"text"`
 }
 
+// Tokenizer splits a shape line into the tokens a replaced pair is diffed by: go/scanner tokens for the
+// shapes of a Go root, and identifiers, numbers, quoted strings, and punctuation runs for any other.
+type Tokenizer string
+
+const (
+	TokenizerGo   Tokenizer = "go"
+	TokenizerText Tokenizer = "text"
+)
+
+func (tokenizer Tokenizer) scan(line string) ([]scanned, string) {
+	switch tokenizer {
+	case TokenizerGo:
+		return scanGo(line)
+	case TokenizerText:
+		return scanText(line)
+	}
+	panic(fmt.Sprintf("shape diff tokenizer %q is neither %q nor %q", tokenizer, TokenizerGo, TokenizerText))
+}
+
 // ShapeLine is one line of a shape diff. Text is the line as it appears on its side (the new side for
 // an equal line). Paired marks a replaced line: a delete immediately followed by its insert, whose
 // Tokens hold the token diff between the two (equal and deleted tokens on the delete line, equal and
-// inserted tokens on the insert line).
+// inserted tokens on the insert line), split by Tokenizer.
 type ShapeLine struct {
-	Op     Op      `json:"op"`
-	Text   string  `json:"text"`
-	Paired bool    `json:"paired,omitempty"`
-	Tokens []Token `json:"tokens"`
+	Op        Op        `json:"op"`
+	Text      string    `json:"text"`
+	Paired    bool      `json:"paired,omitempty"`
+	Tokenizer Tokenizer `json:"tokenizer,omitempty"`
+	Tokens    []Token   `json:"tokens"`
 }
 
 // ShapeDiff is the line diff of two canonical shapes, with token diffs of replaced lines.
@@ -42,7 +64,7 @@ type ShapeDiff []ShapeLine
 
 // DiffShapes line-diffs two canonical shape renderings (lines equal when they differ only in
 // whitespace), then token-diffs each replaced line pair that shares at least one token.
-func DiffShapes(before, after string) ShapeDiff {
+func DiffShapes(before, after string, tokenizer Tokenizer) ShapeDiff {
 	oldLines, newLines := strings.Split(before, "\n"), strings.Split(after, "\n")
 	script := myers.Diff(context.Background(), linePair{before: oldLines, after: newLines})
 	diff := ShapeDiff{}
@@ -62,7 +84,7 @@ func DiffShapes(before, after string) ShapeDiff {
 			inserted = append(inserted, newLines[changed.LowB:changed.HighB]...)
 		}
 		index--
-		diff = append(diff, replacedLines(deleted, inserted)...)
+		diff = append(diff, replacedLines(deleted, inserted, tokenizer)...)
 	}
 	return diff
 }
@@ -70,14 +92,14 @@ func DiffShapes(before, after string) ShapeDiff {
 // replacedLines pairs the i-th deleted line with the i-th inserted line when they share a token.
 // Lines keep their hunk position: each run of unpaired lines is emitted, deletions before
 // insertions, ahead of the pair that follows it.
-func replacedLines(deleted, inserted []string) ShapeDiff {
+func replacedLines(deleted, inserted []string, tokenizer Tokenizer) ShapeDiff {
 	var result, deletions, insertions ShapeDiff
 	for index := range max(len(deleted), len(inserted)) {
 		if index < len(deleted) && index < len(inserted) {
-			if segments := tokenDiff(deleted[index], inserted[index]); sharesToken(segments) {
+			if segments := tokenDiff(deleted[index], inserted[index], tokenizer); sharesToken(segments) {
 				result = append(append(append(result, deletions...), insertions...),
-					ShapeLine{Op: OpDelete, Paired: true, Text: deleted[index], Tokens: filterTokens(segments, OpInsert)},
-					ShapeLine{Op: OpInsert, Paired: true, Text: inserted[index], Tokens: filterTokens(segments, OpDelete)})
+					ShapeLine{Op: OpDelete, Paired: true, Tokenizer: tokenizer, Text: deleted[index], Tokens: filterTokens(segments, OpInsert)},
+					ShapeLine{Op: OpInsert, Paired: true, Tokenizer: tokenizer, Text: inserted[index], Tokens: filterTokens(segments, OpDelete)})
 				deletions, insertions = nil, nil
 				continue
 			}
@@ -138,10 +160,25 @@ func (pair linePair) Equal(a, b int) bool {
 	return strings.Join(strings.Fields(pair.before[a]), " ") == strings.Join(strings.Fields(pair.after[b]), " ")
 }
 
-// scanned is one go/scanner token of a line with the whitespace that precedes it.
+// scanned is one token of a line with the whitespace that precedes it.
 type scanned struct{ leading, text string }
 
-func scanLine(line string) ([]scanned, string) {
+// textToken matches the tokens of a non-Go shape: an identifier (which may carry a @, #, or $ sigil),
+// a number, a quoted string or identifier, or a run of any other non-space characters.
+var textToken = regexp.MustCompile(`[\p{L}_@#$][\p{L}\p{N}_@#$]*|\p{N}[\p{L}\p{N}_.]*|'(?:[^']|'')*'?|"[^"]*"?|` + "`[^`]*`?" +
+	`|[^\s\p{L}\p{N}_@#$'"` + "`" + `]+`)
+
+func scanText(line string) ([]scanned, string) {
+	var result []scanned
+	end := 0
+	for _, span := range textToken.FindAllStringIndex(line, -1) {
+		result = append(result, scanned{leading: line[end:span[0]], text: line[span[0]:span[1]]})
+		end = span[1]
+	}
+	return result, line[end:]
+}
+
+func scanGo(line string) ([]scanned, string) {
 	fileSet := token.NewFileSet()
 	file := fileSet.AddFile("", fileSet.Base(), len(line))
 	var tokens scanner.Scanner
@@ -179,11 +216,11 @@ type tokenEdit struct {
 	a, b *scanned
 }
 
-// tokenDiff diffs two lines by go/scanner tokens, dissolves short equal runs between edits so a
+// tokenDiff diffs two lines by the tokenizer's tokens, dissolves short equal runs between edits so a
 // changed tail reads as one replacement, and renders the merged sequence with its whitespace.
-func tokenDiff(before, after string) []Token {
-	oldTokens, _ := scanLine(before)
-	newTokens, trailing := scanLine(after)
+func tokenDiff(before, after string, tokenizer Tokenizer) []Token {
+	oldTokens, _ := tokenizer.scan(before)
+	newTokens, trailing := tokenizer.scan(after)
 	script := myers.Diff(context.Background(), tokenPair{before: oldTokens, after: newTokens})
 	var edits []tokenEdit
 	for _, current := range script.Ranges {
@@ -311,7 +348,7 @@ func (diff ShapeDiff) rich(indent string, markdown bool) api.Text {
 		line := diff[index]
 		if line.Paired && line.Op == OpDelete && index+1 < len(diff) && diff[index+1].Paired {
 			text = text.Append(indent + "~ ")
-			for _, segment := range tokenDiff(line.Text, diff[index+1].Text) {
+			for _, segment := range tokenDiff(line.Text, diff[index+1].Text, line.Tokenizer) {
 				text = text.Add(styledToken(segment.Op, segment.Text, markdown))
 			}
 			text = text.Append("\n")

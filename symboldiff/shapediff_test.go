@@ -25,10 +25,10 @@ func tokens(pairs ...string) []Token {
 
 var _ = Describe("shape diff", func() {
 	It("diffs a one-line signature as one replaced pair with token marks", func() {
-		diff := DiffShapes(saveBefore, saveAfter)
+		diff := DiffShapes(saveBefore, saveAfter, TokenizerGo)
 		Expect(diff).To(Equal(ShapeDiff{
-			{Op: OpDelete, Paired: true, Text: saveBefore, Tokens: tokens("equal", savePrefix, "delete", ") error")},
-			{Op: OpInsert, Paired: true, Text: saveAfter, Tokens: tokens("equal", savePrefix, "insert", ", opts ...SaveOption) (Receipt, error)")},
+			{Op: OpDelete, Paired: true, Tokenizer: TokenizerGo, Text: saveBefore, Tokens: tokens("equal", savePrefix, "delete", ") error")},
+			{Op: OpInsert, Paired: true, Tokenizer: TokenizerGo, Text: saveAfter, Tokens: tokens("equal", savePrefix, "insert", ", opts ...SaveOption) (Receipt, error)")},
 		}))
 		Expect(diff.String()).To(Equal("- " + saveBefore + "\n+ " + saveAfter + "\n"))
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
@@ -42,12 +42,12 @@ var _ = Describe("shape diff", func() {
 	})
 
 	It("diffs a struct field change as a field-level line diff", func() {
-		diff := DiffShapes(invoiceBefore, invoiceAfter)
+		diff := DiffShapes(invoiceBefore, invoiceAfter, TokenizerGo)
 		Expect(diff).To(Equal(ShapeDiff{
 			{Op: OpEqual, Text: "type Invoice struct {", Tokens: tokens("equal", "type Invoice struct {")},
 			{Op: OpEqual, Text: "\tID    InvoiceID", Tokens: tokens("equal", "\tID    InvoiceID")},
-			{Op: OpDelete, Paired: true, Text: "\tTotal int", Tokens: tokens("equal", "\tTotal ", "delete", "int")},
-			{Op: OpInsert, Paired: true, Text: "\tTotal Money", Tokens: tokens("equal", "\tTotal ", "insert", "Money")},
+			{Op: OpDelete, Paired: true, Tokenizer: TokenizerGo, Text: "\tTotal int", Tokens: tokens("equal", "\tTotal ", "delete", "int")},
+			{Op: OpInsert, Paired: true, Tokenizer: TokenizerGo, Text: "\tTotal Money", Tokens: tokens("equal", "\tTotal ", "insert", "Money")},
 			{Op: OpInsert, Text: "\tNotes string", Tokens: tokens("insert", "\tNotes string")},
 			{Op: OpEqual, Text: "}", Tokens: tokens("equal", "}")},
 		}))
@@ -58,24 +58,24 @@ var _ = Describe("shape diff", func() {
 	})
 
 	It("keeps paired and unpaired lines of one hunk in the order they appear", func() {
-		diff := DiffShapes("type T struct {\n\tA int\n\tB string\n}", "type T struct {\n\tX float\n\tB Text\n}")
+		diff := DiffShapes("type T struct {\n\tA int\n\tB string\n}", "type T struct {\n\tX float\n\tB Text\n}", TokenizerGo)
 		Expect(diff.String()).To(Equal("  type T struct {\n- \tA int\n+ \tX float\n- \tB string\n+ \tB Text\n  }\n"))
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
 			"  type T struct {\n- \t~~A int~~\n+ \t**X float**\n~ \tB ~~string~~**Text**\n  }\n"))
 	})
 
 	It("escapes markdown metacharacters of token text so they render literally", func() {
-		diff := DiffShapes("func Pick(m map[string]*_Item) `tag`", "func Pick(m map[string]*_Entry) `tag`")
+		diff := DiffShapes("func Pick(m map[string]*_Item) `tag`", "func Pick(m map[string]*_Entry) `tag`", TokenizerGo)
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
 			"~ func Pick(m map\\[string\\]\\*~~\\_Item~~**\\_Entry**) \\`tag\\`\n"))
 		Expect(diff.String()).To(Equal("- func Pick(m map[string]*_Item) `tag`\n+ func Pick(m map[string]*_Entry) `tag`\n"))
 	})
 
 	It("diffs a parameter-type change as one signature edit across the removed and added identities", func() {
-		diff := DiffShapes("func Half(a Amount) Amount", "func Half(a *Amount) Amount")
+		diff := DiffShapes("func Half(a Amount) Amount", "func Half(a *Amount) Amount", TokenizerGo)
 		Expect(diff).To(Equal(ShapeDiff{
-			{Op: OpDelete, Paired: true, Text: "func Half(a Amount) Amount", Tokens: tokens("equal", "func Half(a Amount) Amount")},
-			{Op: OpInsert, Paired: true, Text: "func Half(a *Amount) Amount", Tokens: tokens("equal", "func Half(a ", "insert", "*", "equal", "Amount) Amount")},
+			{Op: OpDelete, Paired: true, Tokenizer: TokenizerGo, Text: "func Half(a Amount) Amount", Tokens: tokens("equal", "func Half(a Amount) Amount")},
+			{Op: OpInsert, Paired: true, Tokenizer: TokenizerGo, Text: "func Half(a *Amount) Amount", Tokens: tokens("equal", "func Half(a ", "insert", "*", "equal", "Amount) Amount")},
 		}))
 		Expect(diff.String()).To(Equal("- func Half(a Amount) Amount\n+ func Half(a *Amount) Amount\n"))
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal("~ func Half(a **\\***Amount) Amount\n"))
@@ -83,7 +83,7 @@ var _ = Describe("shape diff", func() {
 	})
 
 	It("treats a whitespace-only realignment as equal and keeps the new layout", func() {
-		diff := DiffShapes("type T struct {\n\tA int\n}", "type T struct {\n\tA    int\n\tLong string\n}")
+		diff := DiffShapes("type T struct {\n\tA int\n}", "type T struct {\n\tA    int\n\tLong string\n}", TokenizerGo)
 		Expect(diff).To(Equal(ShapeDiff{
 			{Op: OpEqual, Text: "type T struct {", Tokens: tokens("equal", "type T struct {")},
 			{Op: OpEqual, Text: "\tA    int", Tokens: tokens("equal", "\tA    int")},
@@ -93,6 +93,18 @@ var _ = Describe("shape diff", func() {
 	})
 
 	It("diffs equal shapes to all-equal lines", func() {
-		Expect(DiffShapes("func A()", "func A()")).To(Equal(ShapeDiff{{Op: OpEqual, Text: "func A()", Tokens: tokens("equal", "func A()")}}))
+		Expect(DiffShapes("func A()", "func A()", TokenizerGo)).To(Equal(ShapeDiff{{Op: OpEqual, Text: "func A()", Tokens: tokens("equal", "func A()")}}))
+	})
+
+	It("token-diffs a non-Go shape by identifiers, numbers, quoted strings, and punctuation runs", func() {
+		before, after := "@p1 VARCHAR(10) DEFAULT 'new'", "@p2 VARCHAR(10) DEFAULT 'open'"
+		diff := DiffShapes(before, after, TokenizerText)
+		Expect(diff).To(Equal(ShapeDiff{
+			{Op: OpDelete, Paired: true, Tokenizer: TokenizerText, Text: before, Tokens: tokens("delete", "@p1", "equal", " VARCHAR(10) DEFAULT ", "delete", "'new'")},
+			{Op: OpInsert, Paired: true, Tokenizer: TokenizerText, Text: after, Tokens: tokens("insert", "@p2", "equal", " VARCHAR(10) DEFAULT ", "insert", "'open'")},
+		}))
+		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal("~ ~~@p1~~**@p2** VARCHAR(10) DEFAULT ~~'new'~~**'open'**\n"),
+			"the rich form re-diffs the pair with the tokenizer it was built with")
+		Expect(DiffShapes(before, after, TokenizerGo)[0].Tokens[0]).To(Equal(Token{Op: OpEqual, Text: "@"}), "go/scanner splits the parameter sigil off")
 	})
 })

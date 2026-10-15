@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/flanksource/uir/storage"
 	"github.com/pkg/diff/myers"
+	"gorm.io/gorm"
 )
 
 // fileSegments partitions one side of a file: the text of each outermost symbol extent, keyed by
@@ -28,14 +30,19 @@ type lineAttribution struct {
 	failures     map[string]string
 }
 
-// blobSource reads one commit's files from a registered checkout that contains it.
+// blobSource reads one commit's files from a registered checkout that contains it, or one external
+// revision's files from the blobs its publication stored (stored is then set).
 type blobSource struct {
 	commit   string
 	checkout string
+	stored   *gorm.DB
 	err      error
 }
 
-func newBlobSource(ctx context.Context, scope rootScope, commit string) blobSource {
+func newBlobSource(ctx context.Context, database *gorm.DB, scope rootScope, commit string) blobSource {
+	if scope.external {
+		return blobSource{commit: commit, stored: database}
+	}
 	checkout, err := scope.checkoutFor(ctx, commit)
 	return blobSource{commit: commit, checkout: checkout, err: err}
 }
@@ -46,11 +53,18 @@ func (source blobSource) checkoutBytes(ctx context.Context, path string) ([]byte
 	return git(ctx, source.checkout, "cat-file", "--filters", source.commit+":./"+path)
 }
 
-// read returns the file's checkout bytes at the commit, verified against the source revision's
-// content hash.
+// read returns the file's bytes at the commit, verified against the source revision's content hash:
+// the blob its publication stored, or the checkout's bytes.
 func (source blobSource) read(ctx context.Context, side *fileSide) ([]byte, error) {
 	if source.err != nil {
 		return nil, source.err
+	}
+	if source.stored != nil {
+		content, err := storage.ReadSourceBlob(ctx, source.stored, side.active.Source.ContentHash)
+		if err != nil {
+			return nil, fmt.Errorf("read %s at %s: %w", side.path, source.commit, err)
+		}
+		return content, nil
 	}
 	content, err := source.checkoutBytes(ctx, side.path)
 	if err != nil {

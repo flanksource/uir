@@ -138,7 +138,7 @@ example.org/ledger/book  +3 -2
     (file scope)                   +2 -0
 example.org/ledger/money  +11 -6
   money/money.go (modified)  +11 -6
-    Add                  body      +1 -0  (comments or layout only; body_hash unchanged)
+    Add                  body      +1 -0  (comments or layout only; content_hash unchanged)
     Amount               signature +1 -1
         type Amount struct {
         	Cents    int64
