@@ -140,32 +140,42 @@ var _ = Describe("canonical symbol identity", func() {
 })
 
 var _ = Describe("symbol shapes", func() {
-	It("renders the canonical multi-line layout and hashes it", func() {
+	It("renders the canonical multi-line layout in a public and a private layer", func() {
 		pkg, _, resolver := checkedStore()
 		scope := pkg.Scope()
-		shapes := map[string]string{}
+		shapes := map[string]symbolShapes{}
 		for name, object := range map[string]types.Object{
 			"Invoice": scope.Lookup("Invoice"), "Invoice.Total": lookupMethod(pkg, "Invoice", "Total"),
 			"Loader": scope.Lookup("Loader"), "Loader.Save": lookupMethod(pkg, "Loader", "Save"),
 			"List": scope.Lookup("List"), "List.Push": lookupMethod(pkg, "List", "Push"),
 			"Limit": scope.Lookup("Limit"), "Default": scope.Lookup("Default"), "Sum": scope.Lookup("Sum"),
 		} {
-			shape, err := resolver.shape(object)
+			rendered, err := resolver.shapes(object)
 			Expect(err).ToNot(HaveOccurred(), name)
-			shapes[name] = shape
+			shapes[name] = rendered
 		}
-		Expect(shapes).To(Equal(map[string]string{
-			"Invoice":       "type Invoice struct {\n\tID    string\n\tTotal int `json:\"total\"`\n\tNotes []string\n}",
-			"Invoice.Total": "Total int `json:\"total\"`",
-			"Loader":        "type Loader interface {\n\tLoad(id string) (Invoice, error)\n\tSave(ctx any, inv Invoice) error\n}",
-			"Loader.Save":   "func (Loader) Save(ctx any, inv Invoice) error",
-			"List":          "type List[T any] struct {\n\titems []T\n}",
-			"List.Push":     "func (l *List[T]) Push(value T, more ...T)",
-			"Limit":         "const Limit untyped int = 10",
-			"Default":       "var Default Invoice",
-			"Sum":           "func Sum(values ...int) (total int, err error)",
+		Expect(shapes).To(Equal(map[string]symbolShapes{
+			"Invoice":       sameShapes("type Invoice struct {\n\tID    string\n\tTotal int `json:\"total\"`\n\tNotes []string\n}"),
+			"Invoice.Total": sameShapes("Total int `json:\"total\"`"),
+			"Loader":        sameShapes("type Loader interface {\n\tLoad(id string) (Invoice, error)\n\tSave(ctx any, inv Invoice) error\n}"),
+			"Loader.Save":   sameShapes("func (Loader) Save(ctx any, inv Invoice) error"),
+			"List":          {Public: "type List[T any] struct {\n\topaque\n}", Private: "type List[T any] struct {\n\titems []T\n}"},
+			"List.Push":     sameShapes("func (l *List[T]) Push(value T, more ...T)"),
+			"Limit":         sameShapes("const Limit untyped int = 10"),
+			"Default":       sameShapes("var Default Invoice"),
+			"Sum":           sameShapes("func Sum(values ...int) (total int, err error)"),
 		}))
-		Expect(shapeHash(shapes["Sum"])).To(HaveLen(64))
-		Expect(shapeHash(shapes["Sum"])).ToNot(Equal(shapeHash(shapes["Default"])))
+	})
+
+	It("nests the private hash over the public one, so only a public change moves both", func() {
+		list := symbolShapes{Public: "type List struct {\n\topaque\n}", Private: "type List struct {\n\titems []int\n}"}
+		widened := symbolShapes{Public: list.Public, Private: "type List struct {\n\titems []int\n\tsize  int\n}"}
+		exported := symbolShapes{Public: "type List struct {\n\tLen int\n\topaque\n}", Private: "type List struct {\n\tLen   int\n\titems []int\n}"}
+		public, private := layerHashes(list)
+		widenedPublic, widenedPrivate := layerHashes(widened)
+		exportedPublic, exportedPrivate := layerHashes(exported)
+		Expect([]bool{widenedPublic == public, widenedPrivate == private, exportedPublic == public, exportedPrivate == private}).
+			To(Equal([]bool{true, false, false, false}))
+		Expect([]int{len(public), len(private)}).To(Equal([]int{64, 64}))
 	})
 })

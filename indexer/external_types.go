@@ -15,12 +15,12 @@ import (
 // ExternalIndexerVersion versions how Publish turns a publication into documents and hashes: it enters
 // the configuration hash of every external snapshot and is the indexer version of every external
 // document.
-const ExternalIndexerVersion = "external-v2"
+const ExternalIndexerVersion = "external-v3"
 
 const (
 	externalConfigurationVersion = "uir-external-configuration-v1"
 	externalPackageInputVersion  = "uir-external-package-input-v1"
-	externalExportShapeVersion   = "uir-export-external-v1"
+	externalExportShapeVersion   = "uir-export-external-v2"
 )
 
 // Publication is one root a non-Go producer publishes: what `uir import` reads and Publish writes. Its
@@ -147,13 +147,13 @@ func externalInputHash(configuration, packagePath string, files []discoveredFile
 	return digest.sum()
 }
 
-// externalExportShape digests the sorted (id, shape_hash) of a package's exported declarations.
+// externalExportShape digests the sorted (id, public_hash) of a package's exported declarations.
 func externalExportShape(documents []storage.DocumentContent) string {
 	var declared []string
 	for _, content := range documents {
 		for _, symbol := range content.Symbols {
 			if symbol.ID != nil && symbol.Visibility == "exported" {
-				declared = append(declared, *symbol.ID+" "+symbol.ShapeHash)
+				declared = append(declared, *symbol.ID+" "+symbol.PublicHash)
 			}
 		}
 	}

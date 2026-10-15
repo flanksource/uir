@@ -48,8 +48,8 @@ var _ = Describe("syntax documents", func() {
 		summaries := map[string]symbolSummary{}
 		for _, symbol := range content.Symbols {
 			Expect(symbol.ID).To(BeNil())
-			Expect(symbol.ShapeHash).To(BeEmpty())
-			Expect(symbol.BodyHash).To(HaveLen(64))
+			Expect([]string{symbol.PublicHash, symbol.PrivateHash, symbol.PublicShape}).To(Equal([]string{"", "", ""}))
+			Expect(symbol.ContentHash).To(HaveLen(64))
 			name := strings.Trim(symbol.Identifier.Type+"."+symbol.Identifier.Method+symbol.Identifier.Field, ".")
 			summaries[name] = symbolSummary{Kind: symbol.Kind, Visibility: symbol.Visibility, Shape: symbol.Shape}
 		}

@@ -24,7 +24,7 @@ func newExportShapes(resolver *symbolResolver, load *typedLoad) *exportShapes {
 }
 
 // of is a package's export shape. A package loaded from source in the workspace digests its
-// exported symbols' (id, shape_hash) and its imports' export shapes; one that did not type-check
+// exported symbols' (id, public_hash) and its imports' export shapes; one that did not type-check
 // cleanly has no proven shape, so it digests its files' bytes and its imports' shapes instead. A
 // module-cache package is identified by module path, version, and toolchain, and the standard
 // library by the toolchain alone.
@@ -127,7 +127,8 @@ func (shapes *exportShapes) unproven(pkg *packages.Package, importHashes []strin
 	return digest.sum(), nil
 }
 
-// exportedSymbols is the sorted (symbol id, shape_hash) of every exported symbol a package declares.
+// exportedSymbols is the sorted (symbol id, public_hash) of every exported symbol a package declares:
+// an unexported field or method of an exported type changes its private layer, never this.
 func (shapes *exportShapes) exportedSymbols(pkg *types.Package) ([][2]string, error) {
 	var objects []types.Object
 	scope := pkg.Scope()
@@ -155,14 +156,15 @@ func (shapes *exportShapes) exportedSymbols(pkg *types.Package) ([][2]string, er
 		if resolved.ID == "" || shapes.resolver.rows[resolved.ID].Visibility != "exported" {
 			continue
 		}
-		shape, err := shapes.resolver.shape(object)
+		rendered, err := shapes.resolver.shapes(object)
 		if errors.Is(err, errUnprovenType) {
 			return nil, fmt.Errorf("exported %s has an invalid type in a package without errors", object.Name())
 		}
 		if err != nil {
 			return nil, err
 		}
-		pair := [2]string{resolved.ID, shapeHash(shape)}
+		public, _ := layerHashes(rendered)
+		pair := [2]string{resolved.ID, public}
 		if !seen[pair] {
 			seen[pair] = true
 			pairs = append(pairs, pair)

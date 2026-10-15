@@ -83,7 +83,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 	symbols := []storage.DocumentSymbol{}
 	for _, declared := range fileDeclarations(source.file, source.pkg.TypesInfo) {
 		name, extent := source.span(declared.name.Pos(), declared.name.End()), source.span(declared.start, declared.end)
-		bodyHash, err := tokenStreamHash(source.content[extent[0]:extent[1]])
+		contentHash, err := tokenStreamHash(source.content[extent[0]:extent[1]])
 		if err != nil {
 			return nil, fmt.Errorf("hash %s: %w", declared.name.Name, err)
 		}
@@ -101,7 +101,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 			}
 			symbol = storage.DocumentSymbol{Kind: projection.Kind, Visibility: projection.Visibility, Shape: projection.Shape}
 		}
-		symbol.BodyHash, symbol.NameBytes, symbol.ExtentBytes = bodyHash, name, extent
+		symbol.ContentHash, symbol.NameBytes, symbol.ExtentBytes = contentHash, name, extent
 		symbol.Name, symbol.Extent = source.lines.rangeOf(name), source.lines.rangeOf(extent)
 		if projected {
 			symbol.Identifier, symbol.ParentKey, symbol.ChildSlot = projection.Identifier, projection.ParentIdentity, projection.ChildSlot
@@ -132,7 +132,7 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 		}
 		return storage.DocumentSymbol{}, false, fmt.Errorf("declared %s has no canonical symbol: %s", declared.name.Name, resolved.Note)
 	}
-	shape, err := builder.resolver.shape(declared.object)
+	shapes, err := builder.resolver.shapes(declared.object)
 	if errors.Is(err, errUnprovenType) {
 		return storage.DocumentSymbol{}, false, nil
 	}
@@ -148,25 +148,29 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 		return storage.DocumentSymbol{}, false, err
 	}
 	row, id := builder.resolver.rows[resolved.ID], resolved.ID
-	typeForm := ""
-	if typeName, ok := declared.object.(*types.TypeName); ok {
-		switch {
-		case typeName.IsAlias():
-			typeForm = "alias"
-		default:
-			switch typeName.Type().Underlying().(type) {
-			case *types.Struct:
-				typeForm = "struct"
-			case *types.Interface:
-				typeForm = "interface"
-			default:
-				typeForm = "other"
-			}
-		}
-	}
+	public, private := layerHashes(shapes)
 	return storage.DocumentSymbol{
-		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shape, TypeForm: typeForm, ShapeHash: shapeHash(shape), Implements: implements, Embeds: embeds,
+		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shapes.Private, PublicShape: shapes.Public, TypeForm: typeFormOf(declared.object),
+		PublicHash: public, PrivateHash: private, Implements: implements, Embeds: embeds,
 	}, true, nil
+}
+
+// typeFormOf is a type declaration's form (alias, struct, interface, or other), "" for any other object.
+func typeFormOf(object types.Object) string {
+	typeName, ok := object.(*types.TypeName)
+	if !ok {
+		return ""
+	}
+	if typeName.IsAlias() {
+		return "alias"
+	}
+	switch typeName.Type().Underlying().(type) {
+	case *types.Struct:
+		return "struct"
+	case *types.Interface:
+		return "interface"
+	}
+	return "other"
 }
 
 func (builder *documentBuilder) embeds(object types.Object) ([]string, error) {

@@ -14,12 +14,12 @@ import (
 
 // declarationFacts are the diff inputs a syntax document records for one declared symbol.
 type declarationFacts struct {
-	Kind       string
-	Visibility string
-	Shape      string
-	BodyHash   string
-	Name       storage.ByteSpan
-	Extent     storage.ByteSpan
+	Kind        string
+	Visibility  string
+	Shape       string
+	ContentHash string
+	Name        storage.ByteSpan
+	Extent      storage.ByteSpan
 }
 
 func (indexed *fileIndex) declaration(kind string, exported bool, shape string, name ast.Node, start, end token.Pos) (declarationFacts, error) {
@@ -30,11 +30,11 @@ func (indexed *fileIndex) declaration(kind string, exported bool, shape string, 
 	if exported {
 		facts.Visibility = "exported"
 	}
-	bodyHash, err := tokenStreamHash(indexed.content[facts.Extent[0]:facts.Extent[1]])
+	contentHash, err := tokenStreamHash(indexed.content[facts.Extent[0]:facts.Extent[1]])
 	if err != nil {
 		return declarationFacts{}, fmt.Errorf("hash %s %s: %w", kind, shape, err)
 	}
-	facts.BodyHash = bodyHash
+	facts.ContentHash = contentHash
 	return facts, nil
 }
 
@@ -56,7 +56,7 @@ func tokenStreamHash(source []byte) (string, error) {
 	var errors scanner.ErrorList
 	var tokens scanner.Scanner
 	tokens.Init(fileSet.AddFile("", fileSet.Base(), len(source)), source, errors.Add, 0)
-	digest := newCanonicalHash(bodyHashVersion)
+	digest := newCanonicalHash(contentHashVersion)
 	for {
 		_, kind, literal := tokens.Scan()
 		if kind == token.EOF {
@@ -120,7 +120,7 @@ func (indexed *fileIndex) syntaxDocument() storage.DocumentContent {
 	for _, node := range indexed.Nodes {
 		content.Symbols = append(content.Symbols, storage.DocumentSymbol{
 			Key: node.Identifier.IdentityKey(), Kind: node.Kind, Visibility: node.Visibility, Shape: node.Shape,
-			BodyHash: node.BodyHash, Name: lines.rangeOf(node.Name), NameBytes: node.Name,
+			ContentHash: node.ContentHash, Name: lines.rangeOf(node.Name), NameBytes: node.Name,
 			Extent: lines.rangeOf(node.Extent), ExtentBytes: node.Extent, Identifier: node.Identifier,
 			ParentKey: node.ParentIdentity, ChildSlot: node.ChildSlot, Ordinal: node.Ordinal,
 			Payload: node.Payload, SemanticHash: node.SemanticHash, Field: node.Field,

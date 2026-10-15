@@ -69,8 +69,9 @@ func (source sourceText) declaration(identity Identity, identifier uir.Identifie
 	nameRange, nameBytes := source.span(extent, name)
 	extentRange, extentBytes := source.span(extent, extent)
 	return storage.DocumentSymbol{
-		ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape,
-		ShapeHash: hashBytes([]byte(shape)), BodyHash: hashBytes([]byte(extent)), Name: nameRange, NameBytes: nameBytes,
+		ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape, PublicShape: shape,
+		PublicHash: hashBytes([]byte("public " + shape)), PrivateHash: hashBytes([]byte("private " + shape)), ContentHash: hashBytes([]byte(extent)),
+		Name: nameRange, NameBytes: nameBytes,
 		Extent: extentRange, ExtentBytes: extentBytes, Identifier: identifier,
 	}
 }

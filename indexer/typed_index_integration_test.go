@@ -3,6 +3,7 @@ package indexer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/flanksource/uir"
@@ -58,8 +59,9 @@ var _ = Describe("typed extraction", func() {
 			}.CanonicalKey()))
 			Expect(add.ParameterTypes).To(MatchJSON(`["example.org/ledger/money.Amount","example.org/ledger/money.Amount"]`))
 			addEntry := snapshot.entry("money/money.go", add.ID)
-			Expect([]string{addEntry.Kind, addEntry.Visibility, addEntry.Shape, addEntry.ShapeHash}).To(Equal([]string{
-				"func", "exported", "func Add(a Amount, b Amount) Amount", shapeHash("func Add(a Amount, b Amount) Amount"),
+			addPublic, addPrivate := layerHashes(symbolShapes{Public: "func Add(a Amount, b Amount) Amount", Private: "func Add(a Amount, b Amount) Amount"})
+			Expect([]string{addEntry.Kind, addEntry.Visibility, addEntry.Shape, addEntry.PublicShape, addEntry.PublicHash, addEntry.PrivateHash}).To(Equal([]string{
+				"func", "exported", "func Add(a Amount, b Amount) Amount", "func Add(a Amount, b Amount) Amount", addPublic, addPrivate,
 			}))
 
 			total := findSymbol(database, bookPackage, "func", "Total")
@@ -103,7 +105,7 @@ var _ = Describe("typed extraction", func() {
 			Expect(findSymbol(database, moneyPackage, "func", "Scale").ID).To(Equal(scale.ID))
 			renamedEntry := second.entry("money/money.go", scale.ID)
 			Expect(renamedEntry.Shape).To(Equal("func Scale(a Amount, by int) Amount"))
-			Expect(renamedEntry.ShapeHash).ToNot(Equal(original.ShapeHash))
+			Expect(renamedEntry.PrivateHash).ToNot(Equal(original.PrivateHash))
 
 			retyped := "func Scale(a Amount, factor float64) Amount { return Amount{Cents: int64(float64(a.Cents) * factor), Currency: a.Currency} }\n"
 			writeFile(filepath.Join(workspace, "money", "money.go"), moneySource(moneyAmount, moneyAdd, retyped, moneyUnit, moneyZero))
@@ -123,7 +125,7 @@ var _ = Describe("typed extraction", func() {
 		Entry("PostgreSQL", indexerPostgresOptions),
 	)
 
-	DescribeTable("changes shape and export shape on return and field type changes, and only body_hash on a body edit",
+	DescribeTable("changes shape and export shape on return and field type changes, and only content_hash on a body edit",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openIndexerDB(ctx, options())
 			workspace := GinkgoT().TempDir()
@@ -142,7 +144,7 @@ var _ = Describe("typed extraction", func() {
 			returned := loadTypedSnapshot(ctx, database, indexOnce(ctx, engine, workspace).SnapshotID)
 			Expect(findSymbol(database, moneyPackage, "func", "Unit").ID).To(Equal(unit.ID))
 			Expect(returned.entry("money/money.go", unit.ID).Shape).To(Equal("func Unit() *Amount"))
-			Expect(returned.entry("money/money.go", unit.ID).ShapeHash).ToNot(Equal(first.entry("money/money.go", unit.ID).ShapeHash))
+			Expect(returned.entry("money/money.go", unit.ID).PublicHash).ToNot(Equal(first.entry("money/money.go", unit.ID).PublicHash))
 			Expect(returned.packageRow(database, moneyPackage).ExportShapeHash).ToNot(Equal(first.packageRow(database, moneyPackage).ExportShapeHash))
 			for _, path := range []string{"book/book.go", "book/use.go"} {
 				Expect(returned.documents[path].ID).ToNot(Equal(first.documents[path].ID), "%s imports the changed export shape", path)
@@ -153,7 +155,7 @@ var _ = Describe("typed extraction", func() {
 			retyped := loadTypedSnapshot(ctx, database, indexOnce(ctx, engine, workspace).SnapshotID)
 			Expect(findMember(database, amount, "field", "Currency").ID).To(Equal(currency.ID))
 			Expect(retyped.entry("money/money.go", currency.ID).Shape).To(Equal("Currency Code `json:\"currency\"`"))
-			Expect(retyped.entry("money/money.go", currency.ID).ShapeHash).ToNot(Equal(returned.entry("money/money.go", currency.ID).ShapeHash))
+			Expect(retyped.entry("money/money.go", currency.ID).PublicHash).ToNot(Equal(returned.entry("money/money.go", currency.ID).PublicHash))
 			Expect(retyped.entry("money/money.go", amount.ID).Shape).To(Equal("type Amount struct {\n\tCents    int64\n\tCurrency Code `json:\"currency\"`\n}"))
 			Expect(retyped.packageRow(database, moneyPackage).ExportShapeHash).ToNot(Equal(returned.packageRow(database, moneyPackage).ExportShapeHash))
 			Expect(retyped.documents["book/book.go"].ID).ToNot(Equal(returned.documents["book/book.go"].ID))
@@ -162,12 +164,51 @@ var _ = Describe("typed extraction", func() {
 			writeFile(moneyPath, moneySource(codedAmount, reordered, moneyScale, pointerUnit, moneyZero))
 			bodied := loadTypedSnapshot(ctx, database, indexOnce(ctx, engine, workspace).SnapshotID)
 			before, after := retyped.entry("money/money.go", add.ID), bodied.entry("money/money.go", add.ID)
-			Expect(after.ShapeHash).To(Equal(before.ShapeHash))
-			Expect(after.BodyHash).ToNot(Equal(before.BodyHash))
+			Expect([]string{after.PublicHash, after.PrivateHash}).To(Equal([]string{before.PublicHash, before.PrivateHash}))
+			Expect(after.ContentHash).ToNot(Equal(before.ContentHash))
 			Expect(bodied.packageRow(database, moneyPackage).ExportShapeHash).To(Equal(retyped.packageRow(database, moneyPackage).ExportShapeHash))
 			Expect(bodied.documents["money/money.go"].ID).ToNot(Equal(retyped.documents["money/money.go"].ID))
 			for _, path := range []string{"book/book.go", "book/use.go"} {
 				Expect(bodied.documents[path].ID).To(Equal(retyped.documents[path].ID), "%s is reused after a body-only edit", path)
+			}
+		},
+		Entry("SQLite", indexerSQLiteOptions),
+		Entry("PostgreSQL", indexerPostgresOptions),
+	)
+
+	DescribeTable("keeps the export shape and importers' documents when only a private struct field is added, and changes them for an exported one",
+		func(ctx SpecContext, options func() storage.DBOptions) {
+			database := openIndexerDB(ctx, options())
+			workspace := GinkgoT().TempDir()
+			writeLedgerModule(workspace)
+			engine, err := New(database)
+			Expect(err).ToNot(HaveOccurred())
+			moneyPath := filepath.Join(workspace, "money", "money.go")
+			amountWith := func(fields ...string) string {
+				return "type Amount struct {\n\tCents    int64\n\tCurrency string `json:\"currency\"`\n" + strings.Join(fields, "") + "}\n"
+			}
+			index := func(fields ...string) typedSnapshot {
+				writeFile(moneyPath, moneySource(amountWith(fields...), moneyAdd, moneyScale, moneyUnit, moneyZero))
+				return loadTypedSnapshot(ctx, database, indexOnce(ctx, engine, workspace).SnapshotID)
+			}
+			opaque := index("\tnote string\n")
+			amount := findSymbol(database, moneyPackage, "type", "Amount")
+			Expect(opaque.entry("money/money.go", amount.ID).PublicShape).To(Equal("type Amount struct {\n\tCents    int64\n\tCurrency string `json:\"currency\"`\n\topaque\n}"))
+
+			private := index("\tnote string\n", "\trate int\n")
+			before, after := opaque.entry("money/money.go", amount.ID), private.entry("money/money.go", amount.ID)
+			Expect([]bool{after.PublicHash == before.PublicHash, after.PrivateHash == before.PrivateHash, after.ContentHash == before.ContentHash}).
+				To(Equal([]bool{true, false, false}), "public, private, content of Amount after a private field is added")
+			Expect(private.packageRow(database, moneyPackage).ExportShapeHash).To(Equal(opaque.packageRow(database, moneyPackage).ExportShapeHash))
+			for _, path := range []string{"book/book.go", "book/use.go"} {
+				Expect(private.documents[path].ID).To(Equal(opaque.documents[path].ID), "%s is reused: its import's public layer did not change", path)
+			}
+
+			exported := index("\tnote string\n", "\trate int\n", "\tRounded bool\n")
+			Expect(exported.entry("money/money.go", amount.ID).PublicHash).ToNot(Equal(after.PublicHash))
+			Expect(exported.packageRow(database, moneyPackage).ExportShapeHash).ToNot(Equal(private.packageRow(database, moneyPackage).ExportShapeHash))
+			for _, path := range []string{"book/book.go", "book/use.go"} {
+				Expect(exported.documents[path].ID).ToNot(Equal(private.documents[path].ID), "%s imports the changed public layer", path)
 			}
 		},
 		Entry("SQLite", indexerSQLiteOptions),
