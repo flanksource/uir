@@ -25,14 +25,14 @@ type pairing struct {
 }
 
 // shapesRead reports whether every shape the pairing's row shows was decoded: the new shape of an
-// added symbol, the old one of a removed symbol, and both of a signature change.
+// added symbol, the old one of a removed symbol, and both of a signature or structure change.
 func (pair *pairing) shapesRead() bool {
 	switch pair.class {
 	case ClassAdded:
 		return pair.after.decoded()
 	case ClassRemoved:
 		return pair.before.decoded()
-	case ClassSignature:
+	case ClassSignature, ClassStructure:
 		return pair.before.decoded() && pair.after.decoded()
 	}
 	return true
@@ -107,20 +107,19 @@ func matchByKey(before, after []*entry, matched map[*entry]bool) []*pairing {
 	return pairings
 }
 
+// classify compares the documents' layer hashes. The public and private hashes are comparable only
+// when both sides have an id; a key-matched pair can only change in body or path.
 func classify(pair *pairing) Class {
 	switch {
 	case pair.before == nil:
 		return ClassAdded
 	case pair.after == nil:
 		return ClassRemoved
-	case pair.before.symbol.ID != nil && pair.after.symbol.ID != nil && pair.before.symbol.ShapeHash != pair.after.symbol.ShapeHash:
-		return ClassSignature
-	case pair.before.symbol.BodyHash != pair.after.symbol.BodyHash:
-		return ClassBody
-	case pair.before.file.path != pair.after.file.path:
-		return ClassMoved
 	}
-	return ""
+	before, after := pair.before.symbol, pair.after.symbol
+	identified := before.ID != nil && after.ID != nil
+	return changedClass(identified && before.PublicHash != after.PublicHash, identified && before.PrivateHash != after.PrivateHash,
+		before.ContentHash != after.ContentHash, pair.before.file.path != pair.after.file.path)
 }
 
 // ownerAndName reads a declaration's owner and name from its structured identifier.
@@ -142,40 +141,48 @@ func (pair *pairing) reported() *entry {
 	return pair.before
 }
 
-func (pair *pairing) visibleAs(visibility Visibility) bool {
-	if visibility == VisibilityAll {
-		return true
-	}
+func (pair *pairing) visibleAs(visibility Visibility, class Class) bool {
 	for _, side := range []*entry{pair.before, pair.after} {
-		if side != nil && side.symbol.Visibility == string(visibility) {
+		if side != nil && visibility.shows(class, side.symbol.Visibility) {
 			return true
 		}
 	}
 	return false
 }
 
-// newRow describes a pairing. Shapes are included only where they differ.
-func newRow(pair *pairing, class Class, coverage []string) (Row, error) {
+// shownShape is the shape of the layer a row of the class shows: the public shape of a signature
+// change, the private (full) shape otherwise.
+func shownShape(symbol storage.DocumentSymbol, class Class) string {
+	if class == ClassSignature {
+		return symbol.PublicShape
+	}
+	return symbol.Shape
+}
+
+// newRow describes a pairing. Shapes are included only where they differ, and a signature or structure
+// row diffs its layer's shapes.
+func newRow(pair *pairing, class Class, coverage []string, tokenizer Tokenizer) (Row, error) {
 	reported := pair.reported()
 	owner, name := ownerAndName(reported.symbol.Identifier)
 	if name == "" {
 		return Row{}, fmt.Errorf("symbol %q in %q has no name in its identifier", reported.symbol.Key, reported.file.path)
 	}
 	row := Row{Class: class, Kind: reported.symbol.Kind, Owner: owner, Name: name, Visibility: reported.symbol.Visibility, Coverage: coverage}
+	var before, after string
 	if pair.before != nil {
-		row.PathBefore = pair.before.file.path
-		if pair.after == nil || pair.before.symbol.Shape != pair.after.symbol.Shape {
-			row.ShapeBefore = pair.before.symbol.Shape
-		}
+		row.PathBefore, before = pair.before.file.path, shownShape(pair.before.symbol, class)
 	}
 	if pair.after != nil {
-		row.PathAfter = pair.after.file.path
-		if pair.before == nil || pair.before.symbol.Shape != pair.after.symbol.Shape {
-			row.ShapeAfter = pair.after.symbol.Shape
-		}
+		row.PathAfter, after = pair.after.file.path, shownShape(pair.after.symbol, class)
 	}
-	if class == ClassSignature {
-		row.ShapeDiff = DiffShapes(pair.before.symbol.Shape, pair.after.symbol.Shape)
+	if pair.before == nil || pair.after == nil || before != after {
+		row.ShapeBefore, row.ShapeAfter = before, after
+	}
+	if class == ClassSignature || class == ClassStructure {
+		if before == after && pair.before.decoded() && pair.after.decoded() {
+			return Row{}, fmt.Errorf("the %s row of %s in %q shows equal shapes on both sides of the layer whose hash differs", class, row.DisplayName(), reported.file.path)
+		}
+		row.ShapeDiff = DiffShapes(before, after, tokenizer)
 	}
 	return row, nil
 }

@@ -1,6 +1,6 @@
-// Package symboldiff compares the symbol index of two commits of one module root: which symbols
-// were added, removed, or changed in signature or body, and, from hash-verified Git blobs, how many
-// lines each symbol gained and lost. See docs/diff.md.
+// Package symboldiff compares the symbol index of two revisions of one module root: which symbols
+// were added, removed, or changed in signature, structure, or body, and, from hash-verified Git blobs
+// (or an external root's stored blobs), how many lines each symbol gained and lost. See docs/diff.md.
 package symboldiff
 
 import (
@@ -10,7 +10,7 @@ import (
 )
 
 // Visibility selects which rows a diff reports. A row is kept when the symbol's visibility on either
-// side matches.
+// side matches, except a structure row, which only internal and all report.
 type Visibility string
 
 const (
@@ -28,16 +28,48 @@ func ParseVisibility(value string) (Visibility, error) {
 	return "", fmt.Errorf("visibility %q is not one of exported, internal, or all", value)
 }
 
-// Class is how a symbol changed between the two commits.
+// shows reports whether the filter keeps a row of the class for a symbol of the given visibility. A
+// structure row changes only what code inside the symbol's visibility boundary can observe, so it is
+// shown with internal or all whatever the symbol's visibility, and never with exported.
+func (visibility Visibility) shows(class Class, symbol string) bool {
+	switch {
+	case visibility == VisibilityAll:
+		return true
+	case class == ClassStructure:
+		return visibility == VisibilityInternal
+	}
+	return symbol == string(visibility)
+}
+
+// Class is how a symbol changed between the two commits. Of a symbol on both sides, the class names the
+// outermost layer whose hash differs: signature the public layer, structure the private layer only,
+// body the content layer only.
 type Class string
 
 const (
 	ClassAdded     Class = "added"
 	ClassRemoved   Class = "removed"
 	ClassSignature Class = "signature"
+	ClassStructure Class = "structure"
 	ClassBody      Class = "body"
 	ClassMoved     Class = "moved"
 )
+
+// changedClass is the class of a symbol declared on both sides from which of its layers differ and
+// whether its defining path changed; empty when nothing did.
+func changedClass(public, private, content, moved bool) Class {
+	switch {
+	case public:
+		return ClassSignature
+	case private:
+		return ClassStructure
+	case content:
+		return ClassBody
+	case moved:
+		return ClassMoved
+	}
+	return ""
+}
 
 // Coverage markers attached to files and rows whose documents did not prove every fact.
 const (
@@ -48,7 +80,7 @@ const (
 )
 
 // NoteLayoutOnly marks a body row whose hashes are equal but whose lines changed: comments or layout.
-const NoteLayoutOnly = "comments or layout only; body_hash unchanged"
+const NoteLayoutOnly = "comments or layout only; content_hash unchanged"
 
 // Options selects the root, the two commits, and what the diff reports.
 type Options struct {
@@ -147,8 +179,9 @@ type FileDiff struct {
 	Rows       []Row      `json:"rows"`
 }
 
-// Row is one changed symbol. ShapeDiff is set for signature rows and for the added half of a
-// removed-plus-added pair (Group), where it diffs the old identity's shape against the new one.
+// Row is one changed symbol. ShapeDiff is set for signature rows, over the public shapes; for structure
+// rows, over the private shapes; and for the added half of a removed-plus-added pair (Group), where it
+// diffs the old identity's shape against the new one.
 type Row struct {
 	Class       Class      `json:"class"`
 	Kind        string     `json:"kind"`

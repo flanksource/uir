@@ -95,7 +95,7 @@ var _ = Describe("commit-to-commit diff", func() {
 			Expect(money.row("Scale", ClassSignature)).To(Equal(Row{
 				Class: ClassSignature, Kind: "func", Name: "Scale", Visibility: "exported",
 				ShapeBefore: "func Scale(a Amount, factor int) Amount", ShapeAfter: "func Scale(a Amount, by int) Amount",
-				ShapeDiff:  DiffShapes("func Scale(a Amount, factor int) Amount", "func Scale(a Amount, by int) Amount"),
+				ShapeDiff:  DiffShapes("func Scale(a Amount, factor int) Amount", "func Scale(a Amount, by int) Amount", TokenizerGo),
 				PathBefore: "money/money.go", PathAfter: "money/money.go", Lines: &LineCount{Added: 2, Removed: 2},
 			}))
 			Expect(money.row("Scale", ClassSignature).ShapeDiff[0].Tokens).To(Equal(tokens("equal", "func Scale(a Amount, ", "delete", "factor", "equal", " int) Amount")))
@@ -103,7 +103,7 @@ var _ = Describe("commit-to-commit diff", func() {
 			removed, added := money.row("Half", ClassRemoved), money.row("Half", ClassAdded)
 			Expect([]string{removed.Group, added.Group, added.ShapeBefore, added.ShapeAfter}).To(Equal([]string{"Half", "Half", "func Half(a Amount) Amount", "func Half(a *Amount) Amount"}))
 			Expect(removed.ShapeDiff).To(BeNil())
-			Expect(added.ShapeDiff).To(Equal(DiffShapes("func Half(a Amount) Amount", "func Half(a *Amount) Amount")))
+			Expect(added.ShapeDiff).To(Equal(DiffShapes("func Half(a Amount) Amount", "func Half(a *Amount) Amount", TokenizerGo)))
 			Expect(money.row("Add", ClassBody).Note).To(Equal(NoteLayoutOnly))
 			Expect(all.file("book/count.go").row("Count", ClassMoved)).To(Equal(Row{
 				Class: ClassMoved, Kind: "func", Name: "Count", Visibility: "exported",

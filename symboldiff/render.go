@@ -16,7 +16,7 @@ const (
 
 var classStyles = map[Class]string{
 	ClassAdded: "text-green-600", ClassRemoved: "text-red-600", ClassSignature: "text-yellow-600",
-	ClassBody: "text-blue-600", ClassMoved: "text-cyan-600",
+	ClassStructure: "text-orange-600", ClassBody: "text-blue-600", ClassMoved: "text-cyan-600",
 }
 
 func (count *LineCount) String() string {

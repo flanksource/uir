@@ -24,7 +24,9 @@ func (side selectedSide) info() Side {
 
 // Diff compares two commits of one root: the newest clean snapshot of each (or the explicit
 // overrides), their changed files, symbols classified by identity from symbol deltas, and with Stat
-// the line counts of every symbol from hash-verified Git blobs.
+// the line counts of every symbol from hash-verified Git blobs. An external root's revisions are the
+// producer's published revisions: each selects its newest import or historical snapshot, and line
+// counts come from the blobs the publication stored.
 func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, error) {
 	visibility, err := ParseVisibility(string(options.Visibility))
 	if err != nil {
@@ -45,6 +47,9 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 			return Result{}, err
 		}
 	}
+	if options.AutoIndex && scope.external {
+		return Result{}, scope.errExternal("its revisions cannot be indexed from Git; republish a missing revision with uir import")
+	}
 	before, after, err := selectSides(ctx, database, scope, options)
 	if err != nil {
 		return Result{}, err
@@ -57,11 +62,11 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	var attribution *lineAttribution
 	var manifests []FileDiff
 	if options.Stat {
-		if attribution, manifests, err = statLines(ctx, scope, files, pairings, before, after, &result); err != nil {
+		if attribution, manifests, err = statLines(ctx, database, scope, files, pairings, [2]selectedSide{before, after}, &result); err != nil {
 			return Result{}, err
 		}
 	}
-	rows, err := buildRows(pairings, attribution, markers, visibility)
+	rows, err := buildRows(pairings, attribution, markers, visibility, scope.tokenizer())
 	if err != nil {
 		return Result{}, err
 	}
@@ -153,16 +158,20 @@ func compareSnapshots(ctx context.Context, database *gorm.DB, sides [2]selectedS
 }
 
 // statLines locates both commits' checkouts, attributes lines, and compares the manifests. A missing
-// checkout fails every file's line counts, and the result says why.
-func statLines(ctx context.Context, scope rootScope, files []changedFile, pairings []*pairing, before, after selectedSide, result *Result) (*lineAttribution, []FileDiff, error) {
-	sources := [2]blobSource{newBlobSource(ctx, scope, before.commit), newBlobSource(ctx, scope, after.commit)}
+// checkout fails every file's line counts, and the result says why. An external root's bytes are its
+// stored blobs, and it has no manifests.
+func statLines(ctx context.Context, database *gorm.DB, scope rootScope, files []changedFile, pairings []*pairing, sides [2]selectedSide, result *Result) (*lineAttribution, []FileDiff, error) {
+	sources := [2]blobSource{newBlobSource(ctx, database, scope, sides[0].commit), newBlobSource(ctx, database, scope, sides[1].commit)}
 	result.From.Checkout, result.To.Checkout = sources[0].checkout, sources[1].checkout
 	attribution := attributeLines(ctx, files, pairings, sources[0], sources[1])
 	if err := errors.Join(sources[0].err, sources[1].err); err != nil {
 		result.LinesError = err.Error()
 		return &attribution, nil, nil
 	}
-	manifests, err := compareManifests(ctx, sources, [2]storage.ModuleSnapshot{before.snapshot, after.snapshot})
+	if scope.external {
+		return &attribution, nil, nil
+	}
+	manifests, err := compareManifests(ctx, sources, [2]storage.ModuleSnapshot{sides[0].snapshot, sides[1].snapshot})
 	return &attribution, manifests, err
 }
 
@@ -209,11 +218,11 @@ type reportedRow struct {
 	visible bool
 }
 
-var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2, ClassBody: 3, ClassMoved: 4}
+var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2, ClassStructure: 3, ClassBody: 4, ClassMoved: 5}
 
 // buildRows turns changed pairings into rows. With line counts, an unchanged pairing whose lines
 // differ (comments or layout inside the extent) is a body row saying so.
-func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, visibility Visibility) ([]reportedRow, error) {
+func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, visibility Visibility, tokenizer Tokenizer) ([]reportedRow, error) {
 	var rows []reportedRow
 	for _, pair := range pairings {
 		class, note := pair.class, ""
@@ -229,18 +238,18 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 			}
 			class, note = ClassBody, NoteLayoutOnly
 		}
-		row, err := newRow(pair, class, markers.ofPairing(pair))
+		row, err := newRow(pair, class, markers.ofPairing(pair), tokenizer)
 		if err != nil {
 			return nil, err
 		}
 		row.Lines, row.Note = count, note
-		reported, visible := pair.reported(), pair.visibleAs(visibility)
+		reported, visible := pair.reported(), pair.visibleAs(visibility, class)
 		if visible && !pair.shapesRead() {
 			return nil, fmt.Errorf("the %s row of %s in %q shows a shape whose document was not read", pair.class, row.DisplayName(), reported.file.path)
 		}
 		rows = append(rows, reportedRow{row: row, pair: pair, path: reported.file.path, pkg: reported.file.active.Source.PackagePath, visible: visible})
 	}
-	groupRetypedPairs(rows)
+	groupRetypedPairs(rows, tokenizer)
 	sort.SliceStable(rows, func(i, j int) bool {
 		left, right := rows[i], rows[j]
 		if left.path != right.path {
@@ -257,7 +266,7 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 // groupRetypedPairs groups a parameter-type change: exactly one removed and one added canonical
 // symbol of the same package, kind, owner, and name. The added row carries the old shape and the
 // shape diff, so the change reads as one signature edit.
-func groupRetypedPairs(rows []reportedRow) {
+func groupRetypedPairs(rows []reportedRow, tokenizer Tokenizer) {
 	type groupKey struct{ pkg, kind, owner, name string }
 	removed, added := map[groupKey][]int{}, map[groupKey][]int{}
 	for index, row := range rows {
@@ -276,6 +285,6 @@ func groupRetypedPairs(rows []reportedRow) {
 		old, current := &rows[removedRows[0]].row, &rows[added[key][0]].row
 		old.Group, current.Group = old.DisplayName(), old.DisplayName()
 		current.ShapeBefore = old.ShapeBefore
-		current.ShapeDiff = DiffShapes(old.ShapeBefore, current.ShapeAfter)
+		current.ShapeDiff = DiffShapes(old.ShapeBefore, current.ShapeAfter, tokenizer)
 	}
 }

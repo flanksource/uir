@@ -37,14 +37,9 @@ func (sites *definitionSites) class(before, after storage.EffectiveSymbol) Class
 		return ClassAdded
 	case len(sites.files[1]) == 0:
 		return ClassRemoved
-	case *before.ShapeFP != *after.ShapeFP:
-		return ClassSignature
-	case *before.BodyFP != *after.BodyFP:
-		return ClassBody
-	case sites.files[0][0].path != sites.files[1][0].path:
-		return ClassMoved
 	}
-	return ""
+	return changedClass(*before.PublicFP != *after.PublicFP, *before.PrivateFP != *after.PrivateFP, *before.ContentFP != *after.ContentFP,
+		sites.files[0][0].path != sites.files[1][0].path)
 }
 
 // symbolPlan classifies, from the two snapshots' effective symbols, every symbol that the changed
@@ -152,7 +147,8 @@ func (plan *symbolPlan) classify() error {
 
 // chooseReads marks the documents the output needs: every changed document for line counts; keyed
 // and excluded documents; both sides of a symbol declared more than once; and, for a visible row, the
-// new side of an added symbol, the old side of a removed one, and both sides of a signature change.
+// new side of an added symbol, the old side of a removed one, and both sides of a signature or
+// structure change.
 func (plan *symbolPlan) chooseReads(files []changedFile, visibility Visibility, stat bool) error {
 	for _, file := range files {
 		for _, document := range file.sides() {
@@ -162,14 +158,15 @@ func (plan *symbolPlan) chooseReads(files []changedFile, visibility Visibility, 
 		}
 	}
 	for handle, sites := range plan.sites {
-		visible, err := visibleHandle(handle, visibility)
+		class, single := plan.classes[handle]
+		visible, err := visibleHandle(handle, visibility, class)
 		if err != nil {
 			return err
 		}
-		class, single := plan.classes[handle]
 		read := [2]bool{!single, !single}
 		if single && visible {
-			read = [2]bool{class == ClassRemoved || class == ClassSignature, class == ClassAdded || class == ClassSignature}
+			both := class == ClassSignature || class == ClassStructure
+			read = [2]bool{class == ClassRemoved || both, class == ClassAdded || both}
 		}
 		for side := range 2 {
 			for _, document := range sites.files[side] {
@@ -182,12 +179,9 @@ func (plan *symbolPlan) chooseReads(files []changedFile, visibility Visibility, 
 	return nil
 }
 
-func visibleHandle(handle int64, visibility Visibility) (bool, error) {
-	if visibility == VisibilityAll {
-		return true, nil
-	}
+func visibleHandle(handle int64, visibility Visibility, class Class) (bool, error) {
 	fields, err := symbolhandle.Unpack(handle)
-	return fields.Visibility.String() == string(visibility), err
+	return visibility.shows(class, fields.Visibility.String()), err
 }
 
 // verifyCovered fails when a symbol whose effective state differs between the snapshots is declared
@@ -196,7 +190,7 @@ func (plan *symbolPlan) verifyCovered(keyed map[int64]bool) error {
 	for side := range 2 {
 		for handle, symbol := range plan.effective[side] {
 			other, found := plan.effective[1-side][handle]
-			if found && *other.ShapeFP == *symbol.ShapeFP && *other.BodyFP == *symbol.BodyFP {
+			if found && *other.PublicFP == *symbol.PublicFP && *other.PrivateFP == *symbol.PrivateFP && *other.ContentFP == *symbol.ContentFP {
 				continue
 			}
 			if plan.sites[handle] == nil && !keyed[handle] {
