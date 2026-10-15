@@ -1,5 +1,7 @@
 # Compact symbol handles and symbol deltas
 
+> Historical record: the `shape_hash`/`body_hash` and `shape_fp`/`body_fp` named below were superseded by the public, private, and content layers (`public_hash`, `private_hash`, `content_hash` and `public_fp`, `private_fp`, `content_fp`) described in [hashes and identities](symbol-index-storage.md#hashes-and-identities).
+
 **Status:** Landed (uncommitted on `main` as of 2026-09-27). The recommendation below was adopted: 64-bit attribute-major handles plus per-snapshot symbol deltas, as a storage surrogate next to the SHA-256 identity. The measurements in Stage 1 and Stage 2 were taken on the prototype (branch `feat/compact-symbol-handles`, worktree `../uir-compact-handles`) before it landed; where the landed code differs from the prototype, this document says so. The landed schema is described in [symbol index storage](symbol-index-storage.md) and the [storage design](../storage/README.md#compact-symbol-handles).
 
 This builds on the [symbol index design](symbol-index-storage.md) and its [benchmarks](benchmarks.md). It asks whether a structured, bit-packed symbol id could shrink the index and speed it up:

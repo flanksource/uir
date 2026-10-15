@@ -68,7 +68,7 @@
       "content_hash": "a0dbca9dbaae3c8dfa31bb3cf2f1a1ba2dfcca84197e0fea340b9dbdb9e1bfa3",
       "source": "<Rule name=\"Apply\">\n  <Call rule=\"Calc\"/>\n  <Read field=\"Policy.Amount\"/>\n  <Set field=\"Entry.Premium\" value=\"Policy.Amount\"/>\n</Rule>\n",
       "content": {
-        "version": 4,
+        "version": 5,
         "package_path": "Co/Prod/PlanA/rules",
         "symbols": [
           {
@@ -77,8 +77,10 @@
             "kind": "test.rule",
             "visibility": "exported",
             "shape": "test.rule Apply",
-            "shape_hash": "94a9545528f0e7937ab560ad87a7a1a9f6ce4e2d93d4e5f55aa39d7b6b352d00",
-            "body_hash": "bfc0851944064321db3e07df5930370429b4a6e71a113311638f952cca4432e4",
+            "public_shape": "test.rule Apply",
+            "public_hash": "32c93dd7f20ccda09e3e935e083c9536a5807d2868ace7c5a51a09b1662fdb5d",
+            "private_hash": "cce2b5b17dd1736afbe1c4abe9ce26210d4475f27bd58657591c3e6f9f9ffa02",
+            "content_hash": "bfc0851944064321db3e07df5930370429b4a6e71a113311638f952cca4432e4",
             "name": [
               1,
               13,
@@ -174,7 +176,7 @@
       "content_hash": "0e429448efa230d9d7e257c07e5939bec1597e577e636b4af65610f216269f44",
       "source": "<Screen name=\"Entry\">\n  <Field name=\"Premium\"/>\n</Screen>\n",
       "content": {
-        "version": 4,
+        "version": 5,
         "package_path": "Co/Prod/PlanA/screens",
         "symbols": [
           {
@@ -183,8 +185,10 @@
             "kind": "test.screen",
             "visibility": "exported",
             "shape": "test.screen Entry",
-            "shape_hash": "bd3b55283605c3817d7fc7992b9a38a140b1778ecc2357e81969a8c49011834b",
-            "body_hash": "9e47795e4d559f614a0eaa31c7c8bc2efc7739c166a7aaa0eff30eda12b83054",
+            "public_shape": "test.screen Entry",
+            "public_hash": "20cb1e2839a5d41f5e5080a34be39ec20cff543d02fc7ce92cec1f37f7de9ab0",
+            "private_hash": "c3bd0dcd1aa1e80a6693fbe109c3e32837a232855fda101bd314dbd197a31e27",
+            "content_hash": "9e47795e4d559f614a0eaa31c7c8bc2efc7739c166a7aaa0eff30eda12b83054",
             "name": [
               1,
               15,
@@ -219,8 +223,10 @@
             "kind": "field",
             "visibility": "exported",
             "shape": "field Premium",
-            "shape_hash": "00611246c98e5f8e7993ec8c7cbec495519d3c5a3b9cae195fa5b8cc79236069",
-            "body_hash": "40041713e5a51666b42ed228dd4a564b3c2f0982b1caab95c28067d42f36ee89",
+            "public_shape": "field Premium",
+            "public_hash": "deed5a6941b6092a839fb122d54f821d4c5845b174b1a03421693895f1bc836f",
+            "private_hash": "b81bb88476100a5bdc1d5327b95047e1760bf3836411b08ae786b0ec014674aa",
+            "content_hash": "40041713e5a51666b42ed228dd4a564b3c2f0982b1caab95c28067d42f36ee89",
             "name": [
               2,
               16,

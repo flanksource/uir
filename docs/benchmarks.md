@@ -1,5 +1,7 @@
 # Symbol index benchmarks
 
+> Historical record: the `shape_hash` and `body_hash` named below were superseded by the `public_hash`, `private_hash`, and `content_hash` layers described in [hashes and identities](symbol-index-storage.md#hashes-and-identities).
+
 Step 8 of [the symbol index design](symbol-index-storage.md): wall time, row counts and database size on two real workspaces, the plans of the posting intersection and the base-chain CTE on both engines, the one optimization this step implemented, and a finding about document size.
 
 ## Setup

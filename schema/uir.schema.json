@@ -3024,6 +3024,10 @@
         "sourceCode": {
           "$ref": "#/$defs/SourceCode"
         },
+        "sqlType": {
+          "description": "SQLType is the dialect type verbatim when the field is a SQL routine's parameter or return value, e.g. \"numeric(10,2)\".",
+          "type": "string"
+        },
         "type": {
           "description": "The type, class, table, API group the node belongs to",
           "type": "string"
@@ -3379,15 +3383,12 @@
             "$ref": "#/$defs/Comment"
           }
         },
+        "definition": {
+          "description": "Definition is the lowered body of a view: the query that produces its columns. Rewriting it without changing the columns is a content change.",
+          "$ref": "#/$defs/BlockStmt"
+        },
         "description": {
           "type": "string"
-        },
-        "extends": {
-          "description": "Triggers and other rules defined against the table.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ASTRecord"
-          }
         },
         "field": {
           "type": "string"
@@ -3443,7 +3444,7 @@
           "$ref": "#/$defs/RecordType"
         },
         "rowCount": {
-          "description": "RowCount is the catalogue's estimate, nil when it was not asked for.",
+          "description": "RowCount is the catalogue's estimate, nil when it was not asked for. It is a statistic, so no fingerprint layer reads it.",
           "type": "integer"
         },
         "signature": {
@@ -3452,6 +3453,13 @@
         },
         "sourceCode": {
           "$ref": "#/$defs/SourceCode"
+        },
+        "triggers": {
+          "description": "Triggers defined against the table. Each carries its event and timing in Properties under TriggerEventProperty and TriggerTimingProperty, and its lowered body in Body.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MethodNode"
+          }
         },
         "type": {
           "description": "The type, class, table, API group the node belongs to",

@@ -354,8 +354,9 @@ export function SymbolDeltas() {
         { name: 'symbol_id', type: 'bigint', pk: true, fk: true },
         { name: 'root_ordinal', type: 'integer', fk: true },
         { name: 'operation', type: 'set | delete' },
-        { name: 'shape_fp', type: 'bigint? · set only' },
-        { name: 'body_fp', type: 'bigint? · set only' },
+        { name: 'public_fp', type: 'bigint? · set only' },
+        { name: 'private_fp', type: 'bigint? · set only' },
+        { name: 'content_fp', type: 'bigint? · set only' },
       ]} indexes={['(symbol_id, snapshot_ordinal)']} />
       <Entity id={id('snapshot-ref3')} title="snapshots" detail="Snapshot reference" fields={[
         { name: 'id', type: 'uuid', pk: true },
