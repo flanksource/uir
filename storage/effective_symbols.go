@@ -8,23 +8,24 @@ import (
 	"gorm.io/gorm"
 )
 
-// EffectiveSymbol is one symbol a snapshot defines, with the fingerprints of its declaration.
+// EffectiveSymbol is one symbol a snapshot defines, with the layered fingerprints of its declaration.
 type EffectiveSymbol struct {
-	Handle  int64
-	ShapeFP *int64
-	BodyFP  *int64
+	Handle    int64
+	PublicFP  *int64
+	PrivateFP *int64
+	ContentFP *int64
 }
 
 // effectiveSymbolsSQL keeps the first symbol delta per handle along the base chain (newest link first)
 // and drops tombstones, as effectiveDeltasSQL does for paths. The walk columns come on every row.
 var effectiveSymbolsSQL = baseChainSQL + fmt.Sprintf(`,
 ranked AS (
-  SELECT d.symbol_handle, d.operation, d.shape_fp, d.body_fp,
+  SELECT d.symbol_handle, d.operation, d.public_fp, d.private_fp, d.content_fp,
          ROW_NUMBER() OVER (PARTITION BY d.symbol_handle ORDER BY c.depth) AS handle_rank
   FROM %[1]s d JOIN chain c ON c.ordinal = d.snapshot_ordinal
 )
 SELECT t.depth AS tail_depth, t.base_id AS tail_base_id, r.root_count,
-       e.symbol_handle, e.shape_fp, e.body_fp
+       e.symbol_handle, e.public_fp, e.private_fp, e.content_fp
 FROM tail t CROSS JOIN roots r LEFT JOIN ranked e ON e.handle_rank = 1 AND e.operation = 'set'
 ORDER BY e.symbol_handle`, SymbolDelta{}.TableName())
 
@@ -33,8 +34,9 @@ type effectiveSymbolRow struct {
 	TailBaseID   *uuid.UUID
 	RootCount    int
 	SymbolHandle *int64
-	ShapeFP      *int64 `gorm:"column:shape_fp"`
-	BodyFP       *int64 `gorm:"column:body_fp"`
+	PublicFP     *int64 `gorm:"column:public_fp"`
+	PrivateFP    *int64 `gorm:"column:private_fp"`
+	ContentFP    *int64 `gorm:"column:content_fp"`
 }
 
 // EffectiveSymbols is a snapshot's defined-symbol set, sorted by handle: one recursive query over
@@ -59,10 +61,10 @@ func EffectiveSymbols(ctx context.Context, database *gorm.DB, snapshotID uuid.UU
 		if row.SymbolHandle == nil {
 			continue
 		}
-		if row.ShapeFP == nil || row.BodyFP == nil {
+		if row.PublicFP == nil || row.PrivateFP == nil || row.ContentFP == nil {
 			return nil, fmt.Errorf("symbol delta for handle %d in snapshot %s chain is a set without fingerprints", *row.SymbolHandle, snapshotID)
 		}
-		symbols = append(symbols, EffectiveSymbol{Handle: *row.SymbolHandle, ShapeFP: row.ShapeFP, BodyFP: row.BodyFP})
+		symbols = append(symbols, EffectiveSymbol{Handle: *row.SymbolHandle, PublicFP: row.PublicFP, PrivateFP: row.PrivateFP, ContentFP: row.ContentFP})
 	}
 	return symbols, nil
 }

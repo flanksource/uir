@@ -11,7 +11,7 @@ import (
 )
 
 // DocumentFormatVersion is the version of DocumentContent written to documents.content.
-const DocumentFormatVersion = 4
+const DocumentFormatVersion = 5
 
 // Range is [start_line, start_utf16_column, end_line, end_utf16_column], one-based.
 type Range [4]int
@@ -23,17 +23,20 @@ type ByteSpan [2]int
 // Excluded states why an excluded document holds no facts.
 type DocumentContent struct {
 	Relationships []DocumentRelationship `json:"relationships,omitempty"`
-	Version     int                  `json:"version"`
-	PackagePath string               `json:"package_path"`
-	Symbols     []DocumentSymbol     `json:"symbols"`
-	Occurrences []DocumentOccurrence `json:"occurrences"`
-	Diagnostics []DocumentDiagnostic `json:"diagnostics"`
-	Excluded    string               `json:"excluded,omitempty"`
+	Version       int                    `json:"version"`
+	PackagePath   string                 `json:"package_path"`
+	Symbols       []DocumentSymbol       `json:"symbols"`
+	Occurrences   []DocumentOccurrence   `json:"occurrences"`
+	Diagnostics   []DocumentDiagnostic   `json:"diagnostics"`
+	Excluded      string                 `json:"excluded,omitempty"`
 }
 
 // DocumentSymbol is one declared symbol. Identifier through Field carry the explorer and query
 // projection; a typed-only declaration (a variable, constant, interface method, or field of a literal
-// struct) has an identifier but no child slot or payload, and the explorer does not list it.
+// struct) has an identifier but no child slot or payload, and the explorer does not list it. Shape is the
+// private shape text (the full declared structure) and PublicShape the part a consumer outside the
+// symbol's visibility boundary observes; PublicHash, PrivateHash, and ContentHash are the three layered
+// hashes (docs/symbol-index-storage.md#hashes-and-identities).
 type DocumentSymbol struct {
 	Props        map[string]any `json:"props,omitempty"`
 	ID           *string        `json:"id"`
@@ -41,9 +44,11 @@ type DocumentSymbol struct {
 	Kind         string         `json:"kind"`
 	Visibility   string         `json:"visibility"`
 	Shape        string         `json:"shape"`
+	PublicShape  string         `json:"public_shape,omitempty"`
 	TypeForm     string         `json:"type_form,omitempty"`
-	ShapeHash    string         `json:"shape_hash,omitempty"`
-	BodyHash     string         `json:"body_hash"`
+	PublicHash   string         `json:"public_hash,omitempty"`
+	PrivateHash  string         `json:"private_hash,omitempty"`
+	ContentHash  string         `json:"content_hash"`
 	Name         Range          `json:"name"`
 	NameBytes    ByteSpan       `json:"name_bytes"`
 	Extent       Range          `json:"extent"`
@@ -61,6 +66,23 @@ type DocumentSymbol struct {
 
 // Explorable reports whether the symbol carries the explorer and nodes projection.
 func (symbol DocumentSymbol) Explorable() bool { return symbol.ChildSlot != "" }
+
+// Fingerprints are the symbol's three layered hashes as the fingerprints a symbol delta stores. Only a
+// declaration with a canonical id has public and private hashes, so any other is an error.
+func (symbol DocumentSymbol) Fingerprints() (SymbolFingerprints, error) {
+	var fingerprints SymbolFingerprints
+	for _, layer := range []struct {
+		name, hash string
+		into       *int64
+	}{{"public", symbol.PublicHash, &fingerprints.Public}, {"private", symbol.PrivateHash, &fingerprints.Private}, {"content", symbol.ContentHash, &fingerprints.Content}} {
+		value, err := SymbolFingerprint(layer.hash)
+		if err != nil {
+			return SymbolFingerprints{}, fmt.Errorf("%s %s fingerprint: %w", symbol.Key, layer.name, err)
+		}
+		*layer.into = value
+	}
+	return fingerprints, nil
+}
 
 // IsCall reports whether the occurrence is a call carrying the call locator.
 func (occurrence DocumentOccurrence) IsCall() bool {
@@ -171,8 +193,9 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 
 func validateSyntaxContent(content DocumentContent, kinds symbolhandle.Kinds) error {
 	for index, symbol := range content.Symbols {
-		if symbol.ID != nil || symbol.ShapeHash != "" || len(symbol.Implements) > 0 || len(symbol.Embeds) > 0 || symbol.TypeForm != "" {
-			return fmt.Errorf("symbol %d (%s): a syntax symbol has no id, shape_hash, or implements", index, symbol.Key)
+		if symbol.ID != nil || symbol.PublicHash != "" || symbol.PrivateHash != "" || symbol.PublicShape != "" ||
+			len(symbol.Implements) > 0 || len(symbol.Embeds) > 0 || symbol.TypeForm != "" {
+			return fmt.Errorf("symbol %d (%s): a syntax symbol has no id, public_hash, private_hash, public_shape, or implements", index, symbol.Key)
 		}
 	}
 	keys, err := validateSymbolEntries(content.Symbols, kinds)
@@ -183,7 +206,7 @@ func validateSyntaxContent(content DocumentContent, kinds symbolhandle.Kinds) er
 }
 
 // validateSymbolEntries checks what every symbol entry shares: key, a registered kind, visibility,
-// shape, body hash, ranges, and extents sorted by start and overlapping only by nesting. It returns the
+// shape, content hash, ranges, and extents sorted by start and overlapping only by nesting. It returns the
 // keys.
 func validateSymbolEntries(symbols []DocumentSymbol, kinds symbolhandle.Kinds) (map[string]bool, error) {
 	keys := make(map[string]bool, len(symbols))
@@ -198,8 +221,8 @@ func validateSymbolEntries(symbols []DocumentSymbol, kinds symbolhandle.Kinds) (
 			return nil, fmt.Errorf("%s: key does not match identifier key %q", subject, symbol.Identifier.IdentityKey())
 		case !visibilities[symbol.Visibility]:
 			return nil, fmt.Errorf("%s: invalid visibility %q", subject, symbol.Visibility)
-		case len(symbol.BodyHash) != 64 || symbol.Shape == "":
-			return nil, fmt.Errorf("%s: shape and a 64-character body_hash are required", subject)
+		case len(symbol.ContentHash) != 64 || symbol.Shape == "":
+			return nil, fmt.Errorf("%s: shape and a 64-character content_hash are required", subject)
 		}
 		for _, err := range []error{validRange(symbol.Name), validRange(symbol.Extent), validSpan(symbol.NameBytes), validSpan(symbol.ExtentBytes)} {
 			if err != nil {

@@ -20,10 +20,10 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl migrations/11_history_prunes.hcl migrations/12_domain_catalog.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl migrations/11_history_prunes.hcl migrations/12_domain_catalog.hcl migrations/13_layered_fingerprints.hcl
 var migrations embed.FS
 
-// UirDB opens the database, discards a pre-handle or H64a index, applies the schema, seeds the builtin
+// UirDB opens the database, discards a pre-handle, H64a, or two-layer index, applies the schema, seeds the builtin
 // symbol kinds, records the handle layout, and then discards the uir_-prefixed legacy tables. The
 // layout cutover must precede migration, which cannot reconcile the current schema onto those tables.
 func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {

@@ -28,17 +28,20 @@ const (
 	generationPreHandle
 	// generationH64a has compact handles in the H64a layout and no symbol_layout row.
 	generationH64a
-	// generationCurrent records symbolhandle.Layout.
+	// generationTwoLayer records symbolhandle.Layout, but its symbol deltas carry one shape and one
+	// body fingerprint (shape_fp, body_fp) instead of the public, private, and content layers.
+	generationTwoLayer
+	// generationCurrent records symbolhandle.Layout and has layered symbol fingerprints.
 	generationCurrent
 )
 
 // generationNames name a discarded generation in errors and in the cutover warning.
-var generationNames = map[indexGeneration]string{generationPreHandle: "pre-handle", generationH64a: "H64a"}
+var generationNames = map[indexGeneration]string{generationPreHandle: "pre-handle", generationH64a: "H64a", generationTwoLayer: "two-layer fingerprint"}
 
 // indexTables lists, child tables first, every index table a cutover discards. Their rows are not
 // migrated; `uir reindex` rebuilds them. A table a generation never had is skipped, so the pre-handle
-// generation (04–06 before ordinals and handles) and H64a (handles packed with 3 kind bits) share the
-// list. The registration tables, modules, locations, and primary_locations, keep their rows, and so do
+// generation (04–06 before ordinals and handles), H64a (handles packed with 3 kind bits), and the
+// two-layer fingerprint generation (symbol deltas with shape_fp and body_fp) share the list. The registration tables, modules, locations, and primary_locations, keep their rows, and so do
 // task_runs and symbol_kinds, which describe no handle.
 var indexTables = []string{
 	"symbol_deltas", "symbol_postings", "snapshot_dependencies", "package_coverage", "documents", "symbols", "symbol_packages",
@@ -46,13 +49,16 @@ var indexTables = []string{
 }
 
 // generationSQLiteSQL and generationPostgresSQL report whether modules exists, whether it has its
-// ordinal column, and whether symbol_layout exists. Each reads only the catalog, so opening a current
-// or empty database adds this one statement and one read of the layout row.
+// ordinal column, whether symbol_layout exists, and whether symbol_deltas still has the two-layer
+// shape_fp column. Each reads only the catalog, so opening a current or empty database adds this one
+// statement and one read of the layout row.
 var (
 	generationSQLiteSQL = fmt.Sprintf(`SELECT
   EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '%[1]s') AS has_modules,
   EXISTS (SELECT 1 FROM pragma_table_info('%[1]s') WHERE name = 'ordinal') AS has_ordinal,
-  EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '%[2]s') AS has_layout`, ModuleRoot{}.TableName(), SymbolLayout{}.TableName())
+  EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '%[2]s') AS has_layout,
+  EXISTS (SELECT 1 FROM pragma_table_info('%[3]s') WHERE name = 'shape_fp') AS has_shape_fingerprint`,
+		ModuleRoot{}.TableName(), SymbolLayout{}.TableName(), SymbolDelta{}.TableName())
 	generationPostgresSQL = fmt.Sprintf(`SELECT
   EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = @schema AND c.relname = '%[1]s' AND c.relkind IN ('r', 'p')) AS has_modules,
@@ -60,7 +66,11 @@ var (
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = @schema AND c.relname = '%[1]s' AND a.attname = 'ordinal' AND NOT a.attisdropped) AS has_ordinal,
   EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = @schema AND c.relname = '%[2]s' AND c.relkind IN ('r', 'p')) AS has_layout`, ModuleRoot{}.TableName(), SymbolLayout{}.TableName())
+    WHERE n.nspname = @schema AND c.relname = '%[2]s' AND c.relkind IN ('r', 'p')) AS has_layout,
+  EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = @schema AND c.relname = '%[3]s' AND a.attname = 'shape_fp' AND NOT a.attisdropped) AS has_shape_fingerprint`,
+		ModuleRoot{}.TableName(), SymbolLayout{}.TableName(), SymbolDelta{}.TableName())
 )
 
 // detectGeneration classifies the database's index. A recorded layout other than symbolhandle.Layout
@@ -70,6 +80,7 @@ func detectGeneration(ctx context.Context, database *gorm.DB, schema string) (in
 		HasModules bool `gorm:"column:has_modules"`
 		HasOrdinal bool `gorm:"column:has_ordinal"`
 		HasLayout  bool `gorm:"column:has_layout"`
+		HasShapeFP bool `gorm:"column:has_shape_fingerprint"`
 	}
 	query := database.WithContext(ctx).Raw(generationSQLiteSQL)
 	if database.Name() != "sqlite" {
@@ -95,6 +106,8 @@ func detectGeneration(ctx context.Context, database *gorm.DB, schema string) (in
 		return generationH64a, nil
 	case layouts[0] != symbolhandle.Layout:
 		return 0, fmt.Errorf("database records symbol handle layout %q; this uir writes %q", layouts[0], symbolhandle.Layout)
+	case catalog.HasShapeFP:
+		return generationTwoLayer, nil
 	}
 	return generationCurrent, nil
 }
@@ -128,9 +141,10 @@ var sqliteModulesSQL = []string{
 	"ALTER TABLE `modules_with_ordinal` RENAME TO `modules`",
 }
 
-// discardStaleGeneration drops a pre-handle or H64a index in one transaction, and numbers the
-// registered roots of a pre-handle one. It runs before migration, because the current schema cannot be
-// reconciled onto those tables without rewriting their rows, and their handles mean nothing in H64b. A
+// discardStaleGeneration drops a pre-handle, H64a, or two-layer fingerprint index in one transaction,
+// and numbers the registered roots of a pre-handle one. It runs before migration, because the current
+// schema cannot be reconciled onto those tables without rewriting their rows: their handles mean
+// nothing in H64b, or their documents and deltas carry no public and private layers. A
 // discarded table that an unmanaged table references refuses the whole cutover: SQLite is checked
 // explicitly, and PostgreSQL refuses the DROP of a table another object depends on.
 func discardStaleGeneration(ctx context.Context, database *gorm.DB, schema string) error {

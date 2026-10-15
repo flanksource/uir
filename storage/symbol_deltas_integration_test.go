@@ -11,8 +11,11 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+// setSymbol records a set whose private fingerprint is the shape plus a constant, so the three layers differ.
 func setSymbol(snapshot storage.ModuleSnapshot, handle, shape, body int64) storage.SymbolDelta {
-	return storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: handle, Operation: storage.SourceSet, ShapeFP: &shape, BodyFP: &body}
+	private := shape + 100
+	return storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: handle, Operation: storage.SourceSet,
+		PublicFP: &shape, PrivateFP: &private, ContentFP: &body}
 }
 
 func deleteSymbol(snapshot storage.ModuleSnapshot, handle int64) storage.SymbolDelta {
@@ -20,7 +23,8 @@ func deleteSymbol(snapshot storage.ModuleSnapshot, handle int64) storage.SymbolD
 }
 
 func effective(handle, shape, body int64) storage.EffectiveSymbol {
-	return storage.EffectiveSymbol{Handle: handle, ShapeFP: &shape, BodyFP: &body}
+	private := shape + 100
+	return storage.EffectiveSymbol{Handle: handle, PublicFP: &shape, PrivateFP: &private, ContentFP: &body}
 }
 
 var _ = Describe("effective symbols", func() {
@@ -81,10 +85,11 @@ var _ = Describe("effective symbols", func() {
 			Expect(err).ToNot(HaveOccurred())
 			snapshot := publishedSnapshot(fixture.location, nil, "initial", 0, fixture.now)
 			createAll(database, &snapshot)
-			shapeOnly := storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: rows[0].Handle, Operation: storage.SourceSet, ShapeFP: new(int64)}
-			Expect(database.Create(&shapeOnly).Error).To(HaveOccurred(), "a set carries both fingerprints")
+			withoutContent := storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: rows[0].Handle, Operation: storage.SourceSet,
+				PublicFP: new(int64), PrivateFP: new(int64)}
+			Expect(database.Create(&withoutContent).Error).To(HaveOccurred(), "a set carries all three fingerprints")
 			tombstone := deleteSymbol(snapshot, rows[0].Handle)
-			tombstone.BodyFP = new(int64)
+			tombstone.ContentFP = new(int64)
 			Expect(database.Create(&tombstone).Error).To(HaveOccurred(), "a delete carries neither")
 			unknownSnapshot := deleteSymbol(snapshot, rows[0].Handle)
 			unknownSnapshot.SnapshotOrdinal = snapshot.Ordinal + 1

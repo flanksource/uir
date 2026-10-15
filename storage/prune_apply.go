@@ -90,7 +90,7 @@ func createRebasedDeltas(ctx context.Context, tx *gorm.DB, root ModuleRoot, reba
 	for _, symbol := range rebased.symbols {
 		symbols = append(symbols, SymbolDelta{
 			SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: root.Ordinal, SymbolHandle: symbol.Handle,
-			Operation: SourceSet, ShapeFP: symbol.ShapeFP, BodyFP: symbol.BodyFP,
+			Operation: SourceSet, PublicFP: symbol.PublicFP, PrivateFP: symbol.PrivateFP, ContentFP: symbol.ContentFP,
 		})
 	}
 	if len(sources) > 0 {
