@@ -260,8 +260,9 @@ func declared(identity indexer.Identity, identifier uir.Identifier, nameRange st
 	id := indexer.SymbolID(identity)
 	shape := identity.Kind + " " + identity.Name
 	return storage.DocumentSymbol{
-		ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape, ShapeHash: sha256Hex(shape),
-		BodyHash: sha256Hex(identity.ModuleKey + " " + shape), Name: nameRange, NameBytes: nameBytes, Extent: extent, ExtentBytes: extentBytes,
+		ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape, PublicShape: shape,
+		PublicHash: sha256Hex("public " + shape), PrivateHash: sha256Hex("private " + shape),
+		ContentHash: sha256Hex(identity.ModuleKey + " " + shape), Name: nameRange, NameBytes: nameBytes, Extent: extent, ExtentBytes: extentBytes,
 		Identifier: identifier,
 	}
 }

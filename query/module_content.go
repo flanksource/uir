@@ -68,11 +68,11 @@ type verifiedSource struct {
 // the blobs its publication stored. Bytes with any other hash are never returned.
 func readVerifiedSource(ctx context.Context, database *gorm.DB, scope moduleScope, source verifiedSource) ([]byte, string, error) {
 	if scope.location.Kind == storage.LocationExternal {
-		content, found, err := readStoredSource(ctx, database, source)
-		if err == nil && !found {
-			err = fmt.Errorf("source %q of external snapshot %s has no stored bytes", source.path, source.snapshot)
+		content, err := storage.ReadSourceBlob(ctx, database, source.hash)
+		if err != nil {
+			return nil, "", fmt.Errorf("source %q of external snapshot %s: %w", source.path, source.snapshot, err)
 		}
-		return content, "snapshot", err
+		return content, "snapshot", nil
 	}
 	modulePath := filepath.Join(scope.location.CanonicalPath, filepath.FromSlash(source.path))
 	resolvedRoot, err := filepath.EvalSymlinks(scope.location.CanonicalPath)
@@ -84,9 +84,12 @@ func readVerifiedSource(ctx context.Context, database *gorm.DB, scope moduleScop
 		return content, "local", err
 	}
 	if scope.snapshot.WorktreeState != storage.WorktreeClean {
-		content, found, err = readStoredSource(ctx, database, source)
-		if err != nil || found {
-			return content, "snapshot", err
+		content, err = storage.ReadSourceBlob(ctx, database, source.hash)
+		if err == nil {
+			return content, "snapshot", nil
+		}
+		if !errors.Is(err, storage.ErrSourceBlobNotStored) {
+			return nil, "", fmt.Errorf("source %q of snapshot %s: %w", source.path, source.snapshot, err)
 		}
 	}
 	content, err = readGitSource(ctx, scope, resolvedRoot, modulePath, source)
@@ -111,22 +114,6 @@ func readLocalSource(resolvedRoot, modulePath string, source verifiedSource) ([]
 		return nil, false, fmt.Errorf("read source %q: %w", source.path, err)
 	}
 	return content, contentHash(content) == source.hash, nil
-}
-
-// readStoredSource reads the blob stored under the indexed hash and reports whether there is one.
-func readStoredSource(ctx context.Context, database *gorm.DB, source verifiedSource) ([]byte, bool, error) {
-	var blob storage.SourceBlob
-	err := database.WithContext(ctx).Where("content_hash = ?", source.hash).Take(&blob).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("load stored source %q: %w", source.path, err)
-	}
-	if contentHash(blob.Content) != source.hash {
-		return nil, false, fmt.Errorf("stored source %q does not match indexed content hash", source.path)
-	}
-	return blob.Content, true, nil
 }
 
 func readGitSource(ctx context.Context, scope moduleScope, resolvedRoot, modulePath string, source verifiedSource) ([]byte, error) {

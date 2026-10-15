@@ -29,11 +29,24 @@ type RecordTable struct {
 	PrimaryKey  []string           `json:"primaryKey,omitempty"`
 	Indexes     []RecordIndex      `json:"indexes,omitempty"`
 	ForeignKeys []RecordForeignKey `json:"foreignKeys,omitempty"`
-	// RowCount is the catalogue's estimate, nil when it was not asked for.
+	// RowCount is the catalogue's estimate, nil when it was not asked for. It is a
+	// statistic, so no fingerprint layer reads it.
 	RowCount *int64 `json:"rowCount,omitempty"`
-	// Triggers and other rules defined against the table.
-	Extends []ASTRecord `json:"extends,omitempty"`
+	// Definition is the lowered body of a view: the query that produces its
+	// columns. Rewriting it without changing the columns is a content change.
+	Definition *BlockStmt `json:"definition,omitempty"`
+	// Triggers defined against the table. Each carries its event and timing in
+	// Properties under TriggerEventProperty and TriggerTimingProperty, and its
+	// lowered body in Body.
+	Triggers []MethodNode `json:"triggers,omitempty"`
 }
+
+// The Properties keys a trigger's declaration is read from. Both are private
+// facts of the trigger and of its table.
+const (
+	TriggerEventProperty  = "event"
+	TriggerTimingProperty = "timing"
+)
 
 // RecordColumn is one column of a RecordTable.
 //
@@ -104,7 +117,7 @@ func (i RecordIndex) GetType() NodeType { return NodeTypeIndex }
 func (f RecordForeignKey) GetType() NodeType { return NodeTypeForeignKey }
 
 func (t RecordTable) GetChildren() []Node {
-	children := make([]Node, 0, len(t.Columns)+len(t.Indexes)+len(t.ForeignKeys)+len(t.Extends))
+	children := make([]Node, 0, len(t.Columns)+len(t.Indexes)+len(t.ForeignKeys)+len(t.Triggers))
 	for i := range t.Columns {
 		children = append(children, t.Columns[i])
 	}
@@ -114,8 +127,8 @@ func (t RecordTable) GetChildren() []Node {
 	for i := range t.ForeignKeys {
 		children = append(children, t.ForeignKeys[i])
 	}
-	for i := range t.Extends {
-		children = append(children, t.Extends[i])
+	for i := range t.Triggers {
+		children = append(children, t.Triggers[i])
 	}
 	return children
 }
@@ -174,7 +187,6 @@ func (t RecordTable) AsRecord() ASTRecord {
 		nodeBase:    t.nodeBase,
 		Description: t.Description,
 		RecordType:  t.RecordType,
-		Extends:     t.Extends,
 	}
 	record.NodeType = NodeTypeRecord
 	for _, column := range t.Columns {
@@ -207,6 +219,12 @@ func (t RecordTable) Pretty() api.Text {
 	}
 	for _, fk := range t.ForeignKeys {
 		p = p.Append("  ").Add(fk.Pretty()).NewLine()
+	}
+	for _, trigger := range t.Triggers {
+		p = p.Append("  TRIGGER ", StyleKeyword).Add(trigger.Pretty().Indent(2)).NewLine()
+	}
+	if t.Definition != nil {
+		p = p.Append("  AS ", StyleKeyword).Add(t.Definition.Pretty().Indent(2)).NewLine()
 	}
 	return p.Append("}", StylePunctuation)
 }
@@ -272,64 +290,13 @@ func (f RecordForeignKey) Pretty() api.Text {
 		Append(" ("+strings.Join(f.ReferencedColumns, ", ")+")", StylePunctuation)
 }
 
-func (t RecordTable) Hash() string {
-	h := NewHasher("table")
-	h.AddString("description", t.Description)
-	h.AddString("record_type", string(t.RecordType))
-	h.AddNodeList("columns", NodesOf(t.Columns))
-	h.AddStringSlice("primary_key", t.PrimaryKey)
-	h.AddNodeList("indexes", NodesOf(t.Indexes))
-	h.AddNodeList("foreign_keys", NodesOf(t.ForeignKeys))
-	h.AddRecords("extends", t.Extends)
-	if t.RowCount != nil {
-		h.AddInt("row_count", int(*t.RowCount))
-	}
-	return h.String()
-}
+func (t RecordTable) Hash() string { return Fingerprint(t).Hash() }
 
-func (c RecordColumn) Hash() string {
-	h := NewHasher("column")
-	h.AddString("name", c.Field)
-	h.AddString("label", c.Label)
-	h.AddString("sql_type", c.SQLType)
-	h.AddString("field_type", string(c.FieldType))
-	h.AddInt("ordinal", c.Ordinal)
-	h.AddBool("nullable", c.Nullable)
-	h.AddBool("primary_key", c.PrimaryKey)
-	h.AddBool("auto_increment", c.AutoIncrement)
-	h.AddBool("unique", c.Unique)
-	h.AddStringSlice("enum", c.Enum)
-	addIntPtr(h, "max_length", c.MaxLength)
-	addIntPtr(h, "precision", c.Precision)
-	addIntPtr(h, "scale", c.Scale)
-	h.AddTypedValue("default", c.DefaultValue)
-	return h.String()
-}
+func (c RecordColumn) Hash() string { return Fingerprint(c).Hash() }
 
-func (i RecordIndex) Hash() string {
-	h := NewHasher("index")
-	h.AddString("name", i.Field)
-	h.AddStringSlice("columns", i.Columns)
-	h.AddStringSlice("included", i.Included)
-	h.AddBool("unique", i.Unique)
-	h.AddBool("primary", i.Primary)
-	h.AddBool("clustered", i.Clustered)
-	h.AddString("index_type", i.IndexType)
-	h.AddString("condition", i.Condition)
-	return h.String()
-}
+func (i RecordIndex) Hash() string { return Fingerprint(i).Hash() }
 
-func (f RecordForeignKey) Hash() string {
-	h := NewHasher("foreignKey")
-	h.AddString("name", f.Field)
-	h.AddStringSlice("columns", f.Columns)
-	h.AddString("referenced_schema", f.ReferencedSchema)
-	h.AddString("referenced_table", f.ReferencedTable)
-	h.AddStringSlice("referenced_columns", f.ReferencedColumns)
-	h.AddString("on_delete", f.OnDelete)
-	h.AddString("on_update", f.OnUpdate)
-	return h.String()
-}
+func (f RecordForeignKey) Hash() string { return Fingerprint(f).Hash() }
 
 type TableBuilder struct {
 	node RecordTable
@@ -337,9 +304,19 @@ type TableBuilder struct {
 
 func (b *TableBuilder) Build() RecordTable { return b.node }
 
+// memberOf qualifies a member's identifier with its table, keeping the member's
+// own name and node type, so two tables' "id" columns are distinct symbols.
+func (b *TableBuilder) memberOf(member Identifier) Identifier {
+	member.Module = b.node.Module
+	member.Package = b.node.Package
+	member.Type = b.node.Type
+	return member
+}
+
 func (b *TableBuilder) WithColumns(columns ...RecordColumn) *TableBuilder {
-	b.node.Columns = append(b.node.Columns, columns...)
 	for _, c := range columns {
+		c.Identifier = b.memberOf(c.Identifier)
+		b.node.Columns = append(b.node.Columns, c)
 		if c.PrimaryKey {
 			b.node.PrimaryKey = append(b.node.PrimaryKey, c.Field)
 		}
@@ -348,12 +325,27 @@ func (b *TableBuilder) WithColumns(columns ...RecordColumn) *TableBuilder {
 }
 
 func (b *TableBuilder) WithIndexes(indexes ...RecordIndex) *TableBuilder {
-	b.node.Indexes = append(b.node.Indexes, indexes...)
+	for _, index := range indexes {
+		index.Identifier = b.memberOf(index.Identifier)
+		b.node.Indexes = append(b.node.Indexes, index)
+	}
 	return b
 }
 
 func (b *TableBuilder) WithForeignKeys(keys ...RecordForeignKey) *TableBuilder {
-	b.node.ForeignKeys = append(b.node.ForeignKeys, keys...)
+	for _, key := range keys {
+		key.Identifier = b.memberOf(key.Identifier)
+		b.node.ForeignKeys = append(b.node.ForeignKeys, key)
+	}
+	return b
+}
+
+// WithTriggers adds triggers, each a MethodNode named by Identifier.Method.
+func (b *TableBuilder) WithTriggers(triggers ...MethodNode) *TableBuilder {
+	for _, trigger := range triggers {
+		trigger.Identifier = b.memberOf(trigger.Identifier)
+		b.node.Triggers = append(b.node.Triggers, trigger)
+	}
 	return b
 }
 

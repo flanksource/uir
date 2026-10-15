@@ -8,8 +8,11 @@ import (
 
 type RecordField struct {
 	nodeBase
-	Label        string          `json:"label,omitempty"`
-	FieldType    RecordFieldType `json:"fieldType"`
+	Label     string          `json:"label,omitempty"`
+	FieldType RecordFieldType `json:"fieldType"`
+	// SQLType is the dialect type verbatim when the field is a SQL routine's
+	// parameter or return value, e.g. "numeric(10,2)".
+	SQLType      string          `json:"sqlType,omitempty"`
 	TypeRef      *TypeReference  `json:"typeRef,omitempty" gorm:"serializer:json"`
 	DefaultValue *TypedValue     `json:"defaultValue,omitempty"`
 	ReadOnly     bool            `json:"readOnly,omitempty"`

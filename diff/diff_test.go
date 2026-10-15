@@ -1,174 +1,147 @@
-package diff
+package diff_test
 
 import (
-	"testing"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/diff"
 )
 
-func TestDiffTreeDetectsExactFieldRename(t *testing.T) {
-	before := &uir.UIR{
-		Records: []uir.ASTRecord{recordWithField("User", "name", uir.RecordFieldTypeString)},
-	}
-	after := &uir.UIR{
-		Records: []uir.ASTRecord{recordWithField("User", "fullName", uir.RecordFieldTypeString)},
-	}
+var (
+	orders             = table("orders", idColumn(), totalColumn("total"), placedAtColumn()).Build()
+	ordersWithStatus   = table("orders", idColumn(), statusColumn(), totalColumn("total"), placedAtColumn()).Build()
+	ordersIDLast       = table("orders", totalColumn("total"), placedAtColumn(), idColumn()).Build()
+	ordersAmount       = table("orders", idColumn(), totalColumn("amount"), placedAtColumn()).Build()
+	ordersIndexed      = table("orders", idColumn(), totalColumn("total"), placedAtColumn()).WithIndexes(uir.NewIndex("ix_total", "total")).Build()
+	customers          = table("customers", idColumn()).Build()
+	ordersIDOnly       = table("orders", idColumn()).Build()
+	purchasesIDOnly    = table("purchases", idColumn()).Build()
+	ordersAudited      = table("orders", idColumn()).WithTriggers(trigger("audit", "insert into audit_log select 1")).Build()
+	ordersAuditedAgain = table("orders", idColumn()).WithTriggers(trigger("audit", "insert into audit_log select 2")).Build()
+	orderTotals        = view("order_totals", "select sum(total) from orders")
+	orderTotalsAgain   = view("order_totals", "select sum(total) from orders where paid")
 
-	result := DiffTree(before, after, DefaultTreeDiffOptions())
+	ordersKey      = symbolOf(orders)
+	orderTotalsKey = symbolOf(orderTotals)
+	auditKey       = memberSymbol(ordersAudited, "audit")
+)
 
-	if !hasChange(result, ChangeRenamed) {
-		t.Fatalf("expected rename change, got %#v", result.Changes)
-	}
-	if result.Summary.Added != 0 || result.Summary.Deleted != 0 {
-		t.Fatalf("rename should not be reported as add/delete, summary=%#v changes=%#v", result.Summary, result.Changes)
-	}
-}
-
-func TestDiffTreeCanDisableExactRenameDetection(t *testing.T) {
-	before := &uir.UIR{
-		Records: []uir.ASTRecord{recordWithField("User", "name", uir.RecordFieldTypeString)},
-	}
-	after := &uir.UIR{
-		Records: []uir.ASTRecord{recordWithField("User", "fullName", uir.RecordFieldTypeString)},
-	}
-
-	result := DiffTree(before, after, TreeDiffOptions{})
-
-	if hasChange(result, ChangeRenamed) {
-		t.Fatalf("expected rename detection to be disabled, got %#v", result.Changes)
-	}
-	if result.Summary.Added == 0 || result.Summary.Deleted == 0 {
-		t.Fatalf("disabled rename detection should leave add/delete, summary=%#v changes=%#v", result.Summary, result.Changes)
-	}
-}
-
-func TestDiffNodeDetectsNestedFieldRename(t *testing.T) {
-	before := recordWithField("User", "name", uir.RecordFieldTypeString)
-	after := recordWithField("User", "fullName", uir.RecordFieldTypeString)
-
-	result := DiffNode(before, after, DefaultNodeDiffOptions())
-
-	if !hasChange(result, ChangeRenamed) {
-		t.Fatalf("expected nested field rename, got %#v", result.Changes)
-	}
-	if result.Summary.Added != 0 || result.Summary.Deleted != 0 {
-		t.Fatalf("rename should not be reported as add/delete, summary=%#v changes=%#v", result.Summary, result.Changes)
-	}
-}
-
-func TestDiffTreeDetectsExactMethodMove(t *testing.T) {
-	before := &uir.UIR{
-		Types: []uir.TypedNode{
-			typeWithMethods("Source", methodWithBody("Run", "return x")),
-			typeWithMethods("Target"),
+var _ = Describe("DiffTree", func() {
+	DescribeTable("classifies schema and code changes",
+		func(opts diff.TreeDiffOptions, before, after *uir.UIR, expected []row) {
+			Expect(rowsOf(diff.DiffTree(before, after, opts))).To(ConsistOf(expected))
 		},
-	}
-	after := &uir.UIR{
-		Types: []uir.TypedNode{
-			typeWithMethods("Source"),
-			typeWithMethods("Target", methodWithBody("Run", "return x")),
+		Entry("tables sharing a column name diff as unchanged",
+			diff.DefaultTreeDiffOptions(), schema(orders, customers), schema(orders, customers), []row{}),
+		Entry("a row-count change is no change",
+			diff.DefaultTreeDiffOptions(), schema(withRowCount(orders, 10)), schema(withRowCount(orders, 20)), []row{}),
+		Entry("a column inserted mid-table is added, the shifted columns are not moved",
+			diff.DefaultTreeDiffOptions(), schema(orders), schema(ordersWithStatus), []row{
+				{Kind: diff.ChangeAdded, Path: memberSymbol(ordersWithStatus, "status"), Symbol: memberSymbol(ordersWithStatus, "status")},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerPublic},
+			}),
+		Entry("a column reordered out of sequence is moved and the table changes privately",
+			diff.DefaultTreeDiffOptions(), schema(orders), schema(ordersIDLast), []row{
+				{Kind: diff.ChangeMoved, Path: ordersKey + ".columns", Symbol: memberSymbol(orders, "id"), Detail: "column position 1 -> 3"},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerPrivate},
+			}),
+		Entry("an added index is added and the table changes privately",
+			diff.DefaultTreeDiffOptions(), schema(orders), schema(ordersIndexed), []row{
+				{Kind: diff.ChangeAdded, Path: memberSymbol(ordersIndexed, "ix_total"), Symbol: memberSymbol(ordersIndexed, "ix_total")},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerPrivate},
+			}),
+		Entry("a rewritten view definition is a content change with statement changes",
+			diff.DefaultTreeDiffOptions(), schema(orderTotals), schema(orderTotalsAgain), []row{
+				{Kind: diff.ChangeAdded, Path: orderTotalsKey + ".definition", Detail: "statement 0"},
+				{Kind: diff.ChangeDeleted, Path: orderTotalsKey + ".definition", Detail: "statement 0"},
+				{Kind: diff.ChangeModified, Path: orderTotalsKey, Symbol: orderTotalsKey, Detail: "table attributes", Layer: uir.LayerContent},
+			}),
+		Entry("a trigger body change is a content change of the trigger",
+			diff.DefaultTreeDiffOptions(), schema(ordersAudited), schema(ordersAuditedAgain), []row{
+				{Kind: diff.ChangeAdded, Path: auditKey + ".body", Detail: "statement 0"},
+				{Kind: diff.ChangeDeleted, Path: auditKey + ".body", Detail: "statement 0"},
+				{Kind: diff.ChangeModified, Path: auditKey, Symbol: auditKey, Detail: "method attributes", Layer: uir.LayerContent},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerContent},
+			}),
+		Entry("a renamed column is renamed",
+			diff.DefaultTreeDiffOptions(), schema(orders), schema(ordersAmount), []row{
+				{Kind: diff.ChangeRenamed, Path: memberSymbol(ordersAmount, "amount"), Symbol: memberSymbol(ordersAmount, "amount")},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerPublic},
+			}),
+		Entry("a renamed table is renamed and its column moves with it",
+			diff.DefaultTreeDiffOptions(), schema(ordersIDOnly), schema(purchasesIDOnly), []row{
+				{Kind: diff.ChangeRenamed, Path: symbolOf(purchasesIDOnly), Symbol: symbolOf(purchasesIDOnly)},
+				{Kind: diff.ChangeMoved, Path: memberSymbol(purchasesIDOnly, "id"), Symbol: memberSymbol(purchasesIDOnly, "id")},
+			}),
+		Entry("a renamed record field is renamed",
+			diff.DefaultTreeDiffOptions(),
+			&uir.UIR{Records: []uir.ASTRecord{recordWithField("User", "name")}},
+			&uir.UIR{Records: []uir.ASTRecord{recordWithField("User", "fullName")}}, []row{
+				{Kind: diff.ChangeRenamed, Path: symbolOf(recordWithField("User", "fullName").Fields[0]), Symbol: symbolOf(recordWithField("User", "fullName").Fields[0])},
+				{Kind: diff.ChangeModified, Path: symbolOf(recordWithField("User", "name")), Symbol: symbolOf(recordWithField("User", "name")), Detail: "record attributes", Layer: uir.LayerPublic},
+			}),
+		Entry("a renamed record field is a delete and add with rename detection off",
+			diff.TreeDiffOptions{},
+			&uir.UIR{Records: []uir.ASTRecord{recordWithField("User", "name")}},
+			&uir.UIR{Records: []uir.ASTRecord{recordWithField("User", "fullName")}}, []row{
+				{Kind: diff.ChangeDeleted, Path: symbolOf(recordWithField("User", "name").Fields[0]), Symbol: symbolOf(recordWithField("User", "name").Fields[0])},
+				{Kind: diff.ChangeAdded, Path: symbolOf(recordWithField("User", "fullName").Fields[0]), Symbol: symbolOf(recordWithField("User", "fullName").Fields[0])},
+				{Kind: diff.ChangeModified, Path: symbolOf(recordWithField("User", "name")), Symbol: symbolOf(recordWithField("User", "name")), Detail: "record attributes", Layer: uir.LayerPublic},
+			}),
+		Entry("a method moved between types is moved",
+			diff.DefaultTreeDiffOptions(),
+			&uir.UIR{Types: []uir.TypedNode{typeWithMethods("Source", methodWithBody("Run", "return x")), typeWithMethods("Target")}},
+			&uir.UIR{Types: []uir.TypedNode{typeWithMethods("Source"), typeWithMethods("Target", methodWithBody("Run", "return x"))}}, []row{
+				{Kind: diff.ChangeMoved, Path: "method:pkg.Target:Run", Symbol: "method:pkg.Target:Run"},
+				{Kind: diff.ChangeModified, Path: symbolOf(typeWithMethods("Source")), Symbol: symbolOf(typeWithMethods("Source")), Detail: "type attributes", Layer: uir.LayerPublic},
+				{Kind: diff.ChangeModified, Path: symbolOf(typeWithMethods("Target")), Symbol: symbolOf(typeWithMethods("Target")), Detail: "type attributes", Layer: uir.LayerPublic},
+			}),
+	)
+})
+
+var _ = Describe("DiffNode", func() {
+	DescribeTable("pairs members by identity only",
+		func(opts diff.NodeDiffOptions, before, after uir.Node, expected []row) {
+			Expect(rowsOf(diff.DiffNode(before, after, opts))).To(ConsistOf(expected))
 		},
-	}
-
-	result := DiffTree(before, after, DefaultTreeDiffOptions())
-
-	if !hasChange(result, ChangeMoved) {
-		t.Fatalf("expected move change, got %#v", result.Changes)
-	}
-}
-
-func TestDiffNodeDetectsMethodMoveInList(t *testing.T) {
-	before := uir.NodeList{methodForType("Source", "Run", "return x")}
-	after := uir.NodeList{methodForType("Target", "Run", "return x")}
-
-	result := DiffNode(before, after, DefaultNodeDiffOptions())
-
-	if !hasChange(result, ChangeMoved) {
-		t.Fatalf("expected method move, got %#v", result.Changes)
-	}
-	if result.Summary.Added != 0 || result.Summary.Deleted != 0 {
-		t.Fatalf("move should not be reported as add/delete, summary=%#v changes=%#v", result.Summary, result.Changes)
-	}
-}
-
-func TestDiffNodeReportsStatementBodyChange(t *testing.T) {
-	before := methodWithBody("Run", "return x")
-	after := methodWithBody("Run", "return y")
-
-	result := DiffNode(before, after, DefaultNodeDiffOptions())
-
-	if !hasChange(result, ChangeDeleted) || !hasChange(result, ChangeAdded) {
-		t.Fatalf("expected statement add/delete from body diff, got %#v", result.Changes)
-	}
-}
-
-func TestDiffNodeCanDisableStatementBodyDiff(t *testing.T) {
-	before := methodWithBody("Run", "return x")
-	after := methodWithBody("Run", "return y")
-
-	result := DiffNode(before, after, NodeDiffOptions{Statements: false})
-
-	if hasChange(result, ChangeAdded) || hasChange(result, ChangeDeleted) {
-		t.Fatalf("expected statement add/delete to be disabled, got %#v", result.Changes)
-	}
-	if !hasChange(result, ChangeModified) {
-		t.Fatalf("expected method modification summary, got %#v", result.Changes)
-	}
-}
-
-func hasChange(result DiffResult, kind ChangeKind) bool {
-	for _, change := range result.Changes {
-		if change.Kind == kind {
-			return true
-		}
-		for _, child := range change.Changes {
-			if child.Kind == kind {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// The node structs embed unexported bases, so fixtures set the promoted fields
-// by assignment rather than through composite literal keys.
-func recordWithField(recordName, fieldName string, fieldType uir.RecordFieldType) uir.ASTRecord {
-	field := uir.RecordField{FieldType: fieldType}
-	field.Identifier = uir.Identifier{Package: "pkg", Type: recordName, Field: fieldName, NodeType: uir.NodeTypeField}
-
-	record := uir.ASTRecord{Fields: []uir.RecordField{field}}
-	record.Identifier = uir.Identifier{Package: "pkg", Type: recordName, NodeType: uir.NodeTypeRecord}
-	return record
-}
-
-func typeWithMethods(name string, methods ...uir.MethodNode) uir.TypedNode {
-	for i := range methods {
-		methods[i].Package = "pkg"
-		methods[i].Type = name
-	}
-
-	typed := uir.TypedNode{Methods: methods}
-	typed.Identifier = uir.Identifier{Package: "pkg", Type: name, NodeType: uir.NodeTypeType}
-	return typed
-}
-
-func methodForType(typeName, methodName, raw string) uir.MethodNode {
-	method := methodWithBody(methodName, raw)
-	method.Type = typeName
-	return method
-}
-
-func methodWithBody(name, raw string) uir.MethodNode {
-	method := uir.MethodNode{Body: blockWithRaw(raw)}
-	method.Identifier = uir.Identifier{Package: "pkg", Type: "Service", Method: name, NodeType: uir.NodeTypeMethod}
-	return method
-}
-
-func blockWithRaw(raw string) *uir.BlockStmt {
-	stmt := uir.RawStmt{Source: raw}
-	stmt.Type = uir.ASTStatementTypeRaw
-
-	block := &uir.BlockStmt{Children: []uir.Statement{stmt}}
-	block.Type = uir.ASTStatementTypeBlock
-	return block
-}
+		Entry("an unrelated table of the same structure is a delete and an add, not a rename",
+			diff.DefaultNodeDiffOptions(), uir.NodeList{ordersIDOnly}, uir.NodeList{customers}, []row{
+				{Kind: diff.ChangeDeleted, Path: "nodes", Symbol: symbolOf(ordersIDOnly)},
+				{Kind: diff.ChangeAdded, Path: "nodes", Symbol: symbolOf(customers)},
+			}),
+		Entry("a renamed record field is a delete and an add",
+			diff.DefaultNodeDiffOptions(), recordWithField("User", "name"), recordWithField("User", "fullName"), []row{
+				{Kind: diff.ChangeDeleted, Path: "record:pkg.User.fields", Symbol: symbolOf(recordWithField("User", "name").Fields[0])},
+				{Kind: diff.ChangeAdded, Path: "record:pkg.User.fields", Symbol: symbolOf(recordWithField("User", "fullName").Fields[0])},
+				{Kind: diff.ChangeModified, Path: "record:pkg.User", Symbol: "record:pkg.User", Detail: "record attributes", Layer: uir.LayerPublic},
+			}),
+		Entry("a column inserted mid-table is added under the table's columns",
+			diff.DefaultNodeDiffOptions(), orders, ordersWithStatus, []row{
+				{Kind: diff.ChangeAdded, Path: ordersKey + ".columns", Symbol: memberSymbol(ordersWithStatus, "status")},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerPublic},
+			}),
+		Entry("a column reordered out of sequence is moved",
+			diff.DefaultNodeDiffOptions(), orders, ordersIDLast, []row{
+				{Kind: diff.ChangeMoved, Path: ordersKey + ".columns", Symbol: memberSymbol(orders, "id"), Detail: "column position 1 -> 3"},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerPrivate},
+			}),
+		Entry("a trigger body change recurses into the trigger",
+			diff.DefaultNodeDiffOptions(), ordersAudited, ordersAuditedAgain, []row{
+				{Kind: diff.ChangeAdded, Path: auditKey + ".body", Detail: "statement 0"},
+				{Kind: diff.ChangeDeleted, Path: auditKey + ".body", Detail: "statement 0"},
+				{Kind: diff.ChangeModified, Path: auditKey, Symbol: auditKey, Detail: "method attributes", Layer: uir.LayerContent},
+				{Kind: diff.ChangeModified, Path: ordersKey, Symbol: ordersKey, Detail: "table attributes", Layer: uir.LayerContent},
+			}),
+		Entry("a method body change is a content change with statement changes",
+			diff.DefaultNodeDiffOptions(), methodWithBody("Run", "return x"), methodWithBody("Run", "return y"), []row{
+				{Kind: diff.ChangeAdded, Path: "method:pkg.Service:Run.body", Detail: "statement 0"},
+				{Kind: diff.ChangeDeleted, Path: "method:pkg.Service:Run.body", Detail: "statement 0"},
+				{Kind: diff.ChangeModified, Path: "method:pkg.Service:Run", Symbol: "method:pkg.Service:Run", Detail: "method attributes", Layer: uir.LayerContent},
+			}),
+		Entry("a method body change without statement diffing is only the content change",
+			diff.NodeDiffOptions{}, methodWithBody("Run", "return x"), methodWithBody("Run", "return y"), []row{
+				{Kind: diff.ChangeModified, Path: "method:pkg.Service:Run", Symbol: "method:pkg.Service:Run", Detail: "method attributes", Layer: uir.LayerContent},
+			}),
+	)
+})

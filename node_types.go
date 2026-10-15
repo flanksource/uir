@@ -81,7 +81,7 @@ type TypedNode struct {
 }
 
 func (t TypedNode) GetChildren() []Node {
-	var children []Node
+	children := NodesOf(t.Variables)
 	if t.Constructor != nil {
 		children = append(children, t.Constructor)
 	}
