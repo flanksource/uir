@@ -313,7 +313,5 @@ var _ = Describe("PublicationFromNodes", func() {
 		Entry("a node type with no publishable kind", func(input *NodePublication) {
 			input.Documents[0].Nodes = append(input.Documents[0].Nodes, uir.PackageNode{})
 		}, `document "public/tables.sql": node type "package" has no symbol kind PublicationFromNodes publishes`),
-		Entry("an empty document", func(input *NodePublication) { input.Documents[1].Nodes = nil },
-			`document "public/views.sql": nodes must list at least one node`),
 	)
 })

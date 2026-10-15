@@ -8,7 +8,14 @@ const GRAPH_DIRECTIONS: readonly ModuleGraphDirection[] = ["callees", "callers",
 export type ScopeRoot = Pick<ModuleRoot, "root_key" | "location" | "snapshot_id">;
 
 export type Route = {
-  view: "overview" | "explorer" | "query" | "history" | "tasks";
+  view: "overview" | "explorer" | "query" | "history" | "tasks" | "connections";
+	connection: string;
+	fromModule: string;
+	toModule: string;
+	fromCapture: string;
+	toCapture: string;
+	fromSchema: string;
+	toSchema: string;
   explorerMode: "files" | "symbols";
   module: string;
   location: string;
@@ -47,7 +54,14 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
   const params = new URLSearchParams(location.search);
   const path = location.pathname.slice(1);
   return {
-    view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : path === "history" ? "history" : path === "tasks" ? "tasks" : "overview",
+    view: path === "explorer" || path === "nodes" ? "explorer" : path === "query" ? "query" : path === "history" ? "history" : path === "tasks" ? "tasks" : path === "connections" ? "connections" : "overview",
+		connection: params.get("connection") ?? "",
+		fromModule: params.get("fromModule") ?? "",
+		toModule: params.get("toModule") ?? "",
+		fromCapture: params.get("fromCapture") ?? "",
+		toCapture: params.get("toCapture") ?? "",
+		fromSchema: params.get("fromSchema") ?? "",
+		toSchema: params.get("toSchema") ?? "",
     explorerMode: params.get("explorerMode") === "symbols" ? "symbols" : "files",
     module: params.get("module") ?? "",
     location: params.get("location") ?? "",
@@ -82,7 +96,7 @@ export function readRoute(location: Pick<Location, "pathname" | "search"> = wind
 
 export function routeURL(route: Route): string {
   const params = new URLSearchParams();
-  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch", "graphRoot", "graphExclude", "taskRun"] as const) {
+  for (const key of ["module", "location", "snapshot", "source", "node", "fileSearch", "symbolSearch", "symbolVisibility", "symbolKinds", "expression", "compareFrom", "compareTo", "logCommit", "diffVisibility", "historySearch", "graphRoot", "graphExclude", "taskRun", "connection", "fromModule", "toModule", "fromCapture", "toCapture", "fromSchema", "toSchema"] as const) {
     if (route[key]) params.set(key, route[key]);
   }
   if (route.historyGroup !== "package") params.set("historyGroup", route.historyGroup);

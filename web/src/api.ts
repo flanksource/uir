@@ -1,4 +1,5 @@
 import { parseServerTiming, type ServerTimingMetric } from "@flanksource/clicky-ui/data";
+import type { JsonSchemaObject } from "@flanksource/clicky-ui/components";
 
 export type TimedResponse<T> = { data: T; timing: ServerTimingMetric[] };
 
@@ -267,6 +268,32 @@ export type SystemInfo = {
   database_size_bytes: number;
 };
 
+export type ConnectionType = "git" | "github" | "azure_devops" | "gitlab" | "postgres" | "sql_server" | "sqlite" | "s3" | "mysql";
+export type ConnectionView = {
+  id: string;
+  name: string;
+  namespace: string;
+  type: ConnectionType;
+  url?: string;
+  username?: string;
+  password?: string;
+  certificate?: string;
+  properties?: Record<string, string>;
+  insecure_tls: boolean;
+  has_url: boolean;
+  has_username: boolean;
+  has_password: boolean;
+  has_certificate: boolean;
+  literal_credentials: boolean;
+  warnings: string[];
+};
+export type ConnectionInput = Partial<Pick<ConnectionView, "name" | "namespace" | "type" | "url" | "username" | "password" | "certificate" | "properties" | "insecure_tls">>;
+export type DatabaseModule = { id: string; connection_id: string; database_name: string; name: string; root_key: string; created_at: string };
+export type DatabaseCapture = { id: string; started_at: string; revision: string; ordinal: number };
+export type DatabaseModuleCreated = { module: DatabaseModule; capture?: ModuleIndexResult; capture_error?: string };
+export type DatabaseDiff = { summary: Record<string, number>; changes?: { kind: string; path?: string; detail?: string; changes?: unknown[] }[] };
+export type DatabaseDiffRequest = { from: string; to: string; from_schema?: string; to_schema?: string };
+
 async function requestResponse(path: string, options?: RequestInit): Promise<Response> {
   const response = await fetch(path, { headers: { Accept: "application/json", ...(options?.body ? { "Content-Type": "application/json" } : {}) }, ...options });
   if (!response.ok) {
@@ -298,6 +325,62 @@ async function timedRequest<T>(path: string, options?: RequestInit): Promise<Tim
   const header = response.headers.get("Server-Timing");
   if (!header) throw new Error(`Server-Timing header missing from ${path}`);
   return { data: await response.json() as T, timing: parseServerTiming(header) };
+}
+
+export function listConnectionSchemas(): Promise<Record<ConnectionType, JsonSchemaObject>> {
+  return request("/api/v1/connections/schema");
+}
+
+export function listConnections(): Promise<ConnectionView[]> {
+  return request("/api/v1/connections");
+}
+
+export function createConnection(input: ConnectionInput): Promise<ConnectionView> {
+  return request("/api/v1/connections", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateConnection(id: string, input: ConnectionInput): Promise<ConnectionView> {
+  return request(`/api/v1/connections/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export async function deleteConnection(id: string): Promise<void> {
+  await requestResponse(`/api/v1/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function testConnection(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/v1/connections/${encodeURIComponent(id)}/test`, { method: "POST" });
+}
+
+export function listConnectionDatabases(id: string): Promise<string[]> {
+  return request(`/api/v1/connections/${encodeURIComponent(id)}/databases`, { method: "POST" });
+}
+
+export function listDatabaseModules(): Promise<DatabaseModule[]> {
+  return request("/api/v1/database-modules");
+}
+
+export function createDatabaseModule(input: Pick<DatabaseModule, "connection_id" | "database_name" | "name">): Promise<DatabaseModuleCreated> {
+  return request("/api/v1/database-modules", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function captureDatabaseModule(id: string): Promise<ModuleIndexResult> {
+  return request(`/api/v1/database-modules/${encodeURIComponent(id)}/capture`, { method: "POST" });
+}
+
+export function listDatabaseCaptures(id: string): Promise<DatabaseCapture[]> {
+  return request(`/api/v1/database-modules/${encodeURIComponent(id)}/snapshots`);
+}
+
+export function listDatabaseSnapshotSchemas(snapshot: string): Promise<string[]> {
+  return request(`/api/v1/database-modules/snapshots/${encodeURIComponent(snapshot)}/schemas`);
+}
+
+export async function deleteDatabaseModule(id: string): Promise<void> {
+  await requestResponse(`/api/v1/database-modules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function compareDatabaseSnapshots(input: DatabaseDiffRequest): Promise<DatabaseDiff> {
+  return request("/api/v1/database-modules/diff", { method: "POST", body: JSON.stringify(input) });
 }
 
 function moduleURL(operation: string, params?: Record<string, string>): string {

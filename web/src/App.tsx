@@ -5,6 +5,7 @@ import { addModules, browseModule, listModuleHeads, listModuleLocations, listMod
 import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
 import { queryExamples, queryScope, type QueryExample } from "./query-model";
 import { QueryCommandPalette } from "./QueryCommandPalette";
+import { ConnectionsView } from "./ConnectionsView";
 import { HistoryView } from "./HistoryView";
 import { QueryView } from "./QueryView";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue, type Route } from "./route";
@@ -133,7 +134,7 @@ export function App() {
     if (route.module && !browse.data) return { items: [] };
     try { return { items: queryExamples(route.module, browse.data?.nodes ?? []) }; } catch (error) { return { items: [], error: `Cannot build query examples: ${String(error)}` }; }
   }, [browse.data, route.module]);
-  const nav = ["overview", "explorer", "query", "history", "tasks"] as const;
+  const nav = ["overview", "explorer", "query", "history", "connections", "tasks"] as const;
   const commandGroups: CommandGroup[] = [
     { id: "queries", heading: "Queries", items: examples.items.map((example) => ({ id: `query:${example.id}`, label: `${example.label} (example)`, description: example.expression, icon: commandNavigationIcons.query,
       onSelect: () => setRoute({ view: "query", expression: example.expression }) })) },
@@ -150,16 +151,17 @@ export function App() {
   ];
 
   return <><AppShell brand={<strong>UIR</strong>} contentWidth="full" contentClassName={route.view === "explorer" ? "overflow-hidden" : undefined}
-    navSections={[{ label: "Module browser", items: nav.map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) }]}
+    navSections={[{ label: "Module browser", items: nav.filter((view) => view !== "connections").map((view) => ({ key: view, label: view[0].toUpperCase() + view.slice(1), to: routeURL({ ...route, view, offset: 0 }), active: route.view === view })) },
+      { label: "Data sources", items: [{ key: "connections", label: "Connections", to: routeURL({ ...route, view: "connections" }), active: route.view === "connections" }] }]}
     search={<CommandPaletteTrigger onClick={() => setSearchOpen(true)} open={searchOpen} label="Search modules, files, symbols…" />}
     actions={<div className="flex items-center gap-2">{route.view === "explorer" && <SegmentedControl value={route.explorerMode} size="sm" aria-label="Explorer navigation" onChange={(explorerMode) => setRoute({ explorerMode })}
       options={[{ id: "files", label: "Files" }, { id: "symbols", label: "Symbols" }]} />}
-      <Combobox ariaLabel="Scope" size="sm" required allowCustomValue={false} className="w-64" value={scopeValue(route)} loading={roots.loading} onChange={selectScope} options={[
+      {route.view !== "connections" && <Combobox ariaLabel="Scope" size="sm" required allowCustomValue={false} className="w-64" value={scopeValue(route)} loading={roots.loading} onChange={selectScope} options={[
       { value: ALL_MODULES, label: "All modules", description: "Every indexed root at its checkout heads" },
       ...(roots.data ?? []).map((item) => ({ value: item.root_key, label: item.name || item.root_key, description: item.root_key, group: "Module roots", icon: commandModuleIcon() })),
-    ]} /></div>}
+    ]} />}</div>}
     sidebarFooter={<SystemDetails />}
-    bodyHeader={<span>{selectedRoot?.name || route.module || "All modules"} {route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
+    bodyHeader={<span>{route.view === "connections" ? "Connections" : selectedRoot?.name || route.module || "All modules"} {route.view !== "connections" && route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
     bodyActions={<Row><TaskManagerButton basePath={TASKS_API} kind={MODULE_INDEX_KIND} tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })}
       selectedId={route.taskRun} onSelectRun={(id) => setRoute({ taskRun: id ?? "" }, true)} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
     {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} roots={roots} heads={heads} browse={browse} locations={locations} onRoute={setRoute} onRefresh={() => setRefresh((current) => current + 1)} /></Suspense> : <PageLayout>
@@ -180,6 +182,7 @@ export function App() {
       </>}
       {route.view === "tasks" && <><Heading>Indexing tasks</Heading><TaskManager basePath={TASKS_API} kind={MODULE_INDEX_KIND}
         selectedId={route.taskRun} onSelectRun={(id) => setRoute({ taskRun: id ?? "" }, true)} /></>}
+      {route.view === "connections" && <ConnectionsView route={route} onRoute={setRoute} refresh={refresh} onRefresh={() => setRefresh((current) => current + 1)} />}
       {route.view === "query" && <>
         <QueryView route={route} query={query} examples={examples.items} onRoute={setRoute} />
         <ErrorMessage error={browse.error ?? examples.error} />

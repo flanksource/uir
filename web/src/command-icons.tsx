@@ -1,4 +1,4 @@
-import { UiCode2, UiHistory, UiLayoutDashboard, UiListTree, UiTable } from "@flanksource/clicky-ui/icons";
+import { UiCode2, UiDatabase, UiHistory, UiLayoutDashboard, UiListTree, UiTable } from "@flanksource/clicky-ui/icons";
 import { FileTypeIcon, FolderTypeIcon } from "./file-icons";
 import { SymbolIcon } from "./symbol-icons";
 
@@ -8,6 +8,7 @@ export const commandNavigationIcons = {
   query: UiCode2,
   history: UiHistory,
   tasks: UiTable,
+  connections: UiDatabase,
 } as const;
 
 export function commandModuleIcon() {

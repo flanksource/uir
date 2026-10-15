@@ -1,7 +1,6 @@
 package indexer
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -26,9 +25,6 @@ type nodeScope struct {
 // nodeDocument walks a document's nodes into symbols, generates its source, and returns the published
 // document and its symbols, owners first.
 func nodeDocument(moduleKey string, document NodeDocument, declared declaredNodes) (PublishedDocument, []PublishedSymbol, error) {
-	if len(document.Nodes) == 0 {
-		return PublishedDocument{}, nil, errors.New("nodes must list at least one node")
-	}
 	scope := nodeScope{moduleKey: moduleKey, packagePath: document.PackagePath, declared: declared}
 	ordinals := map[string]int{}
 	var writer sourceWriter

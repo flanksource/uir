@@ -118,7 +118,7 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		Title: "UIR", Version: "1", StructuredErrorResponses: true,
 		Executor: &rpc.ExecutorConfig{Enabled: true, SkipPreRun: true, PathPrefix: "/api/v1"},
 	}
-	server := rpc.NewSwaggerServer(config, root, &rpc.OpenAPIConfig{Title: "UIR", Version: "1"})
+	server := rpc.NewSwaggerServer(config, root, &rpc.OpenAPIConfig{Title: "UIR", Version: "1", Extensions: []func(*rpc.OpenAPISpec){connectionOpenAPI}})
 	if server.Executor() == nil {
 		return nil, errors.New("register UIR Clicky operations: executor is unavailable")
 	}
@@ -130,6 +130,7 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 	router := route.NewRouter(mux)
 	server.RegisterRoutes(router)
 	task.RegisterHandlersWithSource(router, "/api/v1", taskRuns)
+	registerConnectionRoutes(mux, runtime)
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" {
 			http.NotFound(w, r)
@@ -138,8 +139,8 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		ui.ServeHTTP(w, r)
 	}))
 	return rpchttp.TimingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/modules/refactor/") && !localRefactorRequest(r) {
-			http.Error(w, "explorer refactors require local, same-origin access", http.StatusForbidden)
+		if (strings.HasPrefix(r.URL.Path, "/api/v1/modules/refactor/") || strings.HasPrefix(r.URL.Path, "/api/v1/connections") || strings.HasPrefix(r.URL.Path, "/api/v1/database-modules")) && !localRefactorRequest(r) {
+			http.Error(w, "connection management and explorer refactors require local, same-origin access", http.StatusForbidden)
 			return
 		}
 		ctx := context.WithValue(r.Context(), runtimeContextKey{}, runtime)
