@@ -63,8 +63,8 @@ func document(identity indexer.Identity) indexer.PublishedDocument {
 	bytes := storage.ByteSpan{0, len(identity.Name)}
 	return indexer.PublishedDocument{PathKey: identity.Name + ".txt", PackagePath: root, ContentHash: hash(text), Source: text,
 		Content: storage.DocumentContent{Version: storage.DocumentFormatVersion, PackagePath: root,
-			Symbols: []storage.DocumentSymbol{{ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape,
-				ShapeHash: hash(shape), BodyHash: hash(text), Name: span, NameBytes: bytes, Extent: span, ExtentBytes: bytes, Identifier: identifier}},
+			Symbols: []storage.DocumentSymbol{{ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape, PublicShape: shape,
+				PublicHash: hash("public " + shape), PrivateHash: hash("private " + shape), ContentHash: hash(text), Name: span, NameBytes: bytes, Extent: span, ExtentBytes: bytes, Identifier: identifier}},
 			Occurrences: []storage.DocumentOccurrence{}, Diagnostics: []storage.DocumentDiagnostic{},
 		},
 	}

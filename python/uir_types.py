@@ -196,6 +196,8 @@ class RecordField:
     name: str = ""
     label: str = ""
     field_type: RecordFieldType = RecordFieldType.STRING
+    # The dialect type verbatim for a SQL routine's parameter or return value.
+    sql_type: str = ""
     default_value: Optional[TypedValue] = None
     read_only: bool = False
     write_only: bool = False
