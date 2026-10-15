@@ -1,6 +1,6 @@
 # Diffing two commits
 
-`uir diff` lists the symbols a module root added, removed, and changed between two Git commits, and with `--stat` how many lines each symbol gained and lost. It reads the two commits' snapshots from the index and, for line counts only, the two commits' blobs from a registered checkout. With `--auto-index`, missing clean snapshots are generated from temporary Git worktrees without changing the registered checkout or its head snapshot. The design is in [symbol-index-storage.md](symbol-index-storage.md#diffing-two-commits); the implementation is the `symboldiff` package.
+`uir diff` lists the symbols a module root added, removed, and changed between two Git commits, or between two revisions an external producer published with `uir import` (see [external roots](#external-roots)), and with `--stat` how many lines each symbol gained and lost. It reads the two commits' snapshots from the index and, for line counts only, the two commits' blobs from a registered checkout. With `--auto-index`, missing clean snapshots are generated from temporary Git worktrees without changing the registered checkout or its head snapshot. The design is in [symbol-index-storage.md](symbol-index-storage.md#diffing-two-commits); the implementation is the `symboldiff` package.
 
 ## Command
 
@@ -12,8 +12,8 @@ uir diff <from>..<to> --root <module> [--visibility exported|internal|all] [--st
 | --- | --- |
 | `<from>..<to>` | Two revisions. A full 40- or 64-character commit hash is used as is; anything else (`HEAD~1`, a branch, an abbreviated hash) is resolved with `git rev-parse --verify <rev>^{commit}` in the root's registered checkouts, primary first. Both sides must be non-empty. |
 | `--root` | The module path (`root_key`) to diff. Required. |
-| `--visibility` | `exported` (default), `internal`, or `all`. A row is kept when the symbol's visibility on either side matches. |
-| `--stat` | Adds per-package, per-file, and per-symbol `+added -removed` counts. Requires readable Git blobs. |
+| `--visibility` | `exported` (default), `internal`, or `all`. A row is kept when the symbol's visibility on either side matches, except a `structure` row, which `internal` and `all` keep whatever the symbol's visibility and `exported` never does. |
+| `--stat` | Adds per-package, per-file, and per-symbol `+added -removed` counts. Requires readable Git blobs, or for an external root the source blobs its publications stored. |
 | `--snapshot-from`, `--snapshot-to` | Use this snapshot for that side instead of the newest clean one. The snapshot must belong to the root and record that commit as its revision. |
 | `--auto-index` | Select or generate a clean snapshot for each commit under the current standalone module configuration. Historical indexing reads the commit's `go.mod` and `go.sum` with `GOWORK=off`, so the current workspace cannot replace dependencies or hide the historical module. It leaves registered checkout files and heads untouched. |
 | `--include-tests` | Include Go test symbols in snapshots generated with `--auto-index`. Without it, test files are excluded, matching the usual indexing default. |
@@ -44,28 +44,37 @@ Both snapshots' active documents are derived with `storage.ActiveDocuments` with
 
 ## Classification
 
-Symbols are matched across the whole diff by identity, so a symbol that moved to another file is still one symbol. For changed `indexed` documents outside a package that is `syntax` or `partial` on either side, classification reads no document: both snapshots' effective symbols (`storage.EffectiveSymbols`, from the [symbol deltas](symbol-index-storage.md#symbol-membership-which-symbols-a-snapshot-defines)) give each defined symbol's shape and body fingerprints, the first eight bytes of its `shape_hash` and `body_hash`, and the `definition` postings of each side's changed documents say which of them define each symbol. A symbol declared once on each side it appears on is classified by its handle:
+Symbols are matched across the whole diff by identity, so a symbol that moved to another file is still one symbol. For changed `indexed` documents outside a package that is `syntax` or `partial` on either side, classification reads no document: both snapshots' effective symbols (`storage.EffectiveSymbols`, from the [symbol deltas](symbol-index-storage.md#symbol-membership-which-symbols-a-snapshot-defines)) give each defined symbol's public, private, and content fingerprints, the first eight bytes of its `public_hash`, `private_hash`, and `content_hash`, and the `definition` postings of each side's changed documents say which of them define each symbol. A symbol declared once on each side it appears on is classified by its handle:
 
 | Class | Condition |
 | --- | --- |
 | `added` | only on the new side |
 | `removed` | only on the old side |
-| `signature` | both sides, shape fingerprint differs |
-| `body` | shape fingerprint equal, body fingerprint differs |
+| `signature` | both sides, public fingerprint differs |
+| `structure` | public fingerprint equal, private fingerprint differs |
+| `body` | public and private fingerprints equal, content fingerprint differs |
 | `moved` | fingerprints equal, defining `path_key` differs |
 | omitted | fingerprints and path equal |
 
-A package with a `syntax` or `partial` changed document on either side, and a symbol declared more than once on a side (every `func init` of a package shares one canonical id), are matched over their decoded documents instead: first by canonical symbol id, then by `key` wherever one side has no id (a `syntax` document, or an unproven declaration in a `partial` document). Those rows use the same classes, compare the full `shape_hash` and `body_hash`, and treat `shape_hash` as not comparable when either side has no id.
+The three layers nest (a public change is always a private change), so the class names the outermost layer that changed, and a row carries no separate layer field:
+
+| Class | Layer | What changed | Go example | SQL example |
+| --- | --- | --- | --- | --- |
+| `signature` | public | what code outside the symbol's visibility boundary observes | a parameter, a result, an exported field | a table's output columns, a procedure's parameters |
+| `structure` | private | the full declared structure only | an unexported field added to an exported struct that already had one (the public shape's `opaque` line stands for every unexported field) | an index, a foreign key, a default |
+| `body` | content | the implementation only | a function body | a view definition, a procedure or trigger body |
+
+A package with a `syntax` or `partial` changed document on either side, and a symbol declared more than once on a side (every `func init` of a package shares one canonical id), are matched over their decoded documents instead: first by canonical symbol id, then by `key` wherever one side has no id (a `syntax` document, or an unproven declaration in a `partial` document). Those rows use the same classes and compare the full `public_hash`, `private_hash`, and `content_hash`; when either side has no id the public and private hashes are not comparable, so such a pair can only be `body` or `moved`.
 
 ### Which documents are read
 
-A document is decoded only when the output needs it. With `--stat`, every changed document is read, for its symbol extents. Otherwise the diff reads the documents of `syntax`, `partial`, and `excluded` files, both sides of a symbol declared more than once, and, for a row the visibility filter shows, the new side of an `added` symbol, the old side of a `removed` one, and both sides of a `signature` change, whose shapes the row prints. A shown `body` or `moved` row prints no shape and is named from the `symbols` row and its owners' names. The chosen documents' content is loaded in one batched read (`storage.DocumentContents`).
+A document is decoded only when the output needs it. With `--stat`, every changed document is read, for its symbol extents. Otherwise the diff reads the documents of `syntax`, `partial`, and `excluded` files, both sides of a symbol declared more than once, and, for a row the visibility filter shows, the new side of an `added` symbol, the old side of a `removed` one, and both sides of a `signature` or `structure` change, whose shapes the row prints. A shown `body` or `moved` row prints no shape and is named from the `symbols` row and its owners' names. The chosen documents' content is loaded in one batched read (`storage.DocumentContents`).
 
-`body_hash` digests the declaration's tokens without comments or whitespace, so a comment added inside a function leaves every hash equal. With `--stat`, such a symbol whose lines did change is reported as `body` with the note `comments or layout only; body_hash unchanged`, so the file's totals stay the sum of its rows. Without `--stat` it is not reported.
+`content_hash` digests the declaration's tokens without comments or whitespace, so a comment added inside a function leaves every hash equal. With `--stat`, such a symbol whose lines did change is reported as `body` with the note `comments or layout only; content_hash unchanged`, so the file's totals stay the sum of its rows. Without `--stat` it is not reported.
 
 A rename is `removed` plus `added`, because the name is part of the identity. A parameter-type change is too, because parameter types are part of the identity; when exactly one removed and one added symbol share package, kind, owner, and name, both rows carry the same `group`, and the added row carries the old shape and a shape diff against it, so the change reads as one signature edit. The output never guesses other pairings.
 
-A row has `kind`, `owner`, `name`, `visibility`, both shapes when they differ, both paths, line counts with `--stat`, and coverage markers. It is reported under its new file, or under its old file when removed; a `moved` row names the file it came from. Nested symbols (struct fields, interface methods) are rows of their own, but their lines belong to the outermost declaration that contains them, so they carry no line counts.
+A row has `kind`, `owner`, `name`, `visibility`, both shapes when they differ, both paths, line counts with `--stat`, and coverage markers. A `signature` row's shapes are the public shapes (`public_shape`), so a Go struct shows its exported fields and `opaque`; every other row's shapes are the private (full) shapes (`shape`). It is reported under its new file, or under its old file when removed; a `moved` row names the file it came from. Nested symbols (struct fields, interface methods) are rows of their own, but their lines belong to the outermost declaration that contains them, so they carry no line counts.
 
 ### Coverage
 
@@ -105,11 +114,27 @@ example.org/ledger/money  +11 -6
     (file scope)                   +2 -0
 ```
 
-A signature row shows a shape diff. The two canonical shapes are line-diffed with Myers, treating lines that differ only in whitespace (gofmt realignment) as equal. A removed line immediately followed by an added line that shares at least one token is a replaced pair, and is token-diffed with `go/scanner` tokens; short equal runs between edits are folded into the edit so a changed tail reads as one replacement.
+A `signature` row shows a shape diff of the public shapes, and a `structure` row one of the private shapes. The two canonical shapes are line-diffed with Myers, treating lines that differ only in whitespace (gofmt realignment) as equal. Within a changed hunk, the i-th removed line and the i-th added line are a replaced pair when they share at least one non-blank token, and are token-diffed; short equal runs between edits are folded into the edit so a changed tail reads as one replacement. A Go root's lines are split into `go/scanner` tokens (tokenizer `go`). An external root's shapes are not Go, so they are split language-neutrally (tokenizer `text`): identifiers (which may start with `@`, `#`, or `$`), numbers, quoted strings and identifiers (`'…'`, `"…"`, `` `…` ``), and runs of any other non-space characters.
 
-The plain form (non-TTY output, `String()`) prints unchanged lines with two spaces, removed lines with `- `, and added lines with `+ `. The rich forms print a replaced pair as one `~ ` line with token marks, through clicky `api.Text`: removed tokens red and struck through, added tokens green and bold. In a terminal that is ANSI; in markdown `func Scale(a Amount, ~~factor~~**by** int) Amount` (wrapped in colour spans unless colour is off); in HTML clicky's `<s>` and `<strong>`. JSON carries the structured form: `shape_diff` is a list of lines `{op, text, paired, tokens: [{op, text}]}`, where `op` is `equal`, `delete`, or `insert`, and a paired delete line's tokens are its equal and deleted runs while the paired insert line's are its equal and inserted runs.
+The plain form (non-TTY output, `String()`) prints unchanged lines with two spaces, removed lines with `- `, and added lines with `+ `. The rich forms print a replaced pair as one `~ ` line with token marks, through clicky `api.Text`: removed tokens red and struck through, added tokens green and bold. In a terminal that is ANSI; in markdown `func Scale(a Amount, ~~factor~~**by** int) Amount` (wrapped in colour spans unless colour is off); in HTML clicky's `<s>` and `<strong>`. JSON carries the structured form: `shape_diff` is a list of lines `{op, text, paired, tokenizer, tokens: [{op, text}]}`, where `op` is `equal`, `delete`, or `insert`, a paired line names the `tokenizer` (`go` or `text`) its tokens were split by, and a paired delete line's tokens are its equal and deleted runs while the paired insert line's are its equal and inserted runs.
 
-`--visibility exported` hides internal rows but never their lines: a file with hidden rows says `(N hidden rows)` and its totals still include them, so the totals never silently add up to less than the file's diff.
+`--visibility exported` hides internal rows and `structure` rows but never their lines: a file with hidden rows says `(N hidden rows)` and its totals still include them, so the totals never silently add up to less than the file's diff.
+
+## External roots
+
+A root whose locations are all `external` (a non-Go producer's URI, registered by `uir import` / `indexer.Publish`) is diffed without Git. A root is either Go or external; one that mixes the two location kinds fails.
+
+- **Revisions.** `<from>` and `<to>` are taken literally, never resolved with `git rev-parse`: each must equal a published snapshot's `revision` or `git_commit` (for example `schema-v1..schema-v2`). An unknown revision fails, naming it and the root.
+- **Snapshots.** Each side is the newest `import` or `historical` snapshot of its revision. A producer's snapshot has no worktree to be clean or dirty, so its `worktree_state` (`unknown`) is not checked. `--snapshot-from` and `--snapshot-to` work as for a Go root.
+- **Line counts.** With `--stat`, each file's bytes are the source blob its publication stored under the source revision's `content_hash`, verified against that hash; `checkout` is empty. An external root has no manifests.
+- **Shape diffs** use the language-neutral tokenizer.
+- **No Git history.** `--auto-index` fails, because a producer's revision cannot be indexed from Git: republish it with `uir import`. `uir history` and `uir history show` fail too; compare two published revisions with `uir diff`.
+
+```sh
+uir import schema-v1.json
+uir import schema-v2.json
+uir diff schema-v1..schema-v2 --root example.org/schema --visibility all --stat
+```
 
 ## Failure modes
 
@@ -117,6 +142,8 @@ The plain form (non-TTY output, `String()`) prints unchanged lines with two spac
 | --- | --- |
 | Empty revision, malformed range, unknown `--visibility`, unknown root | The command fails. |
 | Revision that no checkout resolves | The command fails; pass the full commit hash. |
+| External root: revision with no published snapshot, `--auto-index`, or `uir history` | The command fails, naming the revision or saying the root is published by an external producer. |
+| External root: no stored blob under a source's content hash, or a blob whose hash differs (`--stat`) | That file's `lines_error` says so; its rows are still reported. |
 | Commit with no snapshot, or only dirty snapshots | The command fails and names the commit or the dirty snapshots. |
 | Override snapshot of another root or another revision | The command fails. |
 | Different configuration hashes | The command fails. |
