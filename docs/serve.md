@@ -30,10 +30,24 @@ The browser uses these Clicky routes:
 | `POST /api/v1/modules/import` | Publish a [non-Go producer's root](module-indexing.md#publishing-from-a-non-go-producer) with the publication object as the body's `publication` field. Answers synchronously with the `ModuleResult` (`root_key`, `location`, `snapshot_id`, `head_version`, `files`, `parsed_files`, `reused_files`, `unchanged`); a publication refused before anything is written is a 400 `invalid_publication`. |
 | `POST /api/v1/modules/refactor/preview` and `POST /api/v1/modules/refactor/apply` | Preview a gopatch rename or move, then apply the reviewed diff. |
 
-URL-encode module paths, checkout paths, and source paths in requests. `/openapi.json` describes the generated API. The removed `/api/v1/project`, `/api/v1/snapshot`, `/api/v1/root`, `/api/v1/source`, and `/api/v1/node` routes are not compatibility aliases.
+URL-encode module paths, checkout paths, and source paths in requests. `/api/openapi.json` describes the generated API, including the connection routes below. The removed `/api/v1/project`, `/api/v1/snapshot`, `/api/v1/root`, `/api/v1/source`, and `/api/v1/node` routes are not compatibility aliases.
 
 The content route first verifies that the requested path belongs to the selected snapshot and cannot escape its module location. If the current local file has the saved SHA-256 hash, it returns those bytes. Otherwise, dirty and non-Git snapshots read their stored source blob; clean snapshots can read the pinned Git blob. An imported snapshot's location is a producer URI, not a checkout, so its sources are only the blobs its publication stored. Every source is hash-verified. If no source matches, the route returns an error instead of displaying current bytes as historical content. No remote repository is fetched automatically.
 
 Explorer Rename and Move require a current, fully indexed local checkout and a gopatch executable. `serve --gopatch-bin` defaults to the Go bin directory; set it to an absolute path when gopatch is installed elsewhere. Symbol renames pass this server's UIR DSN to gopatch, which checks current indexed references in the module and its consumers. Preview sends `snapshot`, `source`, optional `node`, `action`, and either `new-name` or module-relative `destination`; Apply sends the same fields plus `preview-hash`. Apply rejects a changed diff, then reindexes affected registered checkouts. The preview includes changes to workspace and configured consumer modules. The refactor routes accept only local, same-origin requests.
 
 Opening an older database discards its legacy project tables. Back it up first if the old project history matters; no browser path imports it. The [storage design](../storage/README.md) documents the cutover and multi-root behavior.
+
+## Connections and database captures
+
+Open `/connections` on the local server to save and test Git, GitHub, Azure DevOps, GitLab, PostgreSQL, SQL Server, SQLite, S3, or MySQL connections. The editor renders each commons-db provider schema with Clicky's `JsonSchemaForm`. A connection can be reused by several database modules. Literal credentials are accepted with a warning; secret references such as `op://` are also accepted. Saved literal passwords and credential-bearing URLs are masked in API responses, and leaving a masked field blank while editing preserves its stored value.
+
+For a local SQLite source, create a saved connection through the browser or the API:
+
+```sh
+curl -sS -X POST http://localhost:8080/api/v1/connections -H 'Content-Type: application/json' -d '{"name":"Local catalogue","type":"sqlite","url":".tmp/catalog.db"}'
+```
+
+Test the saved connection, then choose it in **Add a database**. PostgreSQL, SQL Server, MySQL, and SQLite connections can back database modules; Git, hosted source control, and S3 connections can be saved and tested. An S3 connection with a bucket uses `HeadBucket`; without a bucket, testing lists buckets and requires `ListAllMyBuckets` permission. Adding a database module takes its first read-only schema capture. **Capture schema** takes later captures manually. Captures store catalogue metadata, not table rows. A same-module comparison covers every schema; a cross-module comparison requires one schema from each capture and matches objects by exact name and SQL type. MySQL currently contributes relation and column names and types; comparisons involving MySQL omit metadata that its inspector does not capture.
+
+The local, same-origin API provides `GET/POST /api/v1/connections`, `GET/PUT/DELETE /api/v1/connections/{id}`, `POST /api/v1/connections/{id}/test`, and `POST /api/v1/connections/{id}/databases`. `GET /api/v1/connections/schema` supplies the nine form schemas. `GET/POST /api/v1/database-modules`, `POST /api/v1/database-modules/{id}/capture`, `GET /api/v1/database-modules/{id}/snapshots`, and `POST /api/v1/database-modules/diff` manage captures and comparisons. The OpenAPI document lists these routes and their request and response shapes.
