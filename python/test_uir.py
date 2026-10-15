@@ -111,7 +111,7 @@ def build_test_program() -> ModuleNode:
         MethodBuilder("SearchUsers")
         .with_visibility(Visibility.PUBLIC)
         .with_param(field("query", RecordFieldType.STRING))
-        .with_param(field("maxPrice", RecordFieldType.STRING))
+        .with_param(RecordField(name="maxPrice", field_type=RecordFieldType.STRING, sql_type="numeric(10,2)"))
         .with_return(field("users", RecordFieldType.ARRAY))
         .with_return(field("error", RecordFieldType.OBJECT))
         .with_statement(
