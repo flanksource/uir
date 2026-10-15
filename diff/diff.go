@@ -69,6 +69,7 @@ type DiffChange struct {
 	Kind    ChangeKind   `json:"kind"`
 	Path    string       `json:"path,omitempty"`
 	Detail  string       `json:"detail,omitempty"`
+	Layer   uir.Layer    `json:"layer,omitempty"`
 	Before  *DiffNodeRef `json:"before,omitempty"`
 	After   *DiffNodeRef `json:"after,omitempty"`
 	Changes []DiffChange `json:"changes,omitempty"`
@@ -120,11 +121,24 @@ func (r *DiffResult) merge(other DiffResult) {
 	}
 }
 
+// DiffNode compares two nodes, pairing the members of each container by
+// identity. It never pairs two different symbols: renames and moves are
+// DiffTree's to classify.
 func DiffNode(before, after uir.Node, opts NodeDiffOptions) DiffResult {
-	return diffNode(before, after, opts, true)
+	return differ{opts: opts, walkMembers: true}.node(before, after)
 }
 
-func diffNode(before, after uir.Node, opts NodeDiffOptions, reportIdentity bool) DiffResult {
+// differ is one diff's configuration. walkMembers is set by DiffNode, which
+// recurses into a container's members and reports identity changes itself;
+// DiffTree clears it because it flattens every member into an entry of its own
+// and classifies identity from its matching, so walking members there would
+// report each member change twice.
+type differ struct {
+	opts        NodeDiffOptions
+	walkMembers bool
+}
+
+func (d differ) node(before, after uir.Node) DiffResult {
 	var result DiffResult
 	switch {
 	case before == nil && after == nil:
@@ -151,82 +165,119 @@ func diffNode(before, after uir.Node, opts NodeDiffOptions, reportIdentity bool)
 	if before.Hash() == after.Hash() && diffIdentity(before) == diffIdentity(after) {
 		return result
 	}
-	if reportIdentity {
+	if d.walkMembers {
 		result.addIdentityChange(before, after)
 	}
+	result.merge(d.contents(deref(before), deref(after)))
+	return result
+}
 
+// contents diffs two nodes of the same NodeType: their members, their bodies
+// and, last, the node itself.
+func (d differ) contents(before, after uir.Node) DiffResult {
+	path := nodePath(after) + "."
+	var result DiffResult
+	detail := "attributes"
 	switch b := before.(type) {
 	case uir.MethodNode:
-		if a, ok := after.(uir.MethodNode); ok {
-			result.merge(diffMethodNode(b, a, opts))
-			return result
-		}
-	case *uir.MethodNode:
-		if a, ok := after.(*uir.MethodNode); ok {
-			result.merge(diffMethodNode(*b, *a, opts))
-			return result
-		}
-	case uir.ASTRecord:
-		if a, ok := after.(uir.ASTRecord); ok {
-			result.merge(diffNodeSlices(nodePath(after)+".fields", uir.NodesOf(b.Fields), uir.NodesOf(a.Fields), opts, reportIdentity))
-			result.addModifiedIfDifferent(before, after, "record attributes")
-			return result
-		}
+		return d.method(b, sameType[uir.MethodNode](before, after))
 	case uir.RecordTable:
-		if a, ok := after.(uir.RecordTable); ok {
-			path := nodePath(after)
-			result.merge(diffNodeSlices(path+".columns", uir.NodesOf(b.Columns), uir.NodesOf(a.Columns), opts, reportIdentity))
-			result.merge(diffNodeSlices(path+".indexes", uir.NodesOf(b.Indexes), uir.NodesOf(a.Indexes), opts, reportIdentity))
-			result.merge(diffNodeSlices(path+".foreignKeys", uir.NodesOf(b.ForeignKeys), uir.NodesOf(a.ForeignKeys), opts, reportIdentity))
-			result.addModifiedIfDifferent(before, after, "table attributes")
-			return result
-		}
+		return d.table(b, sameType[uir.RecordTable](before, after))
+	case uir.ASTRecord:
+		a := sameType[uir.ASTRecord](before, after)
+		result, detail = d.members(path+"fields", uir.NodesOf(b.Fields), uir.NodesOf(a.Fields)), "record attributes"
 	case uir.TypedNode:
-		if a, ok := after.(uir.TypedNode); ok {
-			result.merge(diffNodeSlices(nodePath(after)+".variables", uir.NodesOf(b.Variables), uir.NodesOf(a.Variables), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".methods", uir.NodesOf(b.Methods), uir.NodesOf(a.Methods), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".types", uir.NodesOf(b.Types), uir.NodesOf(a.Types), opts, reportIdentity))
-			result.addModifiedIfDifferent(before, after, "type attributes")
-			return result
-		}
+		result, detail = d.typed(path, b, sameType[uir.TypedNode](before, after)), "type attributes"
 	case uir.PackageNode:
-		if a, ok := after.(uir.PackageNode); ok {
-			result.merge(diffNodeSlices(nodePath(after)+".types", uir.NodesOf(b.Types), uir.NodesOf(a.Types), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".records", uir.NodesOf(b.Records), uir.NodesOf(a.Records), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".tables", uir.NodesOf(b.Tables), uir.NodesOf(a.Tables), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".endpoints", uir.NodesOf(b.Endpoints), uir.NodesOf(a.Endpoints), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".functions", uir.NodesOf(b.Functions), uir.NodesOf(a.Functions), opts, reportIdentity))
-			result.merge(diffNodeSlices(nodePath(after)+".initFunctions", uir.NodesOf(b.InitFunctions), uir.NodesOf(a.InitFunctions), opts, reportIdentity))
-			result.addModifiedIfDifferent(before, after, "package attributes")
-			return result
-		}
+		result, detail = d.pkg(path, b, sameType[uir.PackageNode](before, after)), "package attributes"
 	case uir.ModuleNode:
-		if a, ok := after.(uir.ModuleNode); ok {
-			result.merge(diffNodeSlices(nodePath(after)+".packages", uir.NodesOf(b.Packages), uir.NodesOf(a.Packages), opts, reportIdentity))
-			return result
-		}
+		a := sameType[uir.ModuleNode](before, after)
+		result, detail = d.members(path+"packages", uir.NodesOf(b.Packages), uir.NodesOf(a.Packages)), "module attributes"
 	case uir.UIR:
-		if a, ok := after.(uir.UIR); ok {
-			result.merge(diffNodeSlices("modules", uir.NodesOf(b.Modules), uir.NodesOf(a.Modules), opts, reportIdentity))
-			result.merge(diffNodeSlices("packages", uir.NodesOf(b.Packages), uir.NodesOf(a.Packages), opts, reportIdentity))
-			result.merge(diffNodeSlices("types", uir.NodesOf(b.Types), uir.NodesOf(a.Types), opts, reportIdentity))
-			result.merge(diffNodeSlices("records", uir.NodesOf(b.Records), uir.NodesOf(a.Records), opts, reportIdentity))
-			result.merge(diffNodeSlices("tables", uir.NodesOf(b.Tables), uir.NodesOf(a.Tables), opts, reportIdentity))
-			result.merge(diffNodeSlices("endpoints", uir.NodesOf(b.Endpoints), uir.NodesOf(a.Endpoints), opts, reportIdentity))
-			result.merge(diffNodeSlices("functions", uir.NodesOf(b.Functions), uir.NodesOf(a.Functions), opts, reportIdentity))
-			result.addModifiedIfDifferent(before, after, "uir attributes")
-			return result
-		}
+		result, detail = d.document(b, sameType[uir.UIR](before, after)), "uir attributes"
 	case uir.NodeList:
-		if a, ok := after.(uir.NodeList); ok {
-			result.merge(diffNodeSlices("nodes", []uir.Node(b), []uir.Node(a), opts, reportIdentity))
-			return result
-		}
+		return d.members("nodes", b, sameType[uir.NodeList](before, after))
+	default:
+		result = d.members(path+"children", diffChildren(before), diffChildren(after))
 	}
-
-	result.merge(diffNodeSlices(nodePath(after)+".children", diffChildren(before), diffChildren(after), opts, reportIdentity))
-	result.addModifiedIfDifferent(before, after, "attributes")
+	result.addModifiedIfDifferent(before, after, detail)
 	return result
+}
+
+func (d differ) typed(path string, b, a uir.TypedNode) DiffResult {
+	result := d.members(path+"variables", uir.NodesOf(b.Variables), uir.NodesOf(a.Variables))
+	result.merge(d.members(path+"methods", uir.NodesOf(b.Methods), uir.NodesOf(a.Methods)))
+	result.merge(d.members(path+"types", uir.NodesOf(b.Types), uir.NodesOf(a.Types)))
+	return result
+}
+
+func (d differ) pkg(path string, b, a uir.PackageNode) DiffResult {
+	result := d.members(path+"types", uir.NodesOf(b.Types), uir.NodesOf(a.Types))
+	result.merge(d.members(path+"records", uir.NodesOf(b.Records), uir.NodesOf(a.Records)))
+	result.merge(d.members(path+"tables", uir.NodesOf(b.Tables), uir.NodesOf(a.Tables)))
+	result.merge(d.members(path+"endpoints", uir.NodesOf(b.Endpoints), uir.NodesOf(a.Endpoints)))
+	result.merge(d.members(path+"functions", uir.NodesOf(b.Functions), uir.NodesOf(a.Functions)))
+	result.merge(d.members(path+"initFunctions", uir.NodesOf(b.InitFunctions), uir.NodesOf(a.InitFunctions)))
+	return result
+}
+
+func (d differ) document(b, a uir.UIR) DiffResult {
+	result := d.members("modules", uir.NodesOf(b.Modules), uir.NodesOf(a.Modules))
+	result.merge(d.members("packages", uir.NodesOf(b.Packages), uir.NodesOf(a.Packages)))
+	result.merge(d.members("types", uir.NodesOf(b.Types), uir.NodesOf(a.Types)))
+	result.merge(d.members("records", uir.NodesOf(b.Records), uir.NodesOf(a.Records)))
+	result.merge(d.members("tables", uir.NodesOf(b.Tables), uir.NodesOf(a.Tables)))
+	result.merge(d.members("endpoints", uir.NodesOf(b.Endpoints), uir.NodesOf(a.Endpoints)))
+	result.merge(d.members("functions", uir.NodesOf(b.Functions), uir.NodesOf(a.Functions)))
+	return result
+}
+
+// table diffs members by key, column order as moves (order is a private fact of
+// the table, not of a column), and the view definition as statements.
+func (d differ) table(b, a uir.RecordTable) DiffResult {
+	path := nodePath(a)
+	result := d.members(path+".columns", uir.NodesOf(b.Columns), uir.NodesOf(a.Columns))
+	result.merge(d.members(path+".indexes", uir.NodesOf(b.Indexes), uir.NodesOf(a.Indexes)))
+	result.merge(d.members(path+".foreignKeys", uir.NodesOf(b.ForeignKeys), uir.NodesOf(a.ForeignKeys)))
+	result.merge(d.members(path+".triggers", uir.NodesOf(b.Triggers), uir.NodesOf(a.Triggers)))
+	result.merge(reorderedColumns(path+".columns", b.Columns, a.Columns))
+	if d.opts.Statements {
+		result.merge(diffBlocks(path+".definition", b.Definition, a.Definition))
+	}
+	result.addModifiedIfDifferent(b, a, "table attributes")
+	return result
+}
+
+// deref unwraps the pointer form of a node contents switches on, so both forms
+// diff the same way.
+func deref(node uir.Node) uir.Node {
+	switch n := node.(type) {
+	case *uir.MethodNode:
+		return *n
+	case *uir.RecordTable:
+		return *n
+	case *uir.ASTRecord:
+		return *n
+	case *uir.TypedNode:
+		return *n
+	case *uir.PackageNode:
+		return *n
+	case *uir.ModuleNode:
+		return *n
+	case *uir.UIR:
+		return *n
+	}
+	return node
+}
+
+// sameType asserts after is the Go type before is; contents only runs on nodes
+// of equal NodeType, so a mismatch is two Go types claiming one NodeType.
+func sameType[T uir.Node](before, after uir.Node) T {
+	a, ok := after.(T)
+	if !ok {
+		panic(fmt.Sprintf("diff: %T and %T share node type %s", before, after, before.GetType()))
+	}
+	return a
 }
 
 func (r *DiffResult) addIdentityChange(before, after uir.Node) {
@@ -252,60 +303,40 @@ func (r *DiffResult) addModifiedIfDifferent(before, after uir.Node, detail strin
 		Before: newDiffNodeRef(before, ""),
 		After:  newDiffNodeRef(after, ""),
 		Detail: detail,
+		Layer:  changedLayer(before, after),
 	})
 }
 
-func diffMethodNode(before, after uir.MethodNode, opts NodeDiffOptions) DiffResult {
+// changedLayer is the outermost fingerprint layer that differs. A document and
+// a statement have no layers; for any other node a differing Hash with equal
+// layers is impossible, since Hash digests the layers.
+func changedLayer(before, after uir.Node) uir.Layer {
+	switch before.(type) {
+	case uir.UIR, *uir.UIR, uir.Statement:
+		return ""
+	}
+	b, a := uir.Fingerprint(before), uir.Fingerprint(after)
+	switch {
+	case b.Public != a.Public:
+		return uir.LayerPublic
+	case b.Private != a.Private:
+		return uir.LayerPrivate
+	case b.Content != a.Content:
+		return uir.LayerContent
+	}
+	panic(fmt.Sprintf("diff: %s hashes differ but no fingerprint layer does", nodePath(after)))
+}
+
+func (d differ) method(before, after uir.MethodNode) DiffResult {
 	var result DiffResult
 	if before.Hash() == after.Hash() {
 		return result
 	}
-	if opts.Statements {
+	if d.opts.Statements {
 		result.merge(diffBlocks(nodePath(after)+".body", before.Body, after.Body))
 	}
 	result.addModifiedIfDifferent(before, after, "method attributes")
 	return result
-}
-
-func diffNodeSlices(path string, before, after []uir.Node, opts NodeDiffOptions, reportIdentity bool) DiffResult {
-	var result DiffResult
-	script := myers.Diff(context.Background(), nodePair{before: before, after: after})
-	for _, r := range script.Ranges {
-		switch r.Op() {
-		case edit.Eq:
-			for i := 0; i < r.Len(); i++ {
-				result.merge(diffNode(before[r.LowA+i], after[r.LowB+i], opts, reportIdentity))
-			}
-		case edit.Del:
-			for i := r.LowA; i < r.HighA; i++ {
-				result.Add(DiffChange{Kind: ChangeDeleted, Path: path, Before: newDiffNodeRef(before[i], "")})
-			}
-		case edit.Ins:
-			for i := r.LowB; i < r.HighB; i++ {
-				result.Add(DiffChange{Kind: ChangeAdded, Path: path, After: newDiffNodeRef(after[i], "")})
-			}
-		}
-	}
-	return result
-}
-
-type nodePair struct {
-	before []uir.Node
-	after  []uir.Node
-}
-
-func (p nodePair) LenA() int { return len(p.before) }
-func (p nodePair) LenB() int { return len(p.after) }
-func (p nodePair) Equal(ai, bi int) bool {
-	a := p.before[ai]
-	b := p.after[bi]
-	if a == nil || b == nil {
-		return a == b
-	}
-	if a.GetIdentifier().SymbolKey() != "" && a.GetIdentifier().SymbolKey() == b.GetIdentifier().SymbolKey() {
-		return true
-	}
-	return a.Hash() == b.Hash()
 }
 
 func diffIdentity(node uir.Node) string {
@@ -555,7 +586,7 @@ func DiffTree(before, after *uir.UIR, opts TreeDiffOptions) DiffResult {
 				})
 			}
 		}
-		result.merge(diffNode(b.node, a.node, opts.NodeDiffOptions, false))
+		result.merge(differ{opts: opts.NodeDiffOptions}.node(b.node, a.node))
 	}
 
 	for i, entry := range beforeEntries {

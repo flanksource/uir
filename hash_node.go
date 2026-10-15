@@ -39,109 +39,28 @@ func (nl NodeList) Hash() string {
 	return h.String()
 }
 
-func (ref NodeRef) Hash() string {
-	h := NewHasher("nodeRef")
-	h.AddString("symbol", ref.SymbolKey())
-	return h.String()
-}
+// Every node registered in Nodes hashes as the digest of its three fingerprint
+// layers (fingerprint.go), so the layers are the single source of truth.
+
+func (ref NodeRef) Hash() string { return Fingerprint(ref).Hash() }
 
 func (node UIRNode) Hash() string {
 	return node.Value().Hash()
 }
 
-func (n ModuleNode) Hash() string {
-	h := NewHasher("module")
-	h.AddNodeList("packages", NodesOf(n.Packages))
-	return h.String()
-}
+func (n ModuleNode) Hash() string { return Fingerprint(n).Hash() }
 
-func (p PackageNode) Hash() string {
-	h := NewHasher("package")
-	h.AddRecordFields("variables", p.Variables)
-	h.AddTypes("types", p.Types)
-	h.AddRecords("records", p.Records)
-	h.AddEndpoints("endpoints", p.Endpoints)
-	h.AddMethods("functions", p.Functions)
-	h.AddMethods("init_functions", p.InitFunctions)
-	return h.String()
-}
+func (p PackageNode) Hash() string { return Fingerprint(p).Hash() }
 
-func (t TypedNode) Hash() string {
-	h := NewHasher("type")
-	h.AddString("visibility", string(t.Visibility))
-	h.AddRecordFields("variables", t.Variables)
-	h.AddMethods("methods", t.Methods)
-	h.AddTypes("types", t.Types)
-	if t.Constructor != nil {
-		h.AddString("constructor", t.Constructor.Hash())
-	} else {
-		h.AddString("constructor", "<nil>")
-	}
-	if t.Destructor != nil {
-		h.AddString("destructor", t.Destructor.Hash())
-	} else {
-		h.AddString("destructor", "<nil>")
-	}
-	addTypeParams(h, "type_params", t.TypeParams)
-	addTypeReferences(h, "implements", t.Implements)
-	h.AddTypeReference("extends", t.Extends)
-	h.AddBool("is_abstract", t.IsAbstract)
-	return h.String()
-}
+func (t TypedNode) Hash() string { return Fingerprint(t).Hash() }
 
-func (m MethodNode) Hash() string {
-	h := NewHasher("method")
-	h.AddString("visibility", string(m.Visibility))
-	h.AddRecordFields("params", m.Params)
-	h.AddRecordFields("returns", m.Returns)
-	addErrors(h, "errors", m.Errors)
-	if m.Body != nil {
-		h.AddString("body", m.Body.Hash())
-	} else {
-		h.AddString("body", "<nil>")
-	}
-	h.AddBool("is_async", m.IsAsync)
-	h.AddBool("is_generator", m.IsGenerator)
-	addTypeParams(h, "type_params", m.TypeParams)
-	h.AddTypeReference("return_type", m.ReturnType)
-	return h.String()
-}
+func (m MethodNode) Hash() string { return Fingerprint(m).Hash() }
 
-func (f RecordField) Hash() string {
-	h := NewHasher("field")
-	h.AddString("label", f.Label)
-	h.AddString("field_type", string(f.FieldType))
-	h.AddTypeReference("type_ref", f.TypeRef)
-	h.AddTypedValue("default_value", f.DefaultValue)
-	h.AddBool("read_only", f.ReadOnly)
-	h.AddBool("write_only", f.WriteOnly)
-	h.AddString("visibility", string(f.Visibility))
-	h.AddString("validation", hashFieldValidation(f.Validation))
-	return h.String()
-}
+func (f RecordField) Hash() string { return Fingerprint(f).Hash() }
 
-func (r ASTRecord) Hash() string {
-	h := NewHasher("record")
-	h.AddRecords("extends", r.Extends)
-	h.AddString("description", r.Description)
-	h.AddString("record_type", string(r.RecordType))
-	h.AddRecordFields("fields", r.Fields)
-	h.AddStringSlice("examples", r.Examples)
-	h.AddString("validation", hashRecordValidation(r.Validation))
-	addRecordReferences(h, "references", r.References)
-	return h.String()
-}
+func (r ASTRecord) Hash() string { return Fingerprint(r).Hash() }
 
-func (e ASTEndpoint) Hash() string {
-	h := NewHasher("endpoint")
-	h.AddString("method", string(e.Method))
-	h.AddString("endpoint_type", string(e.EndpointType))
-	h.AddString("input", e.Input.Hash())
-	h.AddString("output", e.Output.Hash())
-	h.AddStringSlice("examples", e.Examples)
-	addErrors(h, "errors", e.Errors)
-	return h.String()
-}
+func (e ASTEndpoint) Hash() string { return Fingerprint(e).Hash() }
 
 func hashScopedVariableRef(s ScopedVariableRef) string {
 	h := NewHasher("stmt.scoped_variable_ref")
@@ -263,26 +182,6 @@ func hashFieldValidation(v FieldValidation) string {
 	return h.String()
 }
 
-func hashRecordValidation(v RecordValidation) string {
-	h := NewHasher("record_validation")
-	h.AddStringSlice("unique_fields", v.UniqueFields)
-	addIntPtr(h, "min_records", v.MinRecords)
-	addIntPtr(h, "max_records", v.MaxRecords)
-	h.AddStringSlice("any_of", v.AnyOf)
-	h.AddStringSlice("one_of", v.OneOf)
-	h.AddStringSlice("all_of", v.AllOf)
-	h.AddStringSlice("none_of", v.NoneOf)
-	addExpressions(h, "expressions", v.Expressions)
-	addGeneratorHints(h, "hints", v.Hints)
-	h.AddInt("conditions.len", len(v.Conditions))
-	for i, c := range v.Conditions {
-		prefix := fmt.Sprintf("conditions.%d", i)
-		h.AddString(prefix+".condition", hashExpression(c.Condition))
-		h.AddString(prefix+".validation", hashRecordValidation(c.Validation))
-	}
-	return h.String()
-}
-
 func hashExpression(e Expression) string {
 	h := NewHasher("expression")
 	h.AddString("type", string(e.ExpressionType))
@@ -354,38 +253,6 @@ func addTypeReferences(h *Hasher, field string, refs []TypeReference) {
 	h.AddInt(field+".len", len(refs))
 	for i, ref := range refs {
 		h.AddString(fmt.Sprintf("%s.%d", field, i), hashTypeReference(ref))
-	}
-}
-
-func addTypeParams(h *Hasher, field string, params []TypeParam) {
-	h.AddInt(field+".len", len(params))
-	for i, param := range params {
-		prefix := fmt.Sprintf("%s.%d", field, i)
-		h.AddString(prefix+".name", param.Name)
-		h.AddTypeReference(prefix+".constraint", param.Constraint)
-		h.AddTypeReference(prefix+".default", param.Default)
-	}
-}
-
-func addErrors(h *Hasher, field string, errors []ASTError) {
-	h.AddInt(field+".len", len(errors))
-	for i, err := range errors {
-		prefix := fmt.Sprintf("%s.%d", field, i)
-		h.AddString(prefix+".id", err.ID.ID)
-		h.AddString(prefix+".name", err.Name)
-		h.AddString(prefix+".error_type", string(err.ErrorType))
-		h.AddString(prefix+".description", err.Description)
-		h.AddString(prefix+".code", hashTypedValue(err.Code))
-	}
-}
-
-func addRecordReferences(h *Hasher, field string, refs []RecordReference) {
-	h.AddInt(field+".len", len(refs))
-	for i, ref := range refs {
-		prefix := fmt.Sprintf("%s.%d", field, i)
-		h.AddString(prefix+".name", ref.Name)
-		h.AddString(prefix+".mapping", ref.Mapping)
-		h.AddString(prefix+".type", string(ref.RecordReferenceType))
 	}
 }
 

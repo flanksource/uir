@@ -358,8 +358,8 @@ func (n *recordTreeNode) GetChildren() []api.TreeNode {
 	return children
 }
 
-// tableTreeNode renders a table as its columns, then its indexes, then its
-// foreign keys — the order someone reads a schema in.
+// tableTreeNode renders a table as its columns, then its indexes, its foreign
+// keys, its triggers and a view's definition — the order someone reads a schema in.
 type tableTreeNode struct{ tbl uir.RecordTable }
 
 func (n *tableTreeNode) Pretty() api.Text {
@@ -378,8 +378,11 @@ func (n *tableTreeNode) GetChildren() []api.TreeNode {
 	for i := range n.tbl.ForeignKeys {
 		children = append(children, &foreignKeyTreeNode{fk: n.tbl.ForeignKeys[i]})
 	}
-	for i := range n.tbl.Extends {
-		children = append(children, &recordTreeNode{rec: n.tbl.Extends[i]})
+	for i := range n.tbl.Triggers {
+		children = append(children, &methodTreeNode{m: n.tbl.Triggers[i]})
+	}
+	if n.tbl.Definition != nil {
+		children = append(children, &definitionTreeNode{body: *n.tbl.Definition})
 	}
 	return children
 }
@@ -398,6 +401,15 @@ type foreignKeyTreeNode struct{ fk uir.RecordForeignKey }
 
 func (n *foreignKeyTreeNode) Pretty() api.Text            { return n.fk.Pretty() }
 func (n *foreignKeyTreeNode) GetChildren() []api.TreeNode { return nil }
+
+// definitionTreeNode is a view's lowered definition, collapsed like a method body.
+type definitionTreeNode struct{ body uir.BlockStmt }
+
+func (n *definitionTreeNode) Pretty() api.Text {
+	return api.Text{Content: "definition", Style: uir.StyleKeyword}.
+		Add(api.Collapsed{Label: "body", Content: n.body.Pretty()})
+}
+func (n *definitionTreeNode) GetChildren() []api.TreeNode { return nil }
 
 type fieldTreeNode struct{ f uir.RecordField }
 

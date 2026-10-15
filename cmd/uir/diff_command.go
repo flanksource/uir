@@ -12,7 +12,7 @@ type diffOptions struct {
 	Range        string `args:"true" required:"true"`
 	Root         string `flag:"root" help:"Module path" required:"true"`
 	Visibility   string `flag:"visibility" help:"Rows to report: exported, internal, or all" default:"exported"`
-	Stat         bool   `flag:"stat" help:"Add per-file and per-symbol line counts from hash-verified Git blobs"`
+	Stat         bool   `flag:"stat" help:"Add per-file and per-symbol line counts from hash-verified Git blobs, or an external root's stored blobs"`
 	SnapshotFrom string `flag:"snapshot-from" help:"Snapshot UUID to use for <from> instead of its newest clean snapshot"`
 	SnapshotTo   string `flag:"snapshot-to" help:"Snapshot UUID to use for <to> instead of its newest clean snapshot"`
 	AutoIndex    bool   `flag:"auto-index" help:"Index missing clean commit snapshots without moving the checkout head"`

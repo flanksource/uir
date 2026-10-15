@@ -97,8 +97,8 @@ func (source publishedText) declaration(identity indexer.Identity, identifier ui
 	nameRange, nameBytes := source.span(extent, name)
 	extentRange, extentBytes := source.span(extent, extent)
 	return storage.DocumentSymbol{
-		ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape,
-		ShapeHash: sha256Text(shape), BodyHash: sha256Text(extent), Name: nameRange, NameBytes: nameBytes,
+		ID: &id, Key: identifier.IdentityKey(), Kind: identity.Kind, Visibility: "exported", Shape: shape, PublicShape: shape,
+		PublicHash: sha256Text("public " + shape), PrivateHash: sha256Text("private " + shape), ContentHash: sha256Text(extent), Name: nameRange, NameBytes: nameBytes,
 		Extent: extentRange, ExtentBytes: extentBytes, Identifier: identifier,
 	}
 }

@@ -86,6 +86,9 @@ func TestPythonUIRMarshalUnmarshal(t *testing.T) {
 	if searchUsers.Method != "SearchUsers" {
 		t.Errorf("expected method 'SearchUsers', got %s", searchUsers.Method)
 	}
+	if len(searchUsers.Params) != 2 || searchUsers.Params[1].SQLType != "numeric(10,2)" {
+		t.Errorf("expected SearchUsers' second param to keep sqlType numeric(10,2), got %+v", searchUsers.Params)
+	}
 
 	t.Logf("Successfully verified Python UIR implementation!")
 	t.Logf("Module: %s", module.Module)

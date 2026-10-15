@@ -95,7 +95,11 @@ for _, change := range result.Changes {
 }
 ```
 
-Identity classification stays separate from hash equality, which is what lets a relocated-but-identical node be reported as `moved` rather than as an add/delete pair.
+`DiffNode` pairs a container's members (columns, indexes, foreign keys, triggers, fields, methods, package members) by symbol key only: a member that is not the same symbol on both sides is a delete and an add, however alike the two look. A table column whose relative order changed is reported as `moved` with its old and new position, and a view definition or trigger body is diffed statement by statement.
+
+`DiffTree` is where renames and moves are classified. It matches flattened entries by identity, then by hash, and since a node's hash leaves out its own name, a renamed table or column with an unchanged structure is reported as `renamed` rather than as an add/delete pair.
+
+Every `modified` change names the outermost fingerprint layer that differs in `Layer`: `public`, then `private`, then `content` (see `uir.Fingerprint`). Adding an index is a `private` change of its table, rewriting a view is a `content` change, and a row-count change is no change.
 
 ## Serialization
 

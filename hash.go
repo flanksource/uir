@@ -90,34 +90,6 @@ func (h *Hasher) AddRecordFields(field string, fields []RecordField) {
 	}
 }
 
-func (h *Hasher) AddMethods(field string, methods []MethodNode) {
-	h.AddInt(field+".len", len(methods))
-	for i, m := range methods {
-		h.add(fmt.Sprintf("%s.%d", field, i), m.Hash())
-	}
-}
-
-func (h *Hasher) AddTypes(field string, types []TypedNode) {
-	h.AddInt(field+".len", len(types))
-	for i, t := range types {
-		h.add(fmt.Sprintf("%s.%d", field, i), t.Hash())
-	}
-}
-
-func (h *Hasher) AddRecords(field string, records []ASTRecord) {
-	h.AddInt(field+".len", len(records))
-	for i, r := range records {
-		h.add(fmt.Sprintf("%s.%d", field, i), r.Hash())
-	}
-}
-
-func (h *Hasher) AddEndpoints(field string, endpoints []ASTEndpoint) {
-	h.AddInt(field+".len", len(endpoints))
-	for i, e := range endpoints {
-		h.add(fmt.Sprintf("%s.%d", field, i), e.Hash())
-	}
-}
-
 func (h *Hasher) AddStringSlice(field string, values []string) {
 	h.AddInt(field+".len", len(values))
 	for i, v := range values {
