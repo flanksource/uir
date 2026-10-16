@@ -6,7 +6,6 @@ package symboldiff
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 // Visibility selects which rows a diff reports. A row is kept when the symbol's visibility on either
@@ -82,11 +81,12 @@ const (
 // NoteLayoutOnly marks a body row whose hashes are equal but whose lines changed: comments or layout.
 const NoteLayoutOnly = "comments or layout only; content_hash unchanged"
 
-// Options selects the root, the two commits, and what the diff reports.
+// Options selects the root, the revisions to compare, and what the diff reports.
 type Options struct {
-	RootKey      string
-	From         string
-	To           string
+	RootKey string
+	// Revisions is what git diff takes: one spec (A..B, A.., ..B, A...B, A^!, A^-n, or a single
+	// revision, compared against the worktree) or two revisions. pr:N names a pull request's head.
+	Revisions    []string
 	SnapshotFrom string
 	SnapshotTo   string
 	Visibility   Visibility
@@ -100,19 +100,6 @@ type Options struct {
 	// Location is the registered checkout to resolve and index commits from; empty means the primary
 	// checkout first, then any other that has the commit.
 	Location string
-}
-
-// ParseRange splits "<from>..<to>" into its two commits; both must be non-empty.
-func ParseRange(spec string) (string, string, error) {
-	from, to, found := strings.Cut(spec, "..")
-	if !found || strings.HasPrefix(to, ".") {
-		return "", "", fmt.Errorf("commit range %q is not <from>..<to>", spec)
-	}
-	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
-	if from == "" || to == "" {
-		return "", "", fmt.Errorf("commit range %q has an empty revision", spec)
-	}
-	return from, to, nil
 }
 
 // Side is one end of the diff: the resolved commit and the snapshot selected for it.
