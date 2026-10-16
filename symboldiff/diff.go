@@ -32,25 +32,21 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	if options.From == "" || options.To == "" {
-		return Result{}, fmt.Errorf("commit range %q..%q has an empty revision", options.From, options.To)
-	}
-	if database == nil {
-		return Result{}, errors.New("diff: database is required")
-	}
-	scope, err := loadRootScope(ctx, database, options.RootKey)
+	scope, err := loadScope(ctx, database, options)
 	if err != nil {
 		return Result{}, err
-	}
-	if options.Location != "" {
-		if scope, err = scope.preferring(options.Location); err != nil {
-			return Result{}, err
-		}
 	}
 	if options.AutoIndex && scope.external {
 		return Result{}, scope.errExternal("its revisions cannot be indexed from Git; republish a missing revision with uir import")
 	}
-	before, after, err := selectSides(ctx, database, scope, options)
+	resolution, err := scope.resolveRevisions(ctx, options.Revisions)
+	if err != nil {
+		return Result{}, err
+	}
+	if resolution.Worktree {
+		return Result{}, fmt.Errorf("revision %q is compared against the worktree of %s, which is diffed as a git patch, not from the index", options.Revisions[0], resolution.Checkout)
+	}
+	before, after, err := selectSides(ctx, database, scope, resolution, options)
 	if err != nil {
 		return Result{}, err
 	}
@@ -74,29 +70,26 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	return result, nil
 }
 
-func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, options Options) (selectedSide, selectedSide, error) {
+func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, resolution Resolution, options Options) (selectedSide, selectedSide, error) {
 	var sides [2]selectedSide
-	for index, request := range []struct{ revision, override, flag string }{
-		{options.From, options.SnapshotFrom, "--snapshot-from"}, {options.To, options.SnapshotTo, "--snapshot-to"},
+	for index, request := range []struct{ commit, override, flag string }{
+		{resolution.From, options.SnapshotFrom, "--snapshot-from"}, {resolution.To, options.SnapshotTo, "--snapshot-to"},
 	} {
-		commit, err := scope.resolveCommit(ctx, request.revision)
-		if err != nil {
-			return selectedSide{}, selectedSide{}, err
-		}
 		var snapshot storage.ModuleSnapshot
+		var err error
 		if options.AutoIndex && request.override == "" {
-			indexed, indexErr := autoIndex(ctx, database, scope, commit, options)
+			indexed, indexErr := autoIndex(ctx, database, scope, request.commit, options)
 			if indexErr != nil {
 				return selectedSide{}, selectedSide{}, indexErr
 			}
-			snapshot, err = scope.overrideSnapshot(ctx, database, commit, indexed.SnapshotID, request.flag)
+			snapshot, err = scope.overrideSnapshot(ctx, database, request.commit, indexed.SnapshotID, request.flag)
 		} else {
-			snapshot, err = scope.selectSnapshot(ctx, database, commit, request.override, request.flag)
+			snapshot, err = scope.selectSnapshot(ctx, database, request.commit, request.override, request.flag)
 		}
 		if err != nil {
 			return selectedSide{}, selectedSide{}, err
 		}
-		sides[index] = selectedSide{commit: commit, snapshot: snapshot}
+		sides[index] = selectedSide{commit: request.commit, snapshot: snapshot}
 	}
 	if sides[0].snapshot.ConfigurationHash != sides[1].snapshot.ConfigurationHash {
 		return selectedSide{}, selectedSide{}, fmt.Errorf("snapshots %s and %s were indexed under different configuration hashes (%s, %s), so their shape and body hashes are not comparable",

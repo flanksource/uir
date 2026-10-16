@@ -75,7 +75,7 @@ func indexLedger(ctx SpecContext, options storage.DBOptions) ledger {
 
 func (fixture ledger) diff(ctx SpecContext, visibility Visibility, stat bool) Result {
 	GinkgoHelper()
-	result, err := Diff(ctx, fixture.database, Options{RootKey: ledgerRoot, From: fixture.from, To: fixture.to, Visibility: visibility, Stat: stat})
+	result, err := Diff(ctx, fixture.database, Options{RootKey: ledgerRoot, Revisions: []string{fixture.from, fixture.to}, Visibility: visibility, Stat: stat})
 	Expect(err).ToNot(HaveOccurred())
 	return result
 }
@@ -123,7 +123,7 @@ var _ = Describe("commit-to-commit diff", func() {
 			internal := fixture.diff(ctx, VisibilityInternal, true).file("money/money.go")
 			Expect([]any{internal.names(), internal.HiddenRows}).To(Equal([]any{[]string{"body round"}, 8}))
 
-			short, err := Diff(ctx, fixture.database, Options{RootKey: ledgerRoot, From: "HEAD~1", To: "main", Visibility: VisibilityAll, Stat: true})
+			short, err := Diff(ctx, fixture.database, Options{RootKey: ledgerRoot, Revisions: []string{"HEAD~1", "main"}, Visibility: VisibilityAll, Stat: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect([]string{short.From.Commit, short.To.Commit}).To(Equal([]string{fixture.from, fixture.to}))
 			Expect(body(short)).To(Equal(ledgerStatAll))
@@ -154,19 +154,19 @@ var _ = Describe("commit-to-commit diff", func() {
 			to := repo.commit("broken after")
 			repo.index(ctx, database)
 
-			result, err := Diff(ctx, database, Options{RootKey: "example.org/broken", From: from, To: to, Visibility: VisibilityAll, Stat: true})
+			result, err := Diff(ctx, database, Options{RootKey: "example.org/broken", Revisions: []string{from, to}, Visibility: VisibilityAll, Stat: true})
 			Expect(err).ToNot(HaveOccurred())
-			Expect(body(result)).To(Equal(`example.org/broken/fine  +2 -0
-  fine/never.go (modified) [excluded]  +2 -0
-    (file scope)                   +2 -0
-example.org/broken/mixed  +1 -1
-  mixed/a.go (modified) [syntax]  +1 -1
-    A                    body      +1 -1 [syntax]
-    (file scope)                   +0 -0
-example.org/broken/typed  +1 -1
-  typed/typed.go (modified) [partial]  +1 -1
-    Right                body      +1 -1 [partial]
-    (file scope)                   +0 -0
+			Expect(body(result)).To(Equal(`├── 📦 example.org/broken/fine  +2 -0
+│   ╰── ✏️ fine/never.go (modified) [excluded]  +2 -0
+│       ╰── (file scope)  +2 -0
+├── 📦 example.org/broken/mixed  +1 -1
+│   ╰── ✏️ mixed/a.go (modified) [syntax]  +1 -1
+│       ├── 💻 A  body  +1 -1 [syntax]
+│       ╰── (file scope)  +0 -0
+╰── 📦 example.org/broken/typed  +1 -1
+    ╰── ✏️ typed/typed.go (modified) [partial]  +1 -1
+        ├── 💻 Right  body  +1 -1 [partial]
+        ╰── (file scope)  +0 -0
 `))
 			Expect(result.file("fine/never.go").Excluded).To(HavePrefix("build constraints exclude the file"))
 		},
@@ -194,7 +194,7 @@ example.org/broken/typed  +1 -1
 			repo.index(ctx, database)
 			Expect(repo.git("cat-file", "-p", to+":eol/eol.go")).ToNot(ContainSubstring("\r"), "the committed blob is normalised to LF")
 
-			result, err := Diff(ctx, database, Options{RootKey: "example.org/crlf", From: from, To: to, Visibility: VisibilityAll, Stat: true})
+			result, err := Diff(ctx, database, Options{RootKey: "example.org/crlf", Revisions: []string{from, to}, Visibility: VisibilityAll, Stat: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.LinesError).To(BeEmpty())
 			for _, path := range []string{"eol/eol.go", "go.mod"} {
