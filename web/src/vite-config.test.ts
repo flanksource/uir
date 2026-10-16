@@ -6,11 +6,8 @@ const configFile = fileURLToPath(new URL("../vite.config.ts", import.meta.url));
 const clickyRoot = fileURLToPath(new URL("../../../clicky-ui/", import.meta.url));
 const source = new URL("packages/ui/src/", `file://${clickyRoot}`);
 
-it("resolves Clicky UI source and styles only in Vite development mode", async () => {
-  const development = await loadConfigFromFile(
-    { command: "serve", mode: "development" },
-    configFile,
-  );
+it.each(["development", "test"])("resolves Clicky UI source and styles from the sibling checkout when Vite serves %s", async (mode) => {
+  const development = await loadConfigFromFile({ command: "serve", mode }, configFile);
   expect(development?.config.resolve?.alias).toEqual(
     expect.arrayContaining([
       {
@@ -26,6 +23,10 @@ it("resolves Clicky UI source and styles only in Vite development mode", async (
         replacement: fileURLToPath(new URL("components.ts", source)),
       },
       {
+        find: "@flanksource/clicky-ui/connections",
+        replacement: fileURLToPath(new URL("connections.ts", source)),
+      },
+      {
         find: "@flanksource/clicky-ui/styles.css",
         replacement: fileURLToPath(new URL("styles/full.css", source)),
       },
@@ -36,12 +37,9 @@ it("resolves Clicky UI source and styles only in Vite development mode", async (
     ]),
   );
   expect(development?.config.server?.fs?.allow).toContain(clickyRoot);
+});
 
-  for (const environment of [
-    { command: "build", mode: "production" },
-    { command: "serve", mode: "test" },
-  ] as const) {
-    const config = await loadConfigFromFile(environment, configFile);
-    expect(config?.config.resolve?.alias).toBeUndefined();
-  }
+it("builds against the published Clicky UI package", async () => {
+  const production = await loadConfigFromFile({ command: "build", mode: "production" }, configFile);
+  expect(production?.config.resolve?.alias).toBeUndefined();
 });

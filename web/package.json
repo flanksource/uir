@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && vite build",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit -p tsconfig.local.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "dev": "vite --host 127.0.0.1"
