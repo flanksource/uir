@@ -131,12 +131,12 @@ type moduleGetOptions struct {
 }
 
 type moduleLocationOptions struct {
-	Root string `flag:"root" help:"Module path" required:"true"`
+	Root string `flag:"root" help:"Module path; defaults to the module of the current checkout"`
 }
 
 type moduleSnapshotOptions struct {
-	Root     string `flag:"root" help:"Module path" required:"true"`
-	Location string `flag:"location" help:"Canonical checkout path" required:"true"`
+	Root     string `flag:"root" help:"Module path; defaults to the module of the current checkout"`
+	Location string `flag:"location" help:"Registered checkout path; defaults to the current checkout"`
 	Limit    int    `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
 	Offset   int    `flag:"offset" help:"Rows to skip" default:"0"`
 }
@@ -156,19 +156,25 @@ type moduleQueryOptions struct {
 	Include    []string       `flag:"include" help:"Include module, package, or symbol paths matching a glob"`
 	Exclude    []string       `flag:"exclude" help:"Exclude module, package, or symbol paths matching a glob"`
 	GroupBy    string         `flag:"group-by" help:"Tree levels in order: module,package,file" default:"module,package,file"`
-	RootKey    string         `flag:"root" help:"Module path to query"`
-	Location   string         `flag:"location" help:"Registered checkout path"`
+	RootKey    string         `flag:"root" help:"Module path to query; defaults to the module of the current checkout"`
+	Location   string         `flag:"location" help:"Registered checkout path; defaults to the current checkout"`
 	SnapshotID string         `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
 	Limit      int            `flag:"limit" help:"Maximum rows from 1 through 1000" default:"100"`
+	allRootsOption
 }
 
 type moduleSuggestOptions struct {
 	Language   query.Language `flag:"language" help:"Selector language: compact or sql" default:"compact"`
 	Prefix     string         `flag:"prefix" help:"Partial Go symbol spelling" required:"true"`
-	RootKey    string         `flag:"root" help:"Module path to query"`
-	Location   string         `flag:"location" help:"Registered checkout path"`
+	RootKey    string         `flag:"root" help:"Module path to query; defaults to the module of the current checkout"`
+	Location   string         `flag:"location" help:"Registered checkout path; defaults to the current checkout"`
 	SnapshotID string         `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
 	Limit      int            `flag:"limit" help:"Maximum suggestions from 1 through 100" default:"20"`
+	allRootsOption
+}
+
+func (options moduleSuggestOptions) checkoutDefaults() checkoutDefaults {
+	return checkoutDefaults{Root: options.RootKey, Location: options.Location, Snapshot: options.SnapshotID, All: options.All}
 }
 
 func (moduleQueryRow) Columns() []api.ColumnDef {
@@ -250,9 +256,12 @@ func registerModuleCommands(root *cobra.Command) {
 		if err != nil {
 			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
 		}
-		result, err := pipeline.SuggestSymbols(ctx, options.Prefix, query.ModuleScopeOptions{
-			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit,
-		})
+		scope, err := moduleScope(ctx, database, options.checkoutDefaults())
+		if err != nil {
+			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
+		}
+		scope.Limit = options.Limit
+		result, err := pipeline.SuggestSymbols(ctx, options.Prefix, scope)
 		warnMissingHeads(ctx, result.Warnings)
 		return result, err
 	})
@@ -268,9 +277,12 @@ func registerModuleCommands(root *cobra.Command) {
 		if err != nil {
 			return query.ItemsWithWarnings[string]{}, err
 		}
-		result, err := pipeline.SuggestSelectors(ctx, options.Prefix, query.ModuleScopeOptions{
-			RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit, Language: options.Language,
-		})
+		scope, err := moduleScope(ctx, database, options.checkoutDefaults())
+		if err != nil {
+			return query.ItemsWithWarnings[string]{}, err
+		}
+		scope.Limit, scope.Language = options.Limit, options.Language
+		result, err := pipeline.SuggestSelectors(ctx, options.Prefix, scope)
 		warnMissingHeads(ctx, result.Warnings)
 		return result, err
 	})
@@ -282,7 +294,11 @@ func registerModuleCommands(root *cobra.Command) {
 		if err != nil {
 			return nil, err
 		}
-		return storage.ModuleLocations(ctx, database, options.Root)
+		rootKey, _, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, Required: true})
+		if err != nil {
+			return nil, err
+		}
+		return storage.ModuleLocations(ctx, database, rootKey)
 	})
 	locations.Short = "List registered checkouts for a module root"
 	setModuleRoute(locations, "modules/locations")
@@ -292,8 +308,12 @@ func registerModuleCommands(root *cobra.Command) {
 		if err != nil {
 			return clicky.PagedResult[storage.ModuleSnapshotView]{}, err
 		}
+		rootKey, location, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, Location: options.Location, Required: true})
+		if err != nil {
+			return clicky.PagedResult[storage.ModuleSnapshotView]{}, err
+		}
 		rows, total, err := storage.ModuleSnapshots(ctx, database, storage.ModuleSnapshotListOptions{
-			RootKey: options.Root, Location: options.Location, Limit: options.Limit, Offset: options.Offset,
+			RootKey: rootKey, Location: location, Limit: options.Limit, Offset: options.Offset,
 		})
 		if err != nil {
 			return clicky.PagedResult[storage.ModuleSnapshotView]{}, err
@@ -335,9 +355,12 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 			structured.Relations = append(structured.Relations, flag.name)
 		}
 	}
-	result, err := pipeline.RunModules(ctx, options.Expression, query.ModuleScopeOptions{
-		RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID, Limit: options.Limit, Language: options.Language, Structured: structured,
-	})
+	scope, err := moduleScope(ctx, database, checkoutDefaults{Root: options.RootKey, Location: options.Location, Snapshot: options.SnapshotID, All: options.All})
+	if err != nil {
+		return moduleQueryResult{}, err
+	}
+	scope.Limit, scope.Language, scope.Structured = options.Limit, options.Language, structured
+	result, err := pipeline.RunModules(ctx, options.Expression, scope)
 	if err != nil {
 		return moduleQueryResult{}, queryStatusError(err)
 	}

@@ -23,9 +23,10 @@ type moduleGraphOptions struct {
 	Limit      int      `flag:"limit"`
 	Exclude    []string `flag:"exclude"`
 	Access     []string `flag:"access" help:"Edge types to follow: call (calls and dispatches), read, write (repeatable or comma separated; default call)"`
-	RootKey    string   `flag:"root" help:"Module path to query"`
-	Location   string   `flag:"location" help:"Registered checkout path"`
+	RootKey    string   `flag:"root" help:"Module path to query; defaults to the module of the current checkout"`
+	Location   string   `flag:"location" help:"Registered checkout path; defaults to the current checkout"`
 	SnapshotID string   `flag:"snapshot" help:"Explicit immutable snapshot UUID"`
+	allRootsOption
 }
 
 // moduleGraphResult is the graph envelope: the graph's own fields at the top level beside the
@@ -61,6 +62,10 @@ func graphModules(ctx context.Context, database *gorm.DB, options moduleGraphOpt
 	if err != nil {
 		return moduleGraphResult{}, entity.NewStatusError(http.StatusBadRequest, "invalid_query", err.Error())
 	}
+	scope, err := moduleScope(ctx, database, checkoutDefaults{Root: options.RootKey, Location: options.Location, Snapshot: options.SnapshotID, All: options.All})
+	if err != nil {
+		return moduleGraphResult{}, err
+	}
 	pipeline, err := query.NewPipeline(database)
 	if err != nil {
 		return moduleGraphResult{}, err
@@ -68,7 +73,7 @@ func graphModules(ctx context.Context, database *gorm.DB, options moduleGraphOpt
 	result, err := pipeline.Graph(ctx, query.GraphOptions{
 		Selector: options.Selector, Symbol: options.Symbol, Access: access,
 		Direction: graph.Direction(options.Direction), Depth: options.Depth, Limit: options.Limit, Exclude: options.Exclude,
-		Scope: query.ModuleScopeOptions{RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID},
+		Scope: scope,
 	})
 	if err != nil {
 		return moduleGraphResult{}, queryStatusError(err)
