@@ -198,7 +198,7 @@ func (pipeline *Pipeline) sqlGraph(ctx context.Context, index *compactIndex, sou
 	if len(roots) == 0 {
 		return ModuleQueryResult{}, sqlError(source.pos, "graph source matched no symbols")
 	}
-	graphed := GraphResult{Graph: graph.Graph{Roots: []string{}, Nodes: []graph.Node{}, Edges: []graph.Edge{}}, Exclude: options.Exclude, Packages: []GraphPackage{}, Warnings: result.Warnings, Stages: result.Stages, Candidates: []ModuleSymbol{}}
+	graphed := GraphResult{Graph: graph.Graph{Roots: []string{}, Nodes: []graph.Node{}, Edges: []graph.Edge{}}, Exclude: options.Exclude, Packages: []GraphPackage{}, Stages: result.Stages, Candidates: []ModuleSymbol{}}
 	if len(roots) > 1 {
 		graphed.Candidates = roots
 	} else {

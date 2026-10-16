@@ -3,7 +3,7 @@ import { Button, SegmentedControl } from "@flanksource/clicky-ui/components";
 import { DataTable, ServerTimingBadge, type DataTableColumn } from "@flanksource/clicky-ui/data";
 import { browseModule, errorMessage, type ModuleQueryResult, type ModuleQueryRow } from "./api";
 import { queryMatchRoute } from "./query-palette-model";
-import { CoverageWarning, MissingHeadWarnings } from "./CoverageWarning";
+import { CoverageWarning } from "./CoverageWarning";
 import type { QueryExample } from "./query-model";
 import type { Route } from "./route";
 import { ErrorMessage, Heading, Muted, PanelForm } from "./ui";
@@ -71,7 +71,6 @@ export function QueryView({ route, query, examples, onRoute }: {
     <div className="flex items-center gap-3"><h2>Results {query.data ? `(${query.data.path ? 1 : query.data.graph?.nodes.length ?? query.data.matches.length} of ${query.data.total})` : ""}</h2><ServerTimingBadge metrics={query.timing} /></div>
     <ErrorMessage error={query.error} />
     <ErrorMessage error={sourceError} />
-    {query.data && <MissingHeadWarnings warnings={query.data.warnings} />}
     {query.data && <CoverageWarning coverage={query.data.coverage} />}
     {symbols.length > 0 && <Muted>Resolved {symbols.length === 1 ? "symbol" : "symbols"}: {symbols.map((symbol) =>
       `${symbol.owner ? `${symbol.owner}.` : ""}${symbol.name} (${symbol.kind}, ${symbol.package_path})`).join("; ")}</Muted>}

@@ -51,10 +51,9 @@ type GraphResult struct {
 	// Exclude are the effective exclusion patterns.
 	Exclude []string `json:"exclude"`
 	// Packages are the packages reached while walking, drawn or excluded.
-	Packages   []GraphPackage       `json:"packages"`
-	Stages     []ResolutionStage    `json:"stages"`
-	Warnings   []MissingHeadWarning `json:"warnings"`
-	Candidates []ModuleSymbol       `json:"candidates"`
+	Packages   []GraphPackage    `json:"packages"`
+	Stages     []ResolutionStage `json:"stages"`
+	Candidates []ModuleSymbol    `json:"candidates"`
 }
 
 func invalidGraph(format string, arguments ...any) error {
@@ -140,7 +139,7 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 	clock.lap("scope")
 	result := GraphResult{
 		Graph:   graph.Graph{Roots: []string{}, Nodes: []graph.Node{}, Edges: []graph.Edge{}},
-		Exclude: options.Exclude, Packages: []GraphPackage{}, Warnings: selection.warnings, Candidates: []ModuleSymbol{},
+		Exclude: options.Exclude, Packages: []GraphPackage{}, Candidates: []ModuleSymbol{},
 		Stages: []ResolutionStage{{Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, coverageStage(coverage)},
 	}
 	if len(selection.scopes) == 0 {
@@ -167,7 +166,7 @@ func (pipeline *Pipeline) resolveGraph(ctx context.Context, selection moduleScop
 	index := newCompactIndex(base)
 	roots, err := index.graphRoots(ctx, request.options, coverage)
 	var unresolved *UnresolvedSymbolError
-	if len(selection.warnings) > 0 && errors.As(err, &unresolved) {
+	if selection.missingHeads > 0 && errors.As(err, &unresolved) {
 		result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: "0 symbols"})
 		return result, false, nil
 	}

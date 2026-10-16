@@ -6,10 +6,8 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
-	"github.com/flanksource/clicky/api/icons"
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/graph"
-	"github.com/flanksource/uir/query"
 )
 
 func (result moduleGraphResult) Pretty() api.Text {
@@ -27,14 +25,7 @@ func (result moduleGraphResult) tree() *graph.TreeNode {
 	} else {
 		root = result.Tree(graph.TreeOptions{Name: goNodeName})
 	}
-	for _, warning := range result.Warnings {
-		root.Children = append(root.Children, &graph.TreeNode{Label: missingHeadLabel(warning)})
-	}
 	return root
-}
-
-func missingHeadLabel(warning query.MissingHeadWarning) api.Text {
-	return api.Text{}.Add(icons.Warning).Space().Append(warning.RootKey, uir.StyleWarning).Space().Append(warning.Message, uir.StyleMuted)
 }
 
 // goNodeName draws Go symbol icons and preserves native entity kinds.

@@ -157,8 +157,8 @@ var _ = Describe("query symbol rendering", func() {
 		Expect(cliRows).To(Equal(result.Matches))
 	})
 
-	It("shows empty results, incomplete coverage, and missing-head warnings", func() {
-		result := moduleQueryResult{groupBy: []string{"module", "package", "file"}, Coverage: []query.ModuleCoverage{{RootKey: "example.org/service", PackagePath: "example.org/service/api", Coverage: "partial"}}, Warnings: []query.MissingHeadWarning{{RootKey: "example.org/other", Location: "/checkout/other", Message: "not indexed"}}}
+	It("shows empty results and incomplete coverage", func() {
+		result := moduleQueryResult{groupBy: []string{"module", "package", "file"}, Coverage: []query.ModuleCoverage{{RootKey: "example.org/service", PackagePath: "example.org/service/api", Coverage: "partial"}}}
 		output := moduleQueryDisplay{result: result, rows: result.Matches}.Tree().Pretty().String()
 		Expect(output).To(ContainSubstring("0 matches"))
 		tree := moduleQueryDisplay{result: result, rows: result.Matches}.Tree()
@@ -166,7 +166,7 @@ var _ = Describe("query symbol rendering", func() {
 		for _, child := range tree.GetChildren() {
 			labels = append(labels, child.Pretty().String())
 		}
-		Expect(strings.Join(labels, " ")).To(And(ContainSubstring("partial"), ContainSubstring("not indexed")))
+		Expect(strings.Join(labels, " ")).To(ContainSubstring("partial"))
 	})
 
 	It("keeps checkouts identifiable when module grouping is omitted and shows truncation", func() {
