@@ -5,30 +5,70 @@
 ## Command
 
 ```sh
-uir diff <from>..<to> --root <module> [--visibility exported|internal|all] [--stat] [--auto-index] [--include-tests] [--snapshot-from <uuid>] [--snapshot-to <uuid>]
+uir diff <range>     [--root <module>] [--location <checkout>] [--visibility exported|internal|all] [--stat] [--auto-index] [--include-tests] [--snapshot-from <uuid>] [--snapshot-to <uuid>]
+uir diff <from> <to> [same flags]
+uir diff <rev>       [--root <module>] [--location <checkout>] [--visibility exported|internal|all] [--stat]
+git diff HEAD~3 | uir diff [-] [--visibility exported|internal|all] [--stat]
 ```
+
+Revisions are read as `git diff` reads them, by letting git resolve them rather than re-implementing its syntax:
+
+| Revisions | Compares |
+| --- | --- |
+| `A..B`, `A..`, `..B` | `A` to `B`; an empty side is `HEAD`. |
+| `A B` | `A` to `B`. |
+| `A...B` | The merge base of `A` and `B` to `B`. More than one merge base fails. |
+| `A^!`, `A^-`, `A^-n` | `A`'s first (or nth) parent to `A`. |
+| `A` | `A` to the worktree of the checkout it resolved in, through the [patch path](#diffing-a-git-patch) (see [comparing with the worktree](#comparing-with-the-worktree)). |
+| `pr:N` | The head of pull request `N`, fetched from `origin`; usable on either side of `..` and `...` and as either of two revisions. |
+
+Two revisions are each resolved as before: a full 40- or 64-character commit hash is used as is; anything else is resolved with `git rev-parse --verify <rev>^{commit}` in the root's registered checkouts, `--location` (or the current checkout) first. A single spec is expanded with `git rev-parse --revs-only` in the first checkout that knows it: one positive and one negative commit are a range, two positives and one negative (`A...B`) are the merge base to `B`, and a lone positive is a single revision only when the spec itself names one commit. Anything else (`A^@`, `^A`, an `A^!` of a merge commit) fails, naming the commits the spec expanded to. In Go, `symboldiff.ResolveRevisions` returns the resolved pair, or the single commit and its checkout.
 
 | Flag | Meaning |
 | --- | --- |
-| `<from>..<to>` | Two revisions. A full 40- or 64-character commit hash is used as is; anything else (`HEAD~1`, a branch, an abbreviated hash) is resolved with `git rev-parse --verify <rev>^{commit}` in the root's registered checkouts, primary first. Both sides must be non-empty. |
-| `--root` | The module path (`root_key`) to diff. Required. |
+| `--root` | The module path (`root_key`) to diff. Defaults to the module of the registered checkout enclosing the working directory (the nearest `go.mod`); outside one, it is required with a range. |
+| `--location` | The registered checkout to resolve and index revisions from, so `HEAD` and branch names mean that worktree's. Defaults to the checkout enclosing the working directory when it belongs to `--root`, else the primary checkout. A relative or symlinked path is canonicalized. |
 | `--visibility` | `exported` (default), `internal`, or `all`. A row is kept when the symbol's visibility on either side matches, except a `structure` row, which `internal` and `all` keep whatever the symbol's visibility and `exported` never does. |
 | `--stat` | Adds per-package, per-file, and per-symbol `+added -removed` counts. Requires readable Git blobs, or for an external root the source blobs its publications stored. |
 | `--snapshot-from`, `--snapshot-to` | Use this snapshot for that side instead of the newest clean one. The snapshot must belong to the root and record that commit as its revision. |
 | `--auto-index` | Select or generate a clean snapshot for each commit under the current standalone module configuration. Historical indexing reads the commit's `go.mod` and `go.sum` with `GOWORK=off`, so the current workspace cannot replace dependencies or hide the historical module. It leaves registered checkout files and heads untouched. |
 | `--include-tests` | Include Go test symbols in snapshots generated with `--auto-index`. Without it, test files are excluded, matching the usual indexing default. |
 
-The command is a Clicky operation, so `--format json`, `--format yaml`, `--format markdown`, and `--format html` all render the same typed result, and `uir serve` exposes it as `POST /api/v1/modules/diff` with a body such as `{"args": ["<from>..<to>"], "root": "example.org/service", "visibility": "all", "stat": true, "auto-index": true}`. `uir history --root <module> [--location <checkout>]` and `GET /api/v1/modules/history` list local branches, recent commits, and up to 50 pull request refs from `origin` for the browser's History view. A `pr:<number>` revision fetches that pull request head from `origin` when selected.
+The command is a Clicky operation, so `--format json`, `--format yaml`, `--format markdown`, and `--format html` all render the same typed result, and `uir serve` exposes it as `POST /api/v1/modules/diff` with a body such as `{"args": ["<from>..<to>"], "root": "example.org/service", "visibility": "all", "stat": true, "auto-index": true}`. `uir history [--root <module>] [--location <checkout>]` and `GET /api/v1/modules/history` list local branches, recent commits, and up to 50 pull request refs from `origin` for the browser's History view. A `pr:<number>` revision fetches that pull request head from `origin` when selected. On the command line `--root` and `--location` default from the working directory as for `uir diff`; over HTTP the server's working directory is not the caller's, so `root` is required.
 
-To inspect one Git commit as change history, use `uir history show <commit> --root <module>`. It compares that commit with its first parent, indexes either missing clean snapshot on demand, and shows all symbol changes with line counts by default. `--visibility exported|internal|all`, `--include-tests`, and `--stat=false` control the result. An initial commit has no parent and returns an error; use `uir diff` with an explicit range when comparing other revisions.
+To inspect one Git commit as change history, use `uir history show <commit> [--root <module>]`. It compares that commit with its first parent, indexes either missing clean snapshot on demand, and shows all symbol changes with line counts by default. `--visibility exported|internal|all`, `--include-tests`, and `--stat=false` control the result. An initial commit has no parent and returns an error; use `uir diff` with an explicit range when comparing other revisions.
 
 ```sh
 uir history show HEAD --root example.org/ledger
 ```
 
 ```sh
-uir diff HEAD~1..HEAD --root example.org/ledger --visibility all --stat
+# from inside a registered checkout of example.org/ledger
+uir diff HEAD~1..HEAD --visibility all --stat
 ```
+
+## Comparing with the worktree
+
+`uir diff <rev>` is `git diff <rev>`: it runs `git diff --full-index <commit>` in the checkout the revision resolved in (the current checkout, or `--location`) and diffs that patch as below, without the index. `from.commit` is the resolved commit and `to.commit` is `worktree` when any side was read from the worktree. Untracked files are not part of it, as with git. `--snapshot-from`, `--snapshot-to`, `--auto-index`, and `--include-tests` apply to two commits and fail with a single revision; over HTTP a single revision is refused, because the server's worktree is not the caller's.
+
+```sh
+uir diff HEAD --visibility all
+```
+
+## Diffing a git patch
+
+Without a range, or with `-`, `uir diff` reads a git patch from stdin and reports the same result for it, with no database and no indexing:
+
+```sh
+git diff HEAD~3 | uir diff
+git diff | uir diff --stat --visibility all
+```
+
+- **Bytes.** Each side of a file is the blob its `index <old>..<new>` line names, read in the repository holding the working directory (`git rev-parse --show-toplevel`). Every id of the patch, abbreviated or full, is written to one `git cat-file --batch` process and its answers are read in order, so a patch of any size costs the same few git processes. An all-zero id is an absent side and is never sent to git. An old side git does not have, an ambiguous abbreviated id (produce the patch with `--full-index`), or an id that names something other than a blob fails the command, naming the path and id. A new side git does not have is a worktree file (`git diff` without `--cached`): it is read from the worktree, and all such files are hashed by one `git hash-object --stdin-paths` process; each must still hash to the patch's id, otherwise the command fails with `worktree changed since the patch was produced`. The result's `to.commit` is then `worktree`, else `patch:new`; `from.commit` is `patch:old`. In Go, `symboldiff.DiffPatch` reads the sides through a `SourceLocator`; `symboldiff.NewGitLocator` is the one described here.
+- **Packages.** A file's package is the nearest `go.mod` above it in the worktree joined with its directory below that module; the root is the module of the top-level `go.mod`. A file outside every module, or a repository without a top-level `go.mod`, fails the command.
+- **Symbols.** Go files are extracted from syntax alone (`indexer.SyntaxDocument`), so every file and row carries the `syntax` marker, and shapes are the canonical UIR layer shapes (`method public (a (int)) ( (int))`) rather than go/types-printed ones. Unlike a `syntax` document in the index, each symbol's public and private hashes are computed from its extracted node, so rows still classify as `signature` and `structure`. Symbols are matched by a stand-in for the canonical id: the identity key with a function's signature reduced to its parameter types, so a parameter rename is a `signature` row and a parameter-type change is a grouped `removed` plus `added`, as with an index.
+- **Files.** A rename is the removal of its old path and the addition of its new one, so its unchanged symbols are `moved`. A file that is not Go source is listed with `excluded: not Go source` and no rows. A mode-only change is skipped. With `--stat`, lines are attributed from the same bytes; there is no manifest comparison.
+- **Refused input.** A plain `diff -u` without `index` lines, a rename at 100% similarity (git writes no `index` line for it; use `git diff --no-renames`), copies (`-C`), and combined merge diffs fail. `--root`, `--snapshot-from`, `--snapshot-to`, `--auto-index`, `--include-tests`, and `--location` apply to a range and fail with a patch. Over HTTP a patch is refused: there is no stdin, and the server's working directory is not the caller's.
 
 ## Selecting the snapshots
 
@@ -96,25 +136,17 @@ A file's total is the sum of every row reported under it, hidden rows included, 
 ## Rendering
 
 ```text
-example.org/ledger/money  +11 -6
-  money/money.go (modified)  +11 -6
-    Amount               signature +1 -1
-        type Amount struct {
-        	Cents    int64
-      - 	Currency string
-      + 	Currency Code
-        }
-    Half                 removed   +0 -1  func Half(a Amount) Amount
-    Half                 added     +1 -0
-      - func Half(a Amount) Amount
-      + func Half(a *Amount) Amount
-    Scale                signature +2 -2
-      - func Scale(a Amount, factor int) Amount
-      + func Scale(a Amount, by int) Amount
-    (file scope)                   +2 -0
+example.org/ledger old..new
+╰── 📦 example.org/ledger/money  +5 -3
+    ╰── ✏️ money/money.go (modified)  +5 -3
+        ├── ✏️ Scale  signature  +1 -1
+        │   ╰── - func Scale(a Amount, factor int) Amount
+        │       + func Scale(a Amount, by int) Amount
+        ├── 💻 Format  body  +4 -2
+        ╰── (file scope)  +0 -0
 ```
 
-A `signature` row shows a shape diff of the public shapes, and a `structure` row one of the private shapes. The two canonical shapes are line-diffed with Myers, treating lines that differ only in whitespace (gofmt realignment) as equal. Within a changed hunk, the i-th removed line and the i-th added line are a replaced pair when they share at least one non-blank token, and are token-diffed; short equal runs between edits are folded into the edit so a changed tail reads as one replacement. A Go root's lines are split into `go/scanner` tokens (tokenizer `go`). An external root's shapes are not Go, so they are split language-neutrally (tokenizer `text`): identifiers (which may start with `@`, `#`, or `$`), numbers, quoted strings and identifiers (`'…'`, `"…"`, `` `…` ``), and runs of any other non-space characters.
+A `signature` row shows a shape diff of the public shapes, and a `structure` row one of the private shapes. The tree groups those lines beneath their symbol; change icons identify each file and symbol class. With `--stat`, the `+` and `-` counts on body rows show changed content lines, and ANSI colors distinguish additions from removals. The two canonical shapes are line-diffed with Myers, treating lines that differ only in whitespace (gofmt realignment) as equal. Within a changed hunk, the i-th removed line and the i-th added line are a replaced pair when they share at least one non-blank token, and are token-diffed; short equal runs between edits are folded into the edit so a changed tail reads as one replacement. A Go root's lines are split into `go/scanner` tokens (tokenizer `go`). An external root's shapes are not Go, so they are split language-neutrally (tokenizer `text`): identifiers (which may start with `@`, `#`, or `$`), numbers, quoted strings and identifiers (`'…'`, `"…"`, `` `…` ``), and runs of any other non-space characters.
 
 The plain form (non-TTY output, `String()`) prints unchanged lines with two spaces, removed lines with `- `, and added lines with `+ `. The rich forms print a replaced pair as one `~ ` line with token marks, through clicky `api.Text`: removed tokens red and struck through, added tokens green and bold. In a terminal that is ANSI; in markdown `func Scale(a Amount, ~~factor~~**by** int) Amount` (wrapped in colour spans unless colour is off); in HTML clicky's `<s>` and `<strong>`. JSON carries the structured form: `shape_diff` is a list of lines `{op, text, paired, tokenizer, tokens: [{op, text}]}`, where `op` is `equal`, `delete`, or `insert`, a paired line names the `tokenizer` (`go` or `text`) its tokens were split by, and a paired delete line's tokens are its equal and deleted runs while the paired insert line's are its equal and inserted runs.
 
@@ -124,7 +156,7 @@ The plain form (non-TTY output, `String()`) prints unchanged lines with two spac
 
 A root whose locations are all `external` (a non-Go producer's URI, registered by `uir import` / `indexer.Publish`) is diffed without Git. A root is either Go or external; one that mixes the two location kinds fails.
 
-- **Revisions.** `<from>` and `<to>` are taken literally, never resolved with `git rev-parse`: each must equal a published snapshot's `revision` or `git_commit` (for example `schema-v1..schema-v2`). An unknown revision fails, naming it and the root.
+- **Revisions.** `<from>` and `<to>` are taken literally, never resolved with `git rev-parse`: each must equal a published snapshot's `revision` or `git_commit` (for example `schema-v1..schema-v2`, or `schema-v1 schema-v2`). Only those two forms are accepted: `A...B`, `A..`, a single revision, and the other Git forms fail with a message asking for `<from>..<to>`. An unknown revision fails, naming it and the root.
 - **Snapshots.** Each side is the newest `import` or `historical` snapshot of its revision. A producer's snapshot has no worktree to be clean or dirty, so its `worktree_state` (`unknown`) is not checked. `--snapshot-from` and `--snapshot-to` work as for a Go root.
 - **Line counts.** With `--stat`, each file's bytes are the source blob its publication stored under the source revision's `content_hash`, verified against that hash; `checkout` is empty. An external root has no manifests.
 - **Shape diffs** use the language-neutral tokenizer.
