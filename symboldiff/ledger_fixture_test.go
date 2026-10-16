@@ -124,71 +124,70 @@ var ledgerAfter = map[string]*string{
 	)),
 }
 
-// ledgerStatAll is the plain-text rendering of the ledger diff with --visibility all --stat, less its
-// header line.
-const ledgerStatAll = `example.org/ledger  +2 -2
-  go.sum (modified) [manifest]  +2 -2
-    (file scope)                   +2 -2
-example.org/ledger/book  +3 -2
-  book/book.go (modified)  +1 -2
-    Total                body      +1 -1
-    (file scope)                   +0 -1
-  book/count.go (added)  +2 -0
-    Count                moved     +0 -0  from book/book.go
-    (file scope)                   +2 -0
-example.org/ledger/money  +11 -6
-  money/money.go (modified)  +11 -6
-    Add                  body      +1 -0  (comments or layout only; content_hash unchanged)
-    Amount               signature +1 -1
-        type Amount struct {
-        	Cents    int64
-      - 	Currency string
-      + 	Currency Code
-        }
-    Amount.Currency      signature
-      - Currency string
-      + Currency Code
-    Code                 added     +2 -0  type Code string
-    Half                 removed   +0 -1  func Half(a Amount) Amount
-    Half                 added     +1 -0
-      - func Half(a Amount) Amount
-      + func Half(a *Amount) Amount
-    Scale                signature +2 -2
-      - func Scale(a Amount, factor int) Amount
-      + func Scale(a Amount, by int) Amount
-    Unit                 signature +1 -1
-      - func Unit() Amount
-      + func Unit() *Amount
-    round                body      +1 -1
-    (file scope)                   +2 -0
+// ledgerStatAll is the tree rendering of the ledger diff with --visibility all --stat, less its header.
+const ledgerStatAll = `├── 📦 example.org/ledger  +2 -2
+│   ╰── ✏️ go.sum (modified) [manifest]  +2 -2
+│       ╰── (file scope)  +2 -2
+├── 📦 example.org/ledger/book  +3 -2
+│   ├── ✏️ book/book.go (modified)  +1 -2
+│   │   ├── 💻 Total  body  +1 -1
+│   │   ╰── (file scope)  +0 -1
+│   ╰── ➕ book/count.go (added)  +2 -0
+│       ├── 🔀 Count  moved  +0 -0  from book/book.go
+│       ╰── (file scope)  +2 -0
+╰── 📦 example.org/ledger/money  +11 -6
+    ╰── ✏️ money/money.go (modified)  +11 -6
+        ├── 💻 Add  body  +1 -0  (comments or layout only; content_hash unchanged)
+        ├── ✏️ Amount  signature  +1 -1
+        │   ╰──   type Amount struct {
+        │             Cents    int64
+        │       -     Currency string
+        │       +     Currency Code
+        │         }
+        ├── ✏️ Amount.Currency  signature
+        │   ╰── - Currency string
+        │       + Currency Code
+        ├── ➕ Code  added  +2 -0  type Code string
+        ├── ➖ Half  removed  +0 -1  func Half(a Amount) Amount
+        ├── ➕ Half  added  +1 -0
+        │   ╰── - func Half(a Amount) Amount
+        │       + func Half(a *Amount) Amount
+        ├── ✏️ Scale  signature  +2 -2
+        │   ╰── - func Scale(a Amount, factor int) Amount
+        │       + func Scale(a Amount, by int) Amount
+        ├── ✏️ Unit  signature  +1 -1
+        │   ╰── - func Unit() Amount
+        │       + func Unit() *Amount
+        ├── 💻 round  body  +1 -1
+        ╰── (file scope)  +2 -0
 `
 
 // ledgerExported is the default output: exported rows only, without line counts.
-const ledgerExported = `example.org/ledger/book
-  book/book.go (modified)
-    Total                body
-  book/count.go (added)
-    Count                moved      from book/book.go
-example.org/ledger/money
-  money/money.go (modified)  (1 hidden row)
-    Amount               signature
-        type Amount struct {
-        	Cents    int64
-      - 	Currency string
-      + 	Currency Code
-        }
-    Amount.Currency      signature
-      - Currency string
-      + Currency Code
-    Code                 added      type Code string
-    Half                 removed    func Half(a Amount) Amount
-    Half                 added
-      - func Half(a Amount) Amount
-      + func Half(a *Amount) Amount
-    Scale                signature
-      - func Scale(a Amount, factor int) Amount
-      + func Scale(a Amount, by int) Amount
-    Unit                 signature
-      - func Unit() Amount
-      + func Unit() *Amount
+const ledgerExported = `├── 📦 example.org/ledger/book
+│   ├── ✏️ book/book.go (modified)
+│   │   ╰── 💻 Total  body
+│   ╰── ➕ book/count.go (added)
+│       ╰── 🔀 Count  moved  from book/book.go
+╰── 📦 example.org/ledger/money
+    ╰── ✏️ money/money.go (modified)  (1 hidden row)
+        ├── ✏️ Amount  signature
+        │   ╰──   type Amount struct {
+        │             Cents    int64
+        │       -     Currency string
+        │       +     Currency Code
+        │         }
+        ├── ✏️ Amount.Currency  signature
+        │   ╰── - Currency string
+        │       + Currency Code
+        ├── ➕ Code  added  type Code string
+        ├── ➖ Half  removed  func Half(a Amount) Amount
+        ├── ➕ Half  added
+        │   ╰── - func Half(a Amount) Amount
+        │       + func Half(a *Amount) Amount
+        ├── ✏️ Scale  signature
+        │   ╰── - func Scale(a Amount, factor int) Amount
+        │       + func Scale(a Amount, by int) Amount
+        ╰── ✏️ Unit  signature
+            ╰── - func Unit() Amount
+                + func Unit() *Amount
 `

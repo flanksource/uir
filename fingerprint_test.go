@@ -255,6 +255,33 @@ var _ = Describe("TypedNode", func() {
 	})
 })
 
+var _ = Describe("TypeBuilder", func() {
+	It("qualifies members with their type whatever order the builder is called in, so a shared member name keeps distinct symbol keys", func() {
+		build := func(typeName string) uir.TypedNode {
+			return uir.NewType(typeName).
+				WithVariables(uir.Field("id", uir.RecordFieldTypeString)).
+				WithMethod(uir.NewMethod("Save").Build()).
+				WithConstructor(uir.NewMethod(typeName, uir.Identifier{NodeType: uir.NodeTypeConstructor}).Build()).
+				WithDestructor(uir.NewMethod("close").Build()).
+				WithModule("example.org/app").WithPackage("example.org/app/billing").Build()
+		}
+		account, invoice := build("Account"), build("Invoice")
+		owner := uir.Identifier{Module: "example.org/app", Package: "example.org/app/billing", Type: "Account"}
+
+		Expect([]uir.Identifier{
+			account.Variables[0].Identifier, account.Methods[0].Identifier,
+			account.Constructor.Identifier, account.Destructor.Identifier,
+		}).To(Equal([]uir.Identifier{
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Field: "id", NodeType: uir.NodeTypeField},
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Method: "Save", NodeType: uir.NodeTypeMethod},
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Method: "Account", NodeType: uir.NodeTypeConstructor},
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Method: "close", NodeType: uir.NodeTypeMethod},
+		}))
+		Expect(account.Variables[0].SymbolKey()).NotTo(Equal(invoice.Variables[0].SymbolKey()))
+		Expect(account.Methods[0].SymbolKey()).NotTo(Equal(invoice.Methods[0].SymbolKey()))
+	})
+})
+
 var _ = Describe("TableBuilder", func() {
 	It("qualifies members with their table, so a shared column name keeps distinct symbol keys", func() {
 		orders := ordersTable().WithTriggers(auditTrigger("after", "log")).Build()

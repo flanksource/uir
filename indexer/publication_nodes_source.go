@@ -103,7 +103,7 @@ func (scope nodeScope) declare(symbol nodeSymbol, owner *nodeSymbol) error {
 	case scope.declared.ids[id]:
 		return fmt.Errorf("%s is declared twice", symbol.subject(owner))
 	case scope.declared.keys[key]:
-		return fmt.Errorf("%s has identifier key %s, which another symbol already has; qualify members with their owner, as uir.NewTable does for a table's", symbol.subject(owner), key)
+		return fmt.Errorf("%s has identifier key %s, which another symbol already has; qualify members with their owner, as uir.NewTable and uir.NewType do", symbol.subject(owner), key)
 	}
 	scope.declared.ids[id], scope.declared.keys[key] = true, true
 	return nil
