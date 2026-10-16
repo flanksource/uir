@@ -16,19 +16,19 @@ var _ = Describe("compact symbol suggestions", func() {
 		scope := query.ModuleScopeOptions{RootKey: shopModule, Location: primary}
 		modules, err := pipeline.SuggestSelectors(ctx, "mod:example.org/sh", scope)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(modules.Items).To(Equal([]string{"mod:example.org/shop"}))
+		Expect(modules).To(Equal([]string{"mod:example.org/shop"}))
 		packages, err := pipeline.SuggestSelectors(ctx, "pkg:example.org/shop:st", scope)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(packages.Items).To(Equal([]string{"pkg:example.org/shop:store"}))
+		Expect(packages).To(Equal([]string{"pkg:example.org/shop:store"}))
 		functions, err := pipeline.SuggestSelectors(ctx, "func:Store.S", scope)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(functions.Items).To(Equal([]string{"func:example.org/shop/store.Store.Save"}))
+		Expect(functions).To(Equal([]string{"func:example.org/shop/store.Store.Save"}))
 		kinds, err := pipeline.SuggestSelectors(ctx, "kind:f", scope)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(kinds.Items).To(Equal([]string{"kind:field", "kind:foreign_key", "kind:func"}), "kind: completes registered kind names")
+		Expect(kinds).To(Equal([]string{"kind:field", "kind:foreign_key", "kind:func"}), "kind: completes registered kind names")
 		methods, err := pipeline.SuggestSelectors(ctx, "kind:method:Store.S", scope)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(methods.Items).To(Equal([]string{"kind:method:example.org/shop/store.Store.Save"}))
+		Expect(methods).To(Equal([]string{"kind:method:example.org/shop/store.Store.Save"}))
 		_, err = pipeline.SuggestSelectors(ctx, "kind:acme.rule:R", scope)
 		Expect(err).To(MatchError(ContainSubstring(`symbol kind "acme.rule" is not registered`)))
 	})
@@ -43,7 +43,7 @@ var _ = Describe("compact symbol suggestions", func() {
 			GinkgoHelper()
 			found, err := pipeline.SuggestSelectors(ctx, prefix, scope)
 			Expect(err).ToNot(HaveOccurred(), prefix)
-			return found.Items
+			return found
 		}
 
 		Expect(suggest(`mod:"example.org/ent`)).To(Equal([]string{"mod:" + entitiesModule}))
@@ -64,11 +64,11 @@ var _ = Describe("compact symbol suggestions", func() {
 		Expect(err).ToNot(HaveOccurred())
 		found, err := pipeline.SuggestSymbols(ctx, "store.Store.S", query.ModuleScopeOptions{RootKey: shopModule, Location: primary, Limit: 10})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(found.Items).To(HaveLen(1))
-		Expect(found.Items[0].QueryName).To(Equal("example.org/shop/store.Store.Save"))
+		Expect(found).To(HaveLen(1))
+		Expect(found[0].QueryName).To(Equal("example.org/shop/store.Store.Save"))
 		missing, err := pipeline.SuggestSymbols(ctx, "store.Missing", query.ModuleScopeOptions{RootKey: shopModule, Location: primary})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(missing.Items).To(Equal([]query.ModuleSymbol{}))
+		Expect(missing).To(Equal([]query.ModuleSymbol{}))
 	})
 	DescribeTable("validates a partial symbol spelling, which is literal text",
 		func(ctx SpecContext, prefix string, valid bool) {

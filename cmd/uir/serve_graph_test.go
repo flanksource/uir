@@ -108,13 +108,13 @@ var _ = Describe("module call graph", func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	It("serves the graph fields at the top level beside stages, warnings and candidates", func() {
+	It("serves the graph fields at the top level beside stages and candidates", func() {
 		response := get(url.Values{"selector": {"orders.Submit"}, "direction": {"both"}, "depth": {"2"}, "root": {ordersRoot}})
 		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
 		var envelope map[string]any
 		Expect(json.Unmarshal(response.Body.Bytes(), &envelope)).To(Succeed())
 		Expect(envelope).To(And(HaveKey("roots"), HaveKey("nodes"), HaveKey("edges"), HaveKey("omitted"), HaveKey("stages"),
-			HaveKey("packages"), HaveKeyWithValue("warnings", BeEmpty()), HaveKeyWithValue("candidates", BeEmpty())))
+			HaveKey("packages"), HaveKeyWithValue("candidates", BeEmpty()), Not(HaveKey("warnings"))))
 
 		var result query.GraphResult
 		Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
