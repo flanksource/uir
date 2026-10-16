@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@flanksource/clicky-ui/components";
-import { captureDatabaseModule, compareDatabaseSnapshots, createDatabaseModule, deleteDatabaseModule, errorMessage, listConnectionDatabases, listDatabaseCaptures, listDatabaseSnapshotSchemas, type ConnectionView, type DatabaseDiff, type DatabaseModule } from "./api";
+import { CONNECTION_DASHBOARD_QUERY_KEY } from "@flanksource/clicky-ui/connections";
+import { captureDatabaseModule, compareDatabaseSnapshots, createDatabaseModule, deleteDatabaseModule, errorMessage, listConnectionDatabases, listDatabaseCaptures, listDatabaseModules, listDatabaseSnapshotSchemas, listSQLConnections, type DatabaseDiff, type DatabaseModule } from "./api";
 import type { Route } from "./route";
 import { Card, ErrorMessage, Field, Muted, PanelForm, Row, Section, TextInput } from "./ui";
 import { useLoad } from "./use-load";
 
-const sqlTypes = new Set(["postgres", "sql_server", "sqlite", "mysql"]);
 const selectClass = "h-9 min-w-48 rounded-md border border-input bg-background px-3 text-sm";
 
 function CaptureChoice({ snapshots, value, onChange, label }: {
@@ -20,15 +21,17 @@ function CaptureChoice({ snapshots, value, onChange, label }: {
   </select></Field>;
 }
 
-export function DatabaseModulesView({ connections, modules, route, onRoute, onRefresh, refresh }: {
-  connections: ConnectionView[];
-  modules: DatabaseModule[];
+export function DatabaseModulesView({ route, onRoute, onRefresh, refresh }: {
   route: Route;
   onRoute: (patch: Partial<Route>) => void;
   onRefresh: () => void;
   refresh: number;
 }) {
-  const sqlConnections = connections.filter((item) => sqlTypes.has(item.type));
+  // Keyed under the dashboard's query key so ConnectionsPage's invalidation after a save or delete refetches it.
+  const connections = useQuery({ queryKey: [CONNECTION_DASHBOARD_QUERY_KEY, "sql-connections", refresh], queryFn: listSQLConnections });
+  const sqlConnections = connections.data ?? [];
+  const loadedModules = useLoad<DatabaseModule[]>(listDatabaseModules, `database-modules:${refresh}`);
+  const modules = loadedModules.data ?? [];
   const [connectionID, setConnectionID] = useState("");
   const selectedConnection = sqlConnections.find((item) => item.id === connectionID) ?? sqlConnections[0];
   const databases = useLoad(selectedConnection ? () => listConnectionDatabases(selectedConnection.id) : null, `databases:${selectedConnection?.id}:${refresh}`);
@@ -95,7 +98,8 @@ export function DatabaseModulesView({ connections, modules, route, onRoute, onRe
     <PanelForm onSubmit={add}>
       <h3>Add a database</h3>
       <Row><Field label="SQL connection"><select className={selectClass} value={selectedConnection?.id ?? ""} onChange={(event) => { setConnectionID(event.target.value); setDatabaseName(""); }}>
-        {sqlConnections.length === 0 && <option value="">Save a SQL connection first</option>}
+        {connections.isPending && <option value="">Loading connections…</option>}
+        {connections.isSuccess && sqlConnections.length === 0 && <option value="">Save a SQL connection first</option>}
         {sqlConnections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.type}</option>)}
       </select></Field>
       <Field label="Database"><select className={selectClass} value={selectedDatabase} onChange={(event) => setDatabaseName(event.target.value)}>
@@ -103,15 +107,16 @@ export function DatabaseModulesView({ connections, modules, route, onRoute, onRe
         {(databases.data ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
       </select></Field>
       <Field label="Module name"><TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder={selectedDatabase || "Example"} /></Field></Row>
-      <ErrorMessage error={databases.error} />
+      <ErrorMessage error={connections.error ? errorMessage(connections.error) : databases.error} />
       <Button type="submit" disabled={!selectedDatabase || Boolean(pending)} loading={pending === "add"}>Add and capture schema</Button>
     </PanelForm>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">{modules.map((module) => <Card key={module.id}>
-      <strong>{module.name}</strong><Muted>{module.database_name} · {connections.find((item) => item.id === module.connection_id)?.name ?? "Missing connection"}</Muted>
+      <strong>{module.name}</strong><Muted>{module.database_name} · {sqlConnections.find((item) => item.id === module.connection_id)?.name ?? "Missing connection"}</Muted>
       <Row><Button type="button" variant="outline" disabled={Boolean(pending)} onClick={() => capture(module)}>Capture schema</Button>
         <Button type="button" variant="outline" disabled={Boolean(pending)} onClick={() => remove(module)}>Remove module</Button></Row>
     </Card>)}</div>
-    {modules.length === 0 && <Muted>No database modules are registered yet.</Muted>}
+    <ErrorMessage error={loadedModules.error} />
+    {loadedModules.data?.length === 0 && <Muted>No database modules are registered yet.</Muted>}
     {modules.length > 0 && <PanelForm onSubmit={compare}>
       <h3>Compare schema captures</h3>
       <Muted>Same-module comparison includes every schema. Across modules, select a schema on each side; objects align by exact name and SQL type.</Muted>
