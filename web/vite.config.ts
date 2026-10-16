@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -5,7 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
 
 const webDir = fileURLToPath(new URL(".", import.meta.url)).replace(/\/$/, "");
-const clickyRoot = fileURLToPath(new URL("../../clicky-ui/", import.meta.url));
+const clickyRoot = process.env.CLICKY_UI_ROOT
+  ? `${resolve(process.env.CLICKY_UI_ROOT)}/`
+  : fileURLToPath(new URL("../../clicky-ui/", import.meta.url));
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const clickySource = resolve(clickyRoot, "packages/ui/src");
 
@@ -34,9 +37,10 @@ const clickyEntries = {
 } as const;
 
 // `uir serve --dev` and vitest both run Vite's serve command and resolve clicky-ui from the sibling
-// checkout, so local clicky-ui changes need no publish or install; `vite build` uses the published package.
+// checkout (or CLICKY_UI_ROOT), so local clicky-ui changes need no publish or install. `vite build`,
+// and any serve without that checkout such as CI, use the published package pinned in package.json.
 export default defineConfig(({ command }) => {
-  const localClicky = command === "serve";
+  const localClicky = command === "serve" && existsSync(clickySource);
   return {
     plugins: [react(), tailwindcss()],
     resolve: localClicky
