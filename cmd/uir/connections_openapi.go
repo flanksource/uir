@@ -6,24 +6,10 @@ import (
 	"github.com/flanksource/clicky/rpc"
 )
 
-func connectionOpenAPI(spec *rpc.OpenAPISpec) {
+// databaseModuleOpenAPI documents the database-module routes UIR serves beside the commons-db
+// connection service, which documents its own through connections.AddConnectionsOpenAPI.
+func databaseModuleOpenAPI(spec *rpc.OpenAPISpec) {
 	stringSchema := &rpc.OpenAPISchema{Type: "string"}
-	boolSchema := &rpc.OpenAPISchema{Type: "boolean"}
-	properties := &rpc.OpenAPISchema{Type: "object", AdditionalProperties: stringSchema}
-	connectionInput := &rpc.OpenAPISchema{Type: "object", Required: []string{"name", "type"}, Properties: map[string]*rpc.OpenAPISchema{
-		"name": stringSchema, "namespace": stringSchema, "type": {Type: "string", Enum: []any{"git", "github", "azure_devops", "gitlab", "postgres", "sql_server", "sqlite", "s3", "mysql"}},
-		"url": stringSchema, "username": stringSchema, "password": stringSchema, "certificate": stringSchema,
-		"properties": properties, "insecure_tls": boolSchema,
-	}}
-	connectionPatch := *connectionInput
-	connectionPatch.Required = nil
-	connectionView := &rpc.OpenAPISchema{Type: "object", Properties: map[string]*rpc.OpenAPISchema{
-		"id": {Type: "string", Format: "uuid"}, "name": stringSchema, "namespace": stringSchema, "type": stringSchema,
-		"url": stringSchema, "username": stringSchema, "password": stringSchema, "certificate": stringSchema,
-		"properties": properties, "insecure_tls": boolSchema, "has_url": boolSchema, "has_username": boolSchema,
-		"has_password": boolSchema, "has_certificate": boolSchema, "literal_credentials": boolSchema,
-		"warnings": {Type: "array", Items: stringSchema},
-	}}
 	moduleInput := &rpc.OpenAPISchema{Type: "object", Required: []string{"connection_id", "database_name", "name"}, Properties: map[string]*rpc.OpenAPISchema{
 		"connection_id": {Type: "string", Format: "uuid"}, "database_name": stringSchema, "name": stringSchema,
 	}}
@@ -45,7 +31,6 @@ func connectionOpenAPI(spec *rpc.OpenAPISpec) {
 	}}
 	object := &rpc.OpenAPISchema{Type: "object"}
 	stringList := &rpc.OpenAPISchema{Type: "array", Items: stringSchema}
-	connectionList := &rpc.OpenAPISchema{Type: "array", Items: connectionView}
 	moduleList := &rpc.OpenAPISchema{Type: "array", Items: moduleView}
 	captureList := &rpc.OpenAPISchema{Type: "array", Items: capture}
 	created := &rpc.OpenAPISchema{Type: "object", Properties: map[string]*rpc.OpenAPISchema{
@@ -55,14 +40,7 @@ func connectionOpenAPI(spec *rpc.OpenAPISpec) {
 		path, method, summary, status string
 		request, response             *rpc.OpenAPISchema
 	}{
-		{"/api/v1/connections/schema", "get", "List connection form schemas", "200", nil, &rpc.OpenAPISchema{Type: "object", AdditionalProperties: object}},
-		{"/api/v1/connections", "get", "List saved connections", "200", nil, connectionList},
-		{"/api/v1/connections", "post", "Create a connection", "201", connectionInput, connectionView},
-		{"/api/v1/connections/{id}", "get", "Read a connection", "200", nil, connectionView},
-		{"/api/v1/connections/{id}", "put", "Update a connection", "200", &connectionPatch, connectionView},
-		{"/api/v1/connections/{id}", "delete", "Delete a connection", "204", nil, nil},
-		{"/api/v1/connections/{id}/test", "post", "Test a connection", "200", nil, &rpc.OpenAPISchema{Type: "object", Properties: map[string]*rpc.OpenAPISchema{"ok": boolSchema}}},
-		{"/api/v1/connections/{id}/databases", "post", "List accessible SQL databases", "200", nil, stringList},
+		{"/api/v1/database-modules/connections/{id}/databases", "post", "List the SQL databases a saved connection can reach", "200", nil, stringList},
 		{"/api/v1/database-modules", "get", "List database modules", "200", nil, moduleList},
 		{"/api/v1/database-modules", "post", "Register and capture a database", "201", moduleInput, created},
 		{"/api/v1/database-modules/{id}", "get", "Read a database module", "200", nil, moduleView},
@@ -73,7 +51,7 @@ func connectionOpenAPI(spec *rpc.OpenAPISpec) {
 		{"/api/v1/database-modules/diff", "post", "Compare schema captures", "200", diffInput, diffResult},
 	}
 	for _, route := range routes {
-		operation := rpc.OpenAPIOperation{Tags: []string{"Connections"}, Summary: route.summary,
+		operation := rpc.OpenAPIOperation{Tags: []string{"Database modules"}, Summary: route.summary,
 			Description: "Available only to local, same-origin requests.",
 			Responses:   map[string]rpc.OpenAPIResponse{route.status: {Description: "Success"}}}
 		if route.request != nil {

@@ -1,8 +1,9 @@
 table "connections" {
   schema = schema.public
   column "id" {
-    type = uuid
-    null = false
+    type    = uuid
+    null    = false
+    default = sql("gen_random_uuid()")
   }
   column "name" {
     type = text
@@ -11,6 +12,11 @@ table "connections" {
   column "namespace" {
     type = text
     null = false
+  }
+  column "source" {
+    type    = text
+    null    = false
+    default = ""
   }
   column "type" {
     type = text
@@ -41,17 +47,22 @@ table "connections" {
     null = false
   }
   column "created_at" {
-    type = timestamptz
-    null = false
+    type    = timestamptz
+    null    = false
+    default = sql("CURRENT_TIMESTAMP")
   }
   column "updated_at" {
-    type = timestamptz
-    null = false
+    type    = timestamptz
+    null    = false
+    default = sql("CURRENT_TIMESTAMP")
+  }
+  column "created_by" {
+    type = uuid
+    null = true
   }
   primary_key { columns = [column.id] }
   unique "connections_namespace_name_key" { columns = [column.namespace, column.name] }
   check "connections_name_check" { expr = "length(name) > 0" }
-  check "connections_type_check" { expr = "type IN ('git', 'github', 'azure_devops', 'gitlab', 'postgres', 'sql_server', 'sqlite', 's3', 'mysql')" }
 }
 
 table "database_modules" {
