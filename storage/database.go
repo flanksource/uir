@@ -20,7 +20,7 @@ type DBOptions struct {
 	Schema string
 }
 
-//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl migrations/11_history_prunes.hcl migrations/12_domain_catalog.hcl migrations/13_layered_fingerprints.hcl migrations/14_connections.hcl migrations/15_snapshot_sibling_shapes.hcl
+//go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl migrations/11_history_prunes.hcl migrations/12_domain_catalog.hcl migrations/13_layered_fingerprints.hcl migrations/14_connections.hcl migrations/15_snapshot_sibling_shapes.hcl migrations/16_properties.hcl
 var migrations embed.FS
 
 // UirDB opens the database, discards a pre-handle, H64a, or two-layer index, applies the schema, seeds the builtin
@@ -53,6 +53,9 @@ func UirDB(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 
 func migrate(ctx context.Context, database *gorm.DB, dsn, schema string) error {
 	if err := discardStaleGeneration(ctx, database, schema); err != nil {
+		return err
+	}
+	if err := dropConnectionTypeCheck(ctx, database, schema); err != nil {
 		return err
 	}
 	migrationOptions := []commonsmigrate.Option{
