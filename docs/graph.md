@@ -5,7 +5,7 @@
 ## Command
 
 ```sh
-uir graph <selector> [--direction callees|callers|both] [--depth <n>] [--limit <n>] [--exclude <patterns>] [--root <module>] [--location <checkout>] [--snapshot <uuid>]
+uir graph <selector> [--direction callees|callers|both] [--depth <n>] [--limit <n>] [--exclude <patterns>] [--root <module>] [--location <checkout>] [--snapshot <uuid>] [--all]
 uir graph --symbol <id> [...]
 ```
 
@@ -17,7 +17,8 @@ uir graph --symbol <id> [...]
 | `--depth` | How many calls away from the root the graph reaches, from 1 through 8. The default is 2. |
 | `--limit` | The most nodes the graph holds, from 1 through 1000. The default is 150. |
 | `--exclude` | Comma-separated [package patterns](#excluding-packages) whose nodes the graph leaves out. The default is `std,builtin,gorm.io/...`; `none` excludes nothing. |
-| `--root`, `--location`, `--snapshot` | The snapshots to read, as for [`uir query`](query.md). With none, the primary head of every indexed root. `--location` and `--snapshot` are mutually exclusive. |
+| `--root`, `--location`, `--snapshot` | The snapshots to read, as for [`uir query`](query.md). With none, the checkout enclosing the working directory, else the primary head of every indexed root. `--location` and `--snapshot` are mutually exclusive. |
+| `--all` | Every indexed root instead of the current checkout. Cannot be combined with `--root`, `--location`, or `--snapshot`. |
 
 The command is a Clicky operation: `--format json` and `--format yaml` print the envelope below, and the default format prints a tree. `uir serve` exposes it as `GET /api/v1/modules/graph` with the same options as query parameters (`selector`, `symbol`, `direction`, `depth`, `limit`, `exclude`, `root`, `location`, `snapshot`); `exclude` is one comma list, `exclude=std,gorm.io/...`.
 

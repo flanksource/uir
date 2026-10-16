@@ -57,6 +57,15 @@ const (
 	StyleIdentity   = "text-amber-400"
 	StyleIndexKind  = "text-purple-500"
 	StyleForeignKey = "text-teal-500"
+
+	StyleDiffAdded        = "text-green-600"
+	StyleDiffRemoved      = "text-red-600"
+	StyleDiffSignature    = "text-yellow-600"
+	StyleDiffStructure    = "text-orange-600"
+	StyleDiffBody         = "text-blue-600"
+	StyleDiffMoved        = "text-cyan-600"
+	StyleDiffAddedCount   = "text-green-600"
+	StyleDiffRemovedCount = "text-red-600"
 )
 
 // LiteralStyle is the style of a literal of the given type: one each for

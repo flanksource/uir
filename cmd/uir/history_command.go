@@ -10,14 +10,14 @@ import (
 )
 
 type historyOptions struct {
-	Root     string `flag:"root" help:"Registered Go module path" required:"true"`
-	Location string `flag:"location" help:"Registered checkout path; defaults to the primary checkout"`
+	Root     string `flag:"root" help:"Registered Go module path; defaults to the module of the current checkout"`
+	Location string `flag:"location" help:"Registered checkout path; defaults to the current checkout, else the primary checkout"`
 	Limit    int    `flag:"limit" help:"Number of recent commits, from 1 through 200" default:"50"`
 }
 
 type historyShowOptions struct {
 	Commit       string `args:"true" required:"true"`
-	Root         string `flag:"root" help:"Registered Go module path" required:"true"`
+	Root         string `flag:"root" help:"Registered Go module path; defaults to the module of the current checkout"`
 	Visibility   string `flag:"visibility" help:"Rows to report: exported, internal, or all" default:"all"`
 	Stat         bool   `flag:"stat" help:"Add line counts from hash-verified Git blobs" default:"true"`
 	IncludeTests bool   `flag:"include-tests" help:"Include Go test symbols when indexing historical commits"`
@@ -29,7 +29,11 @@ func registerHistoryCommand(root *cobra.Command) {
 		if err != nil {
 			return symboldiff.History{}, err
 		}
-		return symboldiff.ListHistory(ctx, database, options.Root, options.Location, options.Limit)
+		rootKey, location, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, Location: options.Location, Required: true})
+		if err != nil {
+			return symboldiff.History{}, err
+		}
+		return symboldiff.ListHistory(ctx, database, rootKey, location, options.Limit)
 	})
 	command.Short = "List branch, commit, and pull request revisions of an indexed module"
 	setModuleRoute(command, "modules/history")
@@ -43,12 +47,16 @@ func registerHistoryCommand(root *cobra.Command) {
 		if err != nil {
 			return symboldiff.Result{}, err
 		}
+		rootKey, _, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, Required: true})
+		if err != nil {
+			return symboldiff.Result{}, err
+		}
 		taskContext, err := runContext(ctx)
 		if err != nil {
 			return symboldiff.Result{}, err
 		}
 		return symboldiff.DiffCommit(ctx, database, symboldiff.CommitOptions{
-			RootKey: options.Root, Commit: options.Commit, Visibility: visibility, Stat: options.Stat, IncludeTests: options.IncludeTests,
+			RootKey: rootKey, Commit: options.Commit, Visibility: visibility, Stat: options.Stat, IncludeTests: options.IncludeTests,
 			TaskContext: taskContext,
 		})
 	})

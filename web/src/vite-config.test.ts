@@ -1,16 +1,28 @@
-import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { loadConfigFromFile } from "vite";
 
 const configFile = fileURLToPath(new URL("../vite.config.ts", import.meta.url));
-const clickyRoot = fileURLToPath(new URL("../../../clicky-ui/", import.meta.url));
-const source = new URL("packages/ui/src/", `file://${clickyRoot}`);
 
-it("resolves Clicky UI source and styles only in Vite development mode", async () => {
-  const development = await loadConfigFromFile(
-    { command: "serve", mode: "development" },
-    configFile,
-  );
+let clickyRoot: string;
+
+beforeEach(() => {
+  clickyRoot = `${mkdtempSync(join(tmpdir(), "clicky-ui-"))}/`;
+  process.env.CLICKY_UI_ROOT = clickyRoot;
+});
+
+afterEach(() => {
+  delete process.env.CLICKY_UI_ROOT;
+  rmSync(clickyRoot, { recursive: true, force: true });
+});
+
+it.each(["development", "test"])("resolves Clicky UI source and styles from the sibling checkout when Vite serves %s", async (mode) => {
+  mkdirSync(join(clickyRoot, "packages/ui/src"), { recursive: true });
+  const source = new URL("packages/ui/src/", pathToFileURL(clickyRoot));
+  const development = await loadConfigFromFile({ command: "serve", mode }, configFile);
   expect(development?.config.resolve?.alias).toEqual(
     expect.arrayContaining([
       {
@@ -26,6 +38,10 @@ it("resolves Clicky UI source and styles only in Vite development mode", async (
         replacement: fileURLToPath(new URL("components.ts", source)),
       },
       {
+        find: "@flanksource/clicky-ui/connections",
+        replacement: fileURLToPath(new URL("connections.ts", source)),
+      },
+      {
         find: "@flanksource/clicky-ui/styles.css",
         replacement: fileURLToPath(new URL("styles/full.css", source)),
       },
@@ -36,12 +52,16 @@ it("resolves Clicky UI source and styles only in Vite development mode", async (
     ]),
   );
   expect(development?.config.server?.fs?.allow).toContain(clickyRoot);
+});
 
-  for (const environment of [
-    { command: "build", mode: "production" },
-    { command: "serve", mode: "test" },
-  ] as const) {
-    const config = await loadConfigFromFile(environment, configFile);
-    expect(config?.config.resolve?.alias).toBeUndefined();
-  }
+it("serves the published Clicky UI package when there is no sibling checkout", async () => {
+  const development = await loadConfigFromFile({ command: "serve", mode: "test" }, configFile);
+  expect(development?.config.resolve?.alias).toBeUndefined();
+  expect(development?.config.server?.fs?.allow).not.toContain(clickyRoot);
+});
+
+it("builds against the published Clicky UI package", async () => {
+  mkdirSync(join(clickyRoot, "packages/ui/src"), { recursive: true });
+  const production = await loadConfigFromFile({ command: "build", mode: "production" }, configFile);
+  expect(production?.config.resolve?.alias).toBeUndefined();
 });

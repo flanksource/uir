@@ -33,7 +33,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		to := repo.commit("shop after")
 		repo.index(ctx, database)
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
 	})
@@ -51,7 +51,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		to := repo.commit("shop after")
 		repo.index(ctx, database)
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
 	})
@@ -68,7 +68,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		original := repo.index(ctx, database)
 		GinkgoT().Setenv("CGO_ENABLED", "0")
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect([]string{result.From.Commit, result.To.Commit, result.From.WorktreeState}).To(Equal([]string{from, to, "clean"}))
 		Expect(result.From.SnapshotID).ToNot(Equal(original))
@@ -95,23 +95,21 @@ var _ = Describe("commit-to-snapshot selection", func() {
 			to := repo.commit("shop after")
 			clean := repo.index(ctx, database)
 
-			_, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll})
+			_, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll})
 			Expect(err).To(MatchError(And(ContainSubstring("only dirty snapshots"), ContainSubstring(dirty), ContainSubstring("--snapshot-from"))))
 
 			repo.write(map[string]*string{"checkout.go": checkoutSource(" + 1")})
 			unindexed := repo.commit("shop unindexed")
-			_, err = Diff(ctx, database, Options{RootKey: shopRoot, From: to, To: unindexed, Visibility: VisibilityAll})
+			_, err = Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{to, unindexed}, Visibility: VisibilityAll})
 			Expect(err).To(MatchError(And(ContainSubstring(unindexed), ContainSubstring("has no snapshot"), ContainSubstring("index"))))
 
-			_, err = Diff(ctx, database, Options{RootKey: shopRoot, From: "", To: to, Visibility: VisibilityAll})
-			Expect(err).To(MatchError(ContainSubstring("empty revision")))
-			_, _, err = ParseRange(".." + to)
+			_, err = Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{"", to}, Visibility: VisibilityAll})
 			Expect(err).To(MatchError(ContainSubstring("empty revision")))
 
-			_, err = Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, SnapshotFrom: clean, Visibility: VisibilityAll})
+			_, err = Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, SnapshotFrom: clean, Visibility: VisibilityAll})
 			Expect(err).To(MatchError(And(ContainSubstring(clean), ContainSubstring("records revision "+to), ContainSubstring("not "+from))))
 
-			result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, SnapshotFrom: dirty, Visibility: VisibilityAll, Stat: true})
+			result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, SnapshotFrom: dirty, Visibility: VisibilityAll, Stat: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect([]string{result.From.SnapshotID, result.From.WorktreeState}).To(Equal([]string{dirty, "dirty"}))
 			cart := result.file("cart.go")
@@ -119,7 +117,7 @@ var _ = Describe("commit-to-snapshot selection", func() {
 			Expect([]any{cart.Lines, cart.FileScope, cart.names()}).To(Equal([]any{(*LineCount)(nil), (*LineCount)(nil), []string{"signature Cart", "added Cart.Owner", "removed Empty"}}),
 				"a hash mismatch fails the file's line counts but keeps its symbol rows")
 			Expect(result.file("checkout.go").Lines).To(Equal(&LineCount{Added: 1, Removed: 1}))
-			Expect(body(result)).To(ContainSubstring("  cart.go (modified)  lines unavailable: "))
+			Expect(body(result)).To(ContainSubstring("✏️ cart.go (modified)  lines unavailable: "))
 		},
 		Entry("SQLite", sqliteOptions),
 		Entry("PostgreSQL", postgresOptions),
@@ -136,15 +134,15 @@ var _ = Describe("commit-to-snapshot selection", func() {
 		to := repo.commit("shop after")
 		GinkgoT().Setenv("CGO_ENABLED", "0")
 		repo.index(ctx, database)
-		_, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll})
+		_, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll})
 		Expect(err).To(MatchError(And(ContainSubstring("configuration hash"), ContainSubstring("not comparable"))))
 	})
 
 	It("rejects an unknown visibility and an unknown root", func(ctx SpecContext) {
 		database := openDatabase(ctx, sqliteOptions())
-		_, err := Diff(ctx, database, Options{RootKey: shopRoot, From: "a", To: "b", Visibility: "public"})
+		_, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{"a", "b"}, Visibility: "public"})
 		Expect(err).To(MatchError(ContainSubstring(`visibility "public"`)))
-		_, err = Diff(ctx, database, Options{RootKey: "example.org/missing", From: "a", To: "b", Visibility: VisibilityAll})
+		_, err = Diff(ctx, database, Options{RootKey: "example.org/missing", Revisions: []string{"a", "b"}, Visibility: VisibilityAll})
 		Expect(err).To(MatchError(ContainSubstring(`root "example.org/missing" was not found`)))
 	})
 })

@@ -133,22 +133,17 @@ const (
 	ledgerPath    = "billing/Ledger.cls"
 )
 
-func ledgerMember(id uir.Identifier) uir.Identifier {
-	id.Package, id.Type = ledgerPackage, "Ledger"
-	return id
-}
-
 func ledgerField(name string, visibility uir.Visibility) uir.RecordField {
 	field := uir.Field(name, uir.RecordFieldTypeString)
-	field.Identifier, field.Visibility = ledgerMember(field.Identifier), visibility
+	field.Visibility = visibility
 	return field
 }
 
 func ledgerClass(postCall string) uir.TypedNode {
 	amount := uir.Field("amount", uir.RecordFieldTypeFloat)
-	constructor := uir.NewMethod("Ledger", ledgerMember(uir.Identifier{NodeType: uir.NodeTypeConstructor})).
+	constructor := uir.NewMethod("Ledger", uir.Identifier{NodeType: uir.NodeTypeConstructor}).
 		WithVisibility(uir.VisibilityPublic).WithParam(ledgerField("owner", uir.VisibilityNA)).Build()
-	post := uir.NewMethod("post", ledgerMember(uir.Identifier{})).WithVisibility(uir.VisibilityPublic).
+	post := uir.NewMethod("post").WithVisibility(uir.VisibilityPublic).
 		WithParam(amount).WithBody(blockCalling(postCall)).Build()
 	return uir.NewType("Ledger").WithPackage(ledgerPackage).WithVisibility(uir.VisibilityPublic).
 		WithVariables(ledgerField("balance", uir.VisibilityPrivate), ledgerField("owner", uir.VisibilityPublic)).

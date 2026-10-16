@@ -12,9 +12,10 @@ import (
 )
 
 type moduleBrowseOptions struct {
-	RootKey    string `flag:"root" help:"Module path"`
-	Location   string `flag:"location" help:"Registered checkout path"`
+	RootKey    string `flag:"root" help:"Module path; defaults to the module of the current checkout"`
+	Location   string `flag:"location" help:"Registered checkout path; defaults to the current checkout"`
 	SnapshotID string `flag:"snapshot" help:"Immutable snapshot UUID"`
+	allRootsOption
 }
 
 type moduleContentOptions struct {
@@ -68,7 +69,11 @@ func registerModuleBrowseCommands(root *cobra.Command) {
 		if err != nil {
 			return query.ModuleBrowseResult{}, err
 		}
-		return pipeline.BrowseModules(ctx, query.ModuleScopeOptions{RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID})
+		scope, err := moduleScope(ctx, database, checkoutDefaults{Root: options.RootKey, Location: options.Location, Snapshot: options.SnapshotID, All: options.All})
+		if err != nil {
+			return query.ModuleBrowseResult{}, err
+		}
+		return pipeline.BrowseModules(ctx, scope)
 	})
 	browse.Short = "Browse effective sources and symbols in one module snapshot"
 	setModuleRoute(browse, "modules/browse")

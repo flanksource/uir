@@ -9,6 +9,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
 )
 
@@ -105,6 +106,32 @@ func (index lineIndex) rangeOf(span storage.ByteSpan) storage.Range {
 	startLine, startColumn := index.position(span[0])
 	endLine, endColumn := index.position(span[1])
 	return storage.Range{startLine, startColumn, endLine, endColumn}
+}
+
+// SyntaxDocument extracts one Go file from its syntax alone, outside any index, and fills each symbol's
+// public and private layer hashes and shapes from its extracted node, so two syntax documents of a file
+// classify a change by layer. It reads no type information, so no symbol has a canonical id.
+func SyntaxDocument(pathKey, packagePath string, content []byte) (storage.DocumentContent, error) {
+	indexed, err := extractGoFile(pathKey, packagePath, content)
+	if err != nil {
+		return storage.DocumentContent{}, err
+	}
+	nodes := make(map[storage.ByteSpan]uir.Node, len(indexed.Nodes))
+	for _, node := range indexed.Nodes {
+		nodes[node.Name] = node.node
+	}
+	if len(nodes) != len(indexed.Nodes) {
+		return storage.DocumentContent{}, fmt.Errorf("%q declares %d symbols over %d name spans", pathKey, len(indexed.Nodes), len(nodes))
+	}
+	document := indexed.syntaxDocument()
+	for index := range document.Symbols {
+		symbol := &document.Symbols[index]
+		node := nodes[symbol.NameBytes]
+		prints := uir.Fingerprint(node)
+		symbol.PublicHash, symbol.PrivateHash = prints.Public, prints.Private
+		symbol.Shape, symbol.PublicShape = uir.Shape(node, uir.LayerPrivate), uir.Shape(node, uir.LayerPublic)
+	}
+	return document, nil
 }
 
 // syntaxDocument renders the AST extraction of one file in the document format, symbols sorted by

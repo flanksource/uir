@@ -11,9 +11,7 @@ import (
 	"net/url"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +20,7 @@ import (
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/symboldiff"
 	"github.com/spf13/cobra"
 )
 
@@ -50,8 +49,6 @@ type preparedRefactor struct {
 	hash     string
 	files    []string
 }
-
-var refactorHunkHeader = regexp.MustCompile(`^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@`)
 
 func registerRefactorCommands(root *cobra.Command, runtime *commandRuntime) {
 	preview := clicky.AddNamedCommandWithContext("refactor-preview", root, refactorOptions{}, func(ctx context.Context, options refactorOptions) (refactorPreview, error) {
@@ -220,65 +217,24 @@ func runGopatch(ctx context.Context, binary, directory string, args []string, ds
 }
 
 func refactorDiffFiles(diff, directory string) ([]string, error) {
-	files := map[string]bool{}
-	oldLines, newLines := 0, 0
-	for _, line := range strings.Split(diff, "\n") {
-		if oldLines > 0 || newLines > 0 {
-			if line == "" {
-				return nil, errors.New("gopatch diff ended inside a hunk")
-			}
-			switch line[0] {
-			case ' ':
-				oldLines--
-				newLines--
-			case '-':
-				oldLines--
-			case '+':
-				newLines--
-			case '\\':
-				continue
-			default:
-				return nil, fmt.Errorf("invalid gopatch diff hunk line %q", line)
-			}
-			if oldLines < 0 || newLines < 0 {
-				return nil, errors.New("gopatch diff hunk exceeds its declared line count")
-			}
-			continue
-		}
-		if match := refactorHunkHeader.FindStringSubmatch(line); match != nil {
-			oldLines, newLines = 1, 1
-			var err error
-			if match[1] != "" {
-				oldLines, err = strconv.Atoi(match[1])
-				if err != nil {
-					return nil, fmt.Errorf("invalid gopatch diff hunk size: %w", err)
-				}
-			}
-			if match[2] != "" {
-				newLines, err = strconv.Atoi(match[2])
-				if err != nil {
-					return nil, fmt.Errorf("invalid gopatch diff hunk size: %w", err)
-				}
-			}
-			continue
-		}
-		if !strings.HasPrefix(line, "--- ") && !strings.HasPrefix(line, "+++ ") {
-			continue
-		}
-		path := strings.TrimSpace(line[4:])
-		if path == "/dev/null" {
-			continue
-		}
-		if path == "" || filepath.Ext(path) != ".go" {
-			return nil, fmt.Errorf("gopatch diff has an invalid path %q", path)
-		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(directory, path)
-		}
-		files[filepath.Clean(path)] = true
+	patch, err := symboldiff.ParsePatch(strings.NewReader(diff))
+	if err != nil {
+		return nil, fmt.Errorf("read gopatch diff: %w", err)
 	}
-	if oldLines != 0 || newLines != 0 {
-		return nil, errors.New("gopatch diff ended inside a hunk")
+	files := map[string]bool{}
+	for _, file := range patch {
+		for _, path := range []string{file.OldPath, file.NewPath} {
+			if path == "" {
+				continue
+			}
+			if filepath.Ext(path) != ".go" {
+				return nil, fmt.Errorf("gopatch diff has an invalid path %q", path)
+			}
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(directory, path)
+			}
+			files[filepath.Clean(path)] = true
+		}
 	}
 	if len(files) == 0 {
 		return nil, errors.New("gopatch diff has no changed Go files")

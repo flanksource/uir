@@ -241,7 +241,7 @@ func newNodeSpec(node uir.Node, slot string, ordinal int, parent string, facts d
 	}
 	return nodeSpec{
 		declarationFacts: facts, Identifier: node.GetIdentifier(), ParentIdentity: parent, ChildSlot: slot,
-		Ordinal: ordinal, Payload: storage.JSON(payload), SemanticHash: node.Hash(),
+		Ordinal: ordinal, Payload: storage.JSON(payload), SemanticHash: node.Hash(), node: node,
 	}
 }
 

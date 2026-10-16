@@ -1,5 +1,4 @@
 import { parseServerTiming, type ServerTimingMetric } from "@flanksource/clicky-ui/data";
-import type { JsonSchemaObject } from "@flanksource/clicky-ui/components";
 
 export type TimedResponse<T> = { data: T; timing: ServerTimingMetric[] };
 
@@ -268,26 +267,10 @@ export type SystemInfo = {
   database_size_bytes: number;
 };
 
-export type ConnectionType = "git" | "github" | "azure_devops" | "gitlab" | "postgres" | "sql_server" | "sqlite" | "s3" | "mysql";
-export type ConnectionView = {
-  id: string;
-  name: string;
-  namespace: string;
-  type: ConnectionType;
-  url?: string;
-  username?: string;
-  password?: string;
-  certificate?: string;
-  properties?: Record<string, string>;
-  insecure_tls: boolean;
-  has_url: boolean;
-  has_username: boolean;
-  has_password: boolean;
-  has_certificate: boolean;
-  literal_credentials: boolean;
-  warnings: string[];
-};
-export type ConnectionInput = Partial<Pick<ConnectionView, "name" | "namespace" | "type" | "url" | "username" | "password" | "certificate" | "properties" | "insecure_tls">>;
+/** A saved connection as the commons-db connection service lists it; the service owns the full shape. */
+export type Connection = { id: string; name: string; namespace?: string; type: string };
+/** The connection types a database module can capture schema metadata from. */
+export const SQL_CONNECTION_TYPES = ["postgres", "mysql", "sql_server", "sqlite"] as const;
 export type DatabaseModule = { id: string; connection_id: string; database_name: string; name: string; root_key: string; created_at: string };
 export type DatabaseCapture = { id: string; started_at: string; revision: string; ordinal: number };
 export type DatabaseModuleCreated = { module: DatabaseModule; capture?: ModuleIndexResult; capture_error?: string };
@@ -327,32 +310,12 @@ async function timedRequest<T>(path: string, options?: RequestInit): Promise<Tim
   return { data: await response.json() as T, timing: parseServerTiming(header) };
 }
 
-export function listConnectionSchemas(): Promise<Record<ConnectionType, JsonSchemaObject>> {
-  return request("/api/v1/connections/schema");
-}
-
-export function listConnections(): Promise<ConnectionView[]> {
-  return request("/api/v1/connections");
-}
-
-export function createConnection(input: ConnectionInput): Promise<ConnectionView> {
-  return request("/api/v1/connections", { method: "POST", body: JSON.stringify(input) });
-}
-
-export function updateConnection(id: string, input: ConnectionInput): Promise<ConnectionView> {
-  return request(`/api/v1/connections/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) });
-}
-
-export async function deleteConnection(id: string): Promise<void> {
-  await requestResponse(`/api/v1/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-
-export function testConnection(id: string): Promise<{ ok: boolean }> {
-  return request(`/api/v1/connections/${encodeURIComponent(id)}/test`, { method: "POST" });
+export function listSQLConnections(): Promise<Connection[]> {
+  return request(`/api/v1/connection?types=${SQL_CONNECTION_TYPES.join(",")}`);
 }
 
 export function listConnectionDatabases(id: string): Promise<string[]> {
-  return request(`/api/v1/connections/${encodeURIComponent(id)}/databases`, { method: "POST" });
+  return request(`/api/v1/database-modules/connections/${encodeURIComponent(id)}/databases`, { method: "POST" });
 }
 
 export function listDatabaseModules(): Promise<DatabaseModule[]> {

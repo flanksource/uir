@@ -24,7 +24,7 @@ var _ = Describe("database captures", func() {
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() { pool, err := index.DB(); Expect(err).ToNot(HaveOccurred()); Expect(pool.Close()).To(Succeed()) })
 		connection := models.Connection{Name: "Local", Type: models.ConnectionTypeSQLite, URL: sourcePath}
-		Expect(storage.CreateConnection(ctx, index, &connection)).To(Succeed())
+		Expect(index.WithContext(ctx).Create(&connection).Error).To(Succeed())
 		module := storage.DatabaseModule{ConnectionID: connection.ID, DatabaseName: "snapshot", Name: "Orders"}
 		Expect(storage.CreateDatabaseModule(ctx, index, &module)).To(Succeed())
 		first, err := databasecatalog.Capture(ctx, index, module)
