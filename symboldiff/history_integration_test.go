@@ -55,7 +55,7 @@ var _ = Describe("Git history for a registered root", func() {
 		history, err := ListHistory(ctx, database, shopRoot, repo.path, 20)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(history.PullRequests).To(ContainElement(PullRequestRef{Number: 12, Commit: prCommit}))
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: "main", To: "pr:12", Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{"main", "pr:12"}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 		Expect(err).ToNot(HaveOccurred())
 		Expect([]string{result.From.Commit, result.To.Commit}).To(Equal([]string{mainCommit, prCommit}))
 		Expect(result.file("cart.go").names()).To(ContainElement("signature Cart"))
