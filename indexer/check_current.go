@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-
-	"github.com/flanksource/uir/storage"
 )
 
 // CheckCurrent verifies an existing location head against the checkout without publishing a snapshot.
@@ -43,7 +41,7 @@ func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, includeTe
 		if err := indexer.checkContext(ctx, root, head.ContextHash, includeTests); err != nil {
 			return ModuleResult{}, err
 		}
-		if head.Coverage != storage.CoverageIndexed {
+		if !head.Coverage.Complete() {
 			return ModuleResult{}, fmt.Errorf("incomplete UIR index for %q at %q: coverage %s", root.RootKey, root.LocalPath, head.Coverage)
 		}
 		return ModuleResult{RootKey: root.RootKey, Location: root.LocalPath, SnapshotID: head.ID.String()}, nil
@@ -95,6 +93,9 @@ func (indexer *Indexer) HeadIncludesTests(ctx context.Context, path string) (boo
 	return false, fmt.Errorf("%q is not a Go module root", canonical)
 }
 
+// checkContext confirms the head's local dependency context when the root imports workspace siblings:
+// through the sibling shapes and source digests the head recorded, when they hold, and otherwise by
+// extracting the root and comparing context hashes, the authoritative check.
 func (indexer *Indexer) checkContext(ctx context.Context, root discoveredRoot, indexed string, includeTests bool) error {
 	siblings, _, err := workspaceSiblingImports(root)
 	if err != nil {
@@ -103,12 +104,90 @@ func (indexer *Indexer) checkContext(ctx context.Context, root discoveredRoot, i
 	if len(siblings) == 0 {
 		return nil
 	}
+	_, reason, err := indexer.storedHeadCheck(includeTests).reusedRoot(ctx, root)
+	if err != nil {
+		return err
+	}
+	if reason == "" {
+		return nil
+	}
+	if log, found := ctx.Value(phaseLogKey{}).(phaseLog); found {
+		log.Infof("check-current: %s at %s: %s", root.RootKey, root.LocalPath, reason)
+	}
 	extracted, err := extractModule(ctx, indexer.loadPackages, root, includeTests)
 	if err != nil {
 		return err
 	}
 	if extracted.contextHash != indexed {
 		return fmt.Errorf("stale UIR index for %q at %q: local dependency context changed; run uir reindex", root.RootKey, root.LocalPath)
+	}
+	return nil
+}
+
+// storedHeadCheck is a headCheck, with a memo of its own, that links versioned dependencies only to
+// snapshots already stored, so confirming a head never checks out, indexes or publishes a version.
+func (indexer *Indexer) storedHeadCheck(includeTests bool) *headCheck {
+	memo := newRunMemo()
+	check := newHeadCheck(indexer, memo, includeTests)
+	check.resolveVersions = func(ctx context.Context, roots []discoveredRoot, includeTests bool) error {
+		return indexer.linkStoredVersions(ctx, memo, roots, includeTests)
+	}
+	return check
+}
+
+// linkStoredVersions links roots' versioned dependencies as indexVersionedDependencies would when it
+// needs to index none of them, and records any version it would index as unavailable instead.
+func (indexer *Indexer) linkStoredVersions(ctx context.Context, memo *runMemo, roots []discoveredRoot, includeTests bool) error {
+	for rootIndex := range roots {
+		for dependencyIndex := range roots[rootIndex].Dependencies {
+			dependency := &roots[rootIndex].Dependencies[dependencyIndex]
+			key, versioned := versionedRequirement(*dependency, includeTests)
+			if !versioned {
+				continue
+			}
+			if err := indexer.rememberStoredVersion(ctx, memo, key); err != nil {
+				return err
+			}
+			if err := linkVersionedDependency(memo, dependency, includeTests); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// rememberStoredVersion records the outcome expandVersionedNode would record for key without indexing:
+// the stored snapshot when it stands, or, when no registered checkout has the version, the stored
+// snapshot or the same unavailable reason. A version it would index is recorded as unavailable for
+// that reason, so the root's dependency set differs from its head's.
+func (indexer *Indexer) rememberStoredVersion(ctx context.Context, memo *runMemo, key versionMemoKey) error {
+	if _, found := memo.version(key); found {
+		return nil
+	}
+	stored, found, err := indexer.storedVersionSnapshot(ctx, key.modulePath, key.version)
+	if err != nil {
+		return err
+	}
+	miss := "no stored snapshot"
+	if found {
+		if miss, err = indexer.storedVersionMiss(ctx, memo, stored); err != nil {
+			return err
+		}
+	}
+	tag := tagCommit{}
+	if miss != "" {
+		if tag, err = indexer.versionTag(ctx, memo, key.modulePath, key.version); err != nil {
+			return err
+		}
+	}
+	name := versionedKey(key.modulePath, key.version)
+	switch {
+	case miss == "" || (found && !tag.found):
+		memo.rememberVersion(key, versionOutcome{snapshot: stored})
+	case !tag.found:
+		memo.rememberVersion(key, versionOutcome{unavailable: versionNotRegistered(name)})
+	default:
+		memo.rememberVersion(key, versionOutcome{unavailable: fmt.Errorf("%w: %s would be indexed again: %s", errVersionUnavailable, name, miss)})
 	}
 	return nil
 }
