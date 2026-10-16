@@ -61,7 +61,7 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	}
 	if unchanged {
 		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, len(discovered.Files), true
-		return result, location, nil
+		return result, location, createSiblingShapes(ctx, database, base.snapshot, extraction.siblingShapes)
 	}
 	snapshot, err := publishSnapshot(ctx, database, snapshotPublication{
 		root: root, location: location, base: base, extraction: extraction, force: options.Force, startedAt: startedAt, reason: options.Reason,
@@ -114,6 +114,8 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 			return err
 		}
 		handles, err = publishDocuments(ctx, database, publication, current, result)
+		PhaseCount(ctx, "parsed", int64(result.ParsedFiles))
+		PhaseCount(ctx, "reused", int64(result.ReusedFiles))
 		return err
 	}); err != nil {
 		return storage.ModuleSnapshot{}, err
@@ -151,7 +153,10 @@ func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication sna
 		return err
 	}
 	if err := Phase(ctx, "package-coverage", func(ctx context.Context) error {
-		return createPackageCoverage(ctx, database, snapshot, publication.extraction.packages)
+		if err := createPackageCoverage(ctx, database, snapshot, publication.extraction.packages); err != nil {
+			return err
+		}
+		return createSiblingShapes(ctx, database, snapshot, publication.extraction.siblingShapes)
 	}); err != nil {
 		return err
 	}

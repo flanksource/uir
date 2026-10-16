@@ -96,7 +96,7 @@ func (indexer *Indexer) HeadIncludesTests(ctx context.Context, path string) (boo
 }
 
 func (indexer *Indexer) checkContext(ctx context.Context, root discoveredRoot, indexed string, includeTests bool) error {
-	siblings, err := workspaceSiblingImports(root)
+	siblings, _, err := workspaceSiblingImports(root)
 	if err != nil {
 		return err
 	}

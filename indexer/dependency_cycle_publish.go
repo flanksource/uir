@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/flanksource/uir/storage"
@@ -14,14 +15,9 @@ func (indexer *Indexer) indexLocalCycleGraph(ctx context.Context, graph localDep
 	if err := indexer.indexVersionedDependencies(ctx, graph.roots, options.IncludeTests); err != nil {
 		return nil, err
 	}
-	extractions := make(map[int]moduleExtraction, len(graph.roots))
-	for index, root := range graph.roots {
-		extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
-		if err != nil {
-			return nil, fmt.Errorf("extract module %q: %w", root.RootKey, err)
-		}
-		extractions[index] = extraction
-	}
+	ctx, memo := ensureRunMemo(ctx)
+	check := newHeadCheck(indexer, memo, options.IncludeTests)
+	addProgress(ctx, len(graph.roots), 0)
 	results := make(map[int]ModuleResult, len(graph.roots))
 	snapshots := make(map[int]storage.ModuleSnapshot, len(graph.roots))
 	for _, group := range graph.groups {
@@ -30,18 +26,72 @@ func (indexer *Indexer) indexLocalCycleGraph(ctx context.Context, graph localDep
 		for _, index := range group {
 			groupOptions.Force = groupOptions.Force || options.Force && index < requested
 		}
-		if err := indexer.resolveLocalGroup(ctx, &graph, group, snapshots); err != nil {
+		if err := Phase(ctx, graph.groupName(group), func(ctx context.Context) error {
+			return indexer.indexLocalGroup(ctx, check, &graph, group, groupOptions, results, snapshots)
+		}); err != nil {
 			return nil, err
 		}
-		if err := indexer.publishLocalGroup(ctx, graph, group, extractions, groupOptions, results, snapshots); err != nil {
-			return nil, err
-		}
+		addProgress(ctx, 0, len(group))
 	}
 	selected := make([]ModuleResult, requested)
 	for index := range selected {
 		selected[index] = results[index]
 	}
 	return selected, nil
+}
+
+// indexLocalGroup takes a group the run already indexed from memo, or else links it to the earlier
+// groups' snapshots, publishes or reuses it, and remembers every member in memo.
+func (indexer *Indexer) indexLocalGroup(ctx context.Context, check *headCheck, graph *localDependencyGraph, group []int, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
+	remembered, err := indexer.rememberedLocalGroup(ctx, check.memo, *graph, group, options, results, snapshots)
+	if err != nil || remembered {
+		return err
+	}
+	if err := indexer.resolveLocalGroup(ctx, graph, group, snapshots); err != nil {
+		return err
+	}
+	if err := indexer.publishLocalGroup(ctx, check, *graph, group, options, results, snapshots); err != nil {
+		return err
+	}
+	indexed := make([]ModuleResult, 0, len(group))
+	for _, index := range group {
+		indexed = append(indexed, results[index])
+	}
+	check.memo.rememberModules(indexed, options.IncludeTests)
+	return nil
+}
+
+// rememberedLocalGroup takes every member's result and snapshot from memo when the run already indexed
+// the whole group and it is not forced, and reports whether it did.
+func (indexer *Indexer) rememberedLocalGroup(ctx context.Context, memo *runMemo, graph localDependencyGraph, group []int, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) (bool, error) {
+	if options.Force {
+		return false, nil
+	}
+	remembered := make(map[int]ModuleResult, len(group))
+	for _, index := range group {
+		result, found := memo.module(graph.roots[index].LocalPath, options.IncludeTests)
+		if !found {
+			return false, nil
+		}
+		remembered[index] = result
+	}
+	for index, result := range remembered {
+		var snapshot storage.ModuleSnapshot
+		if err := indexer.database.WithContext(ctx).Where("id = ?", uuid.MustParse(result.SnapshotID)).Take(&snapshot).Error; err != nil {
+			return false, fmt.Errorf("load remembered snapshot %s of %q: %w", result.SnapshotID, graph.roots[index].RootKey, err)
+		}
+		results[index], snapshots[index] = result, snapshot
+	}
+	return true, nil
+}
+
+// groupName names a group by its members' root keys.
+func (graph localDependencyGraph) groupName(group []int) string {
+	keys := make([]string, 0, len(group))
+	for _, index := range group {
+		keys = append(keys, graph.roots[index].RootKey)
+	}
+	return strings.Join(keys, " + ")
 }
 
 func (indexer *Indexer) resolveLocalGroup(ctx context.Context, graph *localDependencyGraph, group []int, snapshots map[int]storage.ModuleSnapshot) error {
@@ -93,17 +143,48 @@ func (indexer *Indexer) resolveLocalGroup(ctx context.Context, graph *localDepen
 	return nil
 }
 
-func (indexer *Indexer) publishLocalGroup(ctx context.Context, graph localDependencyGraph, group []int, extractions map[int]moduleExtraction, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
+// publishLocalGroup reuses the group's heads without type-checking when every member's head is
+// reusable, and otherwise extracts every member and reuses the heads only when their contexts are
+// unchanged too, else publishes the group together.
+func (indexer *Indexer) publishLocalGroup(ctx context.Context, check *headCheck, graph localDependencyGraph, group []int, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
+	heads, found, err := indexer.linkGroupHeads(ctx, graph, group)
+	if err != nil {
+		return err
+	}
+	reusable := found && !options.Force
+	if reusable {
+		if reusable, err = groupHeadsReusable(ctx, check, graph, group); err != nil {
+			return err
+		}
+		if reusable {
+			return indexer.reuseLocalGroup(ctx, graph, group, heads, nil, options, results, snapshots)
+		}
+	}
+	extractions := make(map[int]moduleExtraction, len(group))
+	for _, index := range group {
+		extraction, err := extractModule(ctx, indexer.loadPackages, graph.roots[index], options.IncludeTests)
+		if err != nil {
+			return fmt.Errorf("extract module %q: %w", graph.roots[index].RootKey, err)
+		}
+		extractions[index] = extraction
+	}
+	if found && !options.Force && extractedHeadsMatch(graph, group, heads, extractions) {
+		return indexer.reuseLocalGroup(ctx, graph, group, heads, extractions, options, results, snapshots)
+	}
+	return indexer.createLocalGroup(ctx, graph, group, extractions, options, results, snapshots)
+}
+
+// linkGroupHeads loads every member's head, whether all have one, and links the edges between members
+// to those heads.
+func (indexer *Indexer) linkGroupHeads(ctx context.Context, graph localDependencyGraph, group []int) (map[int]storage.ModuleSnapshot, bool, error) {
 	heads := make(map[int]storage.ModuleSnapshot, len(group))
-	reusable := !options.Force
+	all := true
 	for _, index := range group {
 		head, found, err := loadHead(ctx, indexer.database, graph.roots[index])
 		if err != nil {
-			return err
+			return nil, false, err
 		}
-		if !found {
-			reusable = false
-		}
+		all = all && found
 		heads[index] = head
 	}
 	for _, index := range group {
@@ -118,38 +199,54 @@ func (indexer *Indexer) publishLocalGroup(ctx context.Context, graph localDepend
 			}
 		}
 	}
-	if reusable {
-		for _, index := range group {
-			root, head := graph.roots[index], heads[index]
-			if head.Revision != root.Revision || head.WorktreeState != root.WorktreeState || head.ContentSetHash != root.ContentSetHash ||
-				head.ConfigurationHash != root.ConfigurationHash || head.ContextHash != extractions[index].contextHash ||
-				head.DependencySetHash == nil || *head.DependencySetHash != dependencyHash(root.Dependencies) {
-				reusable = false
-				break
-			}
-		}
-	}
-	if reusable {
-		return indexer.reuseLocalGroup(ctx, graph, group, extractions, heads, options, results, snapshots)
-	}
-	return indexer.createLocalGroup(ctx, graph, group, extractions, options, results, snapshots)
+	return heads, all, nil
 }
 
-func (indexer *Indexer) reuseLocalGroup(ctx context.Context, graph localDependencyGraph, group []int, extractions map[int]moduleExtraction, heads map[int]storage.ModuleSnapshot, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
+// groupHeadsReusable reports whether every member's head passes reusableHead.
+func groupHeadsReusable(ctx context.Context, check *headCheck, graph localDependencyGraph, group []int) (bool, error) {
+	for _, index := range group {
+		var reusable bool
+		if err := Phase(ctx, "unchanged-check", func(ctx context.Context) (err error) {
+			_, reusable, err = reusableHead(ctx, check, graph.roots[index], false)
+			return err
+		}); err != nil || !reusable {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// extractedHeadsMatch reports whether every member's head equals its extraction, context included.
+func extractedHeadsMatch(graph localDependencyGraph, group []int, heads map[int]storage.ModuleSnapshot, extractions map[int]moduleExtraction) bool {
+	for _, index := range group {
+		root, head := graph.roots[index], heads[index]
+		if head.Revision != root.Revision || head.WorktreeState != root.WorktreeState || head.ContentSetHash != root.ContentSetHash ||
+			head.ConfigurationHash != root.ConfigurationHash || head.ContextHash != extractions[index].contextHash ||
+			head.DependencySetHash == nil || *head.DependencySetHash != dependencyHash(root.Dependencies) {
+			return false
+		}
+	}
+	return true
+}
+
+// reuseLocalGroup reports every member unchanged at its head. extractions, when the members were
+// extracted, record the sibling shapes of heads written before they were recorded.
+func (indexer *Indexer) reuseLocalGroup(ctx context.Context, graph localDependencyGraph, group []int, heads map[int]storage.ModuleSnapshot, extractions map[int]moduleExtraction, options ModuleOptions, results map[int]ModuleResult, snapshots map[int]storage.ModuleSnapshot) error {
 	err := storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
 		if err := verifyIndexInputs(ctx, transaction, groupInputs(graph, group), options.IncludeTests); err != nil {
 			return err
 		}
 		locations := map[string]storage.ModuleLocation{}
 		for _, index := range group {
-			extraction := extractions[index]
-			extraction.root = graph.roots[index]
-			extraction.reusedHead = heads[index].ID
+			extraction := moduleExtraction{root: graph.roots[index], reusedHead: heads[index].ID}
 			if _, _, err := ensureGraphLocation(ctx, transaction, graph, index, locations); err != nil {
 				return err
 			}
 			result, location, err := indexModule(ctx, transaction, extraction, locations, ModuleOptions{Reason: storage.ReasonDependencyCycle})
 			if err != nil {
+				return err
+			}
+			if err := createSiblingShapes(ctx, transaction, heads[index], extractions[index].siblingShapes); err != nil {
 				return err
 			}
 			locations[extraction.root.LocalPath] = location
@@ -220,12 +317,8 @@ func (indexer *Indexer) createLocalGroup(ctx context.Context, graph localDepende
 
 func ensureGraphLocation(ctx context.Context, database *gorm.DB, graph localDependencyGraph, index int, locations map[string]storage.ModuleLocation) (storage.ModuleRoot, storage.ModuleLocation, error) {
 	root := graph.roots[index]
-	if root.ParentRootKey != "" {
-		if _, found := locations[root.ParentRootKey]; !found {
-			parent, exists := graph.byPath[root.ParentRootKey]
-			if !exists {
-				return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("parent module location %q is missing from dependency graph", root.ParentRootKey)
-			}
+	if _, found := locations[root.ParentRootKey]; root.ParentRootKey != "" && !found {
+		if parent, member := graph.byPath[root.ParentRootKey]; member {
 			if _, _, err := ensureGraphLocation(ctx, database, graph, parent, locations); err != nil {
 				return storage.ModuleRoot{}, storage.ModuleLocation{}, err
 			}

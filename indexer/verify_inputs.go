@@ -20,22 +20,15 @@ var ErrIndexInputsChanged = errors.New("index inputs changed while indexing")
 // extracted, so the publication cannot commit facts about inputs that are already gone.
 func verifyIndexInputs(ctx context.Context, database *gorm.DB, roots []discoveredRoot, includeTests bool) error {
 	for _, root := range roots {
-		fresh, err := discoverModules(ctx, root.LocalPath, includeTests)
+		current, found, err := discoverModuleAt(ctx, root.LocalPath, root.LocalPath, includeTests)
 		if err != nil {
 			return fmt.Errorf("recheck module %q before publication: %w", root.RootKey, err)
 		}
-		matched := false
-		for _, current := range fresh {
-			if current.LocalPath != root.LocalPath {
-				continue
-			}
-			matched = true
-			if current.RootKey != root.RootKey || current.GitCommit != root.GitCommit || current.ContentSetHash != root.ContentSetHash || current.ConfigurationHash != root.ConfigurationHash {
-				return fmt.Errorf("module %q changed: %w", root.RootKey, ErrIndexInputsChanged)
-			}
-		}
-		if !matched {
+		if !found {
 			return fmt.Errorf("module %q disappeared: %w", root.RootKey, ErrIndexInputsChanged)
+		}
+		if current.RootKey != root.RootKey || current.GitCommit != root.GitCommit || current.ContentSetHash != root.ContentSetHash || current.ConfigurationHash != root.ConfigurationHash {
+			return fmt.Errorf("module %q changed: %w", root.RootKey, ErrIndexInputsChanged)
 		}
 		for _, dependency := range root.Dependencies {
 			if dependency.LocalDir == "" || dependency.Edge.TargetSnapshotID == nil {
@@ -63,17 +56,15 @@ func verifyLocalDependency(ctx context.Context, database *gorm.DB, dependency de
 	if head.SnapshotID != snapshot.ID {
 		return fmt.Errorf("dependency %q head changed: %w", dependency.Edge.ModulePath, ErrIndexInputsChanged)
 	}
-	fresh, err := discoverModules(ctx, dependency.LocalDir, includeTests)
+	current, found, err := discoverModuleAt(ctx, dependency.LocalDir, filepath.Clean(dependency.LocalDir), includeTests)
 	if err != nil {
 		return fmt.Errorf("recheck dependency %q source: %w", dependency.Edge.ModulePath, err)
 	}
-	for _, current := range fresh {
-		if current.LocalPath == filepath.Clean(dependency.LocalDir) {
-			if current.ContentSetHash != snapshot.ContentSetHash || current.GitCommit != snapshot.GitCommit {
-				return fmt.Errorf("dependency %q source changed: %w", dependency.Edge.ModulePath, ErrIndexInputsChanged)
-			}
-			return nil
-		}
+	if !found {
+		return fmt.Errorf("dependency %q source disappeared: %w", dependency.Edge.ModulePath, ErrIndexInputsChanged)
 	}
-	return fmt.Errorf("dependency %q source disappeared: %w", dependency.Edge.ModulePath, ErrIndexInputsChanged)
+	if current.ContentSetHash != snapshot.ContentSetHash || current.GitCommit != snapshot.GitCommit {
+		return fmt.Errorf("dependency %q source changed: %w", dependency.Edge.ModulePath, ErrIndexInputsChanged)
+	}
+	return nil
 }

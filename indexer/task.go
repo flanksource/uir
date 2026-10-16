@@ -4,15 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/flanksource/clicky"
+	rpchttp "github.com/flanksource/clicky/rpc/http"
 	clickytask "github.com/flanksource/clicky/task"
 	commonscontext "github.com/flanksource/commons/context"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/taskruns"
+	"gorm.io/gorm"
 )
 
 // ModuleIndexKind is the clicky task kind of every run that publishes snapshots.
@@ -102,6 +106,10 @@ func StartModulesTask(ctx context.Context, indexer *Indexer, requests []ModuleOp
 		paths = append(paths, path)
 		identities = append(identities, fmt.Sprintf("%s exact=%s tests=%t force=%t", found[0].options.Path, options.ExactLocation, options.IncludeTests, options.Force))
 	}
+	imports, err := targetImports(targets)
+	if err != nil {
+		return nil, err
+	}
 	action := "Index"
 	if requests[0].ExistingOnly {
 		action = "Reindex"
@@ -110,8 +118,24 @@ func StartModulesTask(ctx context.Context, indexer *Indexer, requests []ModuleOp
 		name:     fmt.Sprintf("%s %s", action, strings.Join(paths, ", ")),
 		identity: fmt.Sprintf("%s:%s reason=%s", ModuleIndexKind, strings.Join(identities, " + "), requests[0].Reason),
 		labels:   map[string]string{"path": strings.Join(paths, ","), "reason": string(requests[0].Reason)},
-		targets:  targets,
+		targets:  enclosingFirst(targets, imports),
 	})
+}
+
+// enclosingFirst orders targets so a target nested in another target's location runs after it, and,
+// where that leaves a choice, a target runs after the targets whose packages it imports, keeping the
+// request order otherwise: a nested module's location links to its enclosing one's, and an importer's
+// head is reusable only once the run has confirmed its workspace siblings. imports maps a target's
+// index to the indexes of the targets it imports.
+func enclosingFirst(targets []moduleTarget, imports []map[int]bool) []moduleTarget {
+	order := orderAfter(len(targets), func(node, other int) bool {
+		return targets[other].location != targets[node].location && pathWithin(targets[node].location, targets[other].location)
+	}, func(node, other int) bool { return imports[node][other] })
+	ordered := make([]moduleTarget, 0, len(targets))
+	for _, index := range order {
+		ordered = append(ordered, targets[index])
+	}
+	return ordered
 }
 
 // StartMissingModulesTask starts reindexing every registered checkout that has no head.
@@ -132,10 +156,11 @@ func StartMissingModulesTask(ctx context.Context, indexer *Indexer, includeTests
 }
 
 func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (*ModuleIndexRun, error) {
-	published := &publishedSnapshots{}
+	details := newRunDetails(indexer)
 	group := clicky.StartGroup[[]ModuleResult](spec.name, clickytask.WithKind(ModuleIndexKind), clickytask.WithLabels(spec.labels),
-		clickytask.WithConcurrency(1), clickytask.WithGroupIdentity(spec.identity), clickytask.WithDetailsProvider(published.details))
+		clickytask.WithConcurrency(1), clickytask.WithGroupIdentity(spec.identity), clickytask.WithDetailsProvider(details.details))
 	run := &ModuleIndexRun{group: group}
+	details.runID = run.ID()
 	if group.Joined() {
 		return run, nil
 	}
@@ -148,17 +173,18 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 	memo := newRunMemo()
 	for _, target := range spec.targets {
 		module := group.Add(target.rootKey, func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
-			indexCtx := withRunMemo(context.WithValue(WithTaskRunID(taskContext, run.ID()), runGroupKey{}, group.Group), memo)
-			results, err := indexer.indexTarget(indexCtx, target.options, progress.Warnf)
-			if refreshErr := published.refresh(context.WithoutCancel(taskContext), indexer, run.ID()); refreshErr != nil {
-				err = errors.Join(err, refreshErr)
-			}
+			started := time.Now()
+			progress.Infof("indexing %s at %s", target.rootKey, target.location)
+			results, err := runIndexTask(withRunMemo(context.WithValue(taskContext, runGroupKey{}, group.Group), memo), details, progress,
+				func(ctx context.Context) ([]ModuleResult, error) {
+					return indexer.indexTarget(ctx, target.options, progress.Warnf)
+				})
 			if err != nil {
 				return []ModuleResult{{RootKey: target.rootKey, Location: target.location, Error: err.Error()}}, err
 			}
 			for _, result := range results {
-				progress.Infof("root=%s location=%s snapshot=%s files=%d parsed=%d reused=%d unchanged=%t",
-					result.RootKey, result.Location, result.SnapshotID, result.Files, result.ParsedFiles, result.ReusedFiles, result.Unchanged)
+				progress.Infof("root=%s location=%s snapshot=%s files=%d parsed=%d reused=%d unchanged=%t in %s",
+					result.RootKey, result.Location, result.SnapshotID, result.Files, result.ParsedFiles, result.ReusedFiles, result.Unchanged, time.Since(started).Round(time.Millisecond))
 			}
 			return results, nil
 		}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), noTaskRetries)
@@ -192,14 +218,14 @@ func (run *ModuleIndexRun) Wait(ctx context.Context) ([]ModuleResult, error) {
 			failures = append(failures, fmt.Errorf("%s at %s: %w", module.Name(), module.Description(), err))
 		}
 	}
-	// Snapshotting the finished run observes it terminal, which hands it to the installed clicky store
-	// now rather than whenever a worker next retires a task, so a CLI that closes its store right after
-	// Wait still records the run.
-	clickytask.SnapshotByID(run.ID())
+	// Snapshotting the finished run, to merge its phases, observes it terminal, which hands it to the
+	// installed clicky store now rather than whenever a worker next retires a task, so a CLI that closes
+	// its store right after Wait still records the run.
+	mergeErr := mergeRunPhases(ctx, run.ID())
 	if len(failures) > 0 {
-		return results, fmt.Errorf("%d of %d modules failed: %w", len(failures), modules, errors.Join(failures...))
+		return results, errors.Join(fmt.Errorf("%d of %d modules failed: %w", len(failures), modules, errors.Join(failures...)), mergeErr)
 	}
-	return results, nil
+	return results, mergeErr
 }
 
 // waitForRun waits until every task of the run is terminal, or ctx is done; ctx bounds only the wait,
@@ -237,14 +263,18 @@ func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions, 
 }
 
 // indexStep runs index as a step of the task run in ctx, so work a module does on the way, such as a
-// local dependency, shows as its own task; outside a run it just runs index.
-func indexStep(ctx context.Context, name string, index func() ([]ModuleResult, error)) ([]ModuleResult, error) {
+// local dependency, shows as its own task and logs its phases there; outside a run it just runs index.
+func indexStep(ctx context.Context, name string, index func(context.Context) ([]ModuleResult, error)) ([]ModuleResult, error) {
 	group, inRun := ctx.Value(runGroupKey{}).(*clickytask.Group)
 	if !inRun {
-		return index()
+		return index(ctx)
 	}
 	step := group.StartStep(name)
-	results, err := index()
+	stepContext := withProgressUnits(withPhaseLog(ctx, step.Task()), step.Task())
+	results, err := index(stepContext)
+	if err == nil {
+		addProgress(stepContext, 0, 1)
+	}
 	for _, result := range results {
 		step.Task().Infof("root=%s snapshot=%s unchanged=%t", result.RootKey, result.SnapshotID, result.Unchanged)
 	}
@@ -252,26 +282,95 @@ func indexStep(ctx context.Context, name string, index func() ([]ModuleResult, e
 	return results, err
 }
 
-// publishedSnapshots is the run's group details: the snapshots published under the run, read back
-// after each module so the record holds exactly what committed.
-type publishedSnapshots struct {
-	mu  sync.Mutex
-	ids []string
+// runDetails is the run's group details: the snapshots published under the run, read back after each
+// module so the record holds exactly what committed, and the phases its modules ran, summed in
+// timings, which timingsContext carries.
+type runDetails struct {
+	database       *gorm.DB
+	runID          string
+	mu             sync.Mutex
+	ids            []string
+	timingsContext context.Context
+	timings        *rpchttp.Timings
 }
 
-func (published *publishedSnapshots) refresh(ctx context.Context, indexer *Indexer, runID string) error {
-	ids, err := storage.TaskRunSnapshotIDs(ctx, indexer.database, runID)
+func newRunDetails(indexer *Indexer) *runDetails {
+	timingsContext, timings := rpchttp.WithTimings(context.Background())
+	return &runDetails{database: indexer.database, timingsContext: timingsContext, timings: timings}
+}
+
+// runIndexTask runs a run task's index under ctx, marked as the run's, with its own server timings and
+// phase log and progress units, then adds the phases it timed to the run's and reads back the snapshots
+// the run has published, whatever index returned.
+func runIndexTask[T any](ctx context.Context, details *runDetails, progress *clickytask.Task, index func(context.Context) (T, error)) (T, error) {
+	timed, timings := rpchttp.WithTimings(WithTaskRunID(ctx, details.runID))
+	indexed := withProgressUnits(withPhaseLog(timed, progress), progress)
+	result, err := index(indexed)
+	if err == nil {
+		addProgress(indexed, 0, 1)
+	}
+	for _, metric := range timings.Metrics() {
+		rpchttp.AddTiming(details.timingsContext, metric)
+	}
+	if refreshErr := details.refresh(context.WithoutCancel(ctx)); refreshErr != nil {
+		err = errors.Join(err, refreshErr)
+	}
+	return result, err
+}
+
+func (details *runDetails) refresh(ctx context.Context) error {
+	ids, err := storage.TaskRunSnapshotIDs(ctx, details.database, details.runID)
 	if err != nil {
 		return err
 	}
-	published.mu.Lock()
-	published.ids = ids
-	published.mu.Unlock()
+	details.mu.Lock()
+	details.ids = ids
+	details.mu.Unlock()
 	return nil
 }
 
-func (published *publishedSnapshots) details() any {
-	published.mu.Lock()
-	defer published.mu.Unlock()
-	return taskruns.RunDetails{SnapshotIDs: append([]string{}, published.ids...)}
+func (details *runDetails) details() any {
+	details.mu.Lock()
+	defer details.mu.Unlock()
+	phases := []taskruns.PhaseTiming{}
+	for _, metric := range details.timings.Metrics() {
+		counters := make(map[string]int64, len(metric.Counters))
+		for _, counter := range metric.Counters {
+			counters[counter.Name] = counter.Value
+		}
+		phases = append(phases, taskruns.PhaseTiming{Name: metric.Name, DurationMS: float64(metric.Duration) / float64(time.Millisecond), Counters: counters})
+	}
+	return taskruns.RunDetails{SnapshotIDs: append([]string{}, details.ids...), Phases: phases}
+}
+
+// mergeRunPhases adds every phase the finished run recorded in its details to the server timings in
+// ctx, so a request that waited on the run, started or joined, reports where the run's time went.
+func mergeRunPhases(ctx context.Context, runID string) error {
+	for _, snapshot := range clickytask.SnapshotByID(runID) {
+		if snapshot.Type != "group" {
+			continue
+		}
+		details, isDetails := snapshot.Details.(taskruns.RunDetails)
+		if !isDetails {
+			return fmt.Errorf("task run %s has details of type %T, not run details", runID, snapshot.Details)
+		}
+		for _, phase := range details.Phases {
+			rpchttp.AddTiming(ctx, rpchttp.TimingMetric{Name: phase.Name, Duration: time.Duration(phase.DurationMS * float64(time.Millisecond)), Counters: phaseCounters(phase.Counters)})
+		}
+		return nil
+	}
+	return fmt.Errorf("task run %s has no group snapshot", runID)
+}
+
+// phaseCounters orders a phase's counters calls first, then by name.
+func phaseCounters(counters map[string]int64) []rpchttp.TimingCounter {
+	names := slices.Sorted(maps.Keys(counters))
+	if calls := slices.Index(names, "calls"); calls > 0 {
+		names = append([]string{"calls"}, slices.Delete(names, calls, calls+1)...)
+	}
+	ordered := make([]rpchttp.TimingCounter, 0, len(names))
+	for _, name := range names {
+		ordered = append(ordered, rpchttp.TimingCounter{Name: name, Value: counters[name]})
+	}
+	return ordered
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/flanksource/clicky"
 	clickytask "github.com/flanksource/clicky/task"
@@ -28,7 +29,7 @@ func StartRevisionTask(ctx context.Context, indexer *Indexer, options RevisionOp
 	if options.RootKey == "" || options.Commit == "" {
 		return nil, fmt.Errorf("index revision: root %q and commit %q are both required", options.RootKey, options.Commit)
 	}
-	published := &publishedSnapshots{}
+	details := newRunDetails(indexer)
 	short := options.Commit
 	if len(short) > 12 {
 		short = short[:12]
@@ -36,32 +37,37 @@ func StartRevisionTask(ctx context.Context, indexer *Indexer, options RevisionOp
 	group := clicky.StartGroup[ModuleResult](fmt.Sprintf("Index %s@%s", options.RootKey, short), clickytask.WithKind(ModuleIndexKind),
 		clickytask.WithLabels(map[string]string{"root": options.RootKey, "commit": options.Commit, "reason": string(options.Reason)}),
 		clickytask.WithGroupIdentity(fmt.Sprintf("%s:%s@%s tests=%t", ModuleIndexKind, options.RootKey, options.Commit, options.IncludeTests)),
-		clickytask.WithDetailsProvider(published.details))
+		clickytask.WithDetailsProvider(details.details))
 	run := &RevisionIndexRun{group: group}
+	details.runID = run.ID()
 	if group.Joined() {
 		return run, nil
 	}
 	group.Add(options.RootKey+"@"+short, func(taskContext commonscontext.Context, progress *clickytask.Task) (ModuleResult, error) {
+		started := time.Now()
 		progress.Infof("indexing %s at %s from %s", options.RootKey, options.Commit, options.Checkout)
-		result, err := indexer.IndexRevision(WithTaskRunID(taskContext, run.ID()), options)
-		if refreshErr := published.refresh(context.WithoutCancel(taskContext), indexer, run.ID()); refreshErr != nil {
-			err = errors.Join(err, refreshErr)
-		}
+		result, err := runIndexTask(taskContext, details, progress, func(ctx context.Context) (ModuleResult, error) {
+			return indexer.IndexRevision(ctx, options)
+		})
 		if err != nil {
 			return ModuleResult{}, err
 		}
-		progress.Infof("root=%s commit=%s snapshot=%s unchanged=%t", result.RootKey, options.Commit, result.SnapshotID, result.Unchanged)
+		progress.Infof("root=%s commit=%s snapshot=%s files=%d parsed=%d reused=%d unchanged=%t in %s", result.RootKey, options.Commit,
+			result.SnapshotID, result.Files, result.ParsedFiles, result.ReusedFiles, result.Unchanged, time.Since(started).Round(time.Millisecond))
 		return result, nil
 	}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), noTaskRetries)
 	return run, nil
 }
 
-// Wait waits for the commit's snapshot, or until ctx is done.
+// Wait waits for the commit's snapshot, or until ctx is done, and adds the phases the run timed to the
+// server timings in ctx.
 func (run *RevisionIndexRun) Wait(ctx context.Context) (ModuleResult, error) {
 	if err := waitForRun(ctx, run.group.Group); err != nil {
 		return ModuleResult{}, err
 	}
-	clickytask.SnapshotByID(run.ID())
+	if err := mergeRunPhases(ctx, run.ID()); err != nil {
+		return ModuleResult{}, err
+	}
 	for _, item := range run.group.GetTasks() {
 		if revision, isRevision := item.(clickytask.TypedTask[ModuleResult]); isRevision {
 			return revision.GetResult()

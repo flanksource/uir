@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,6 +55,12 @@ const (
 	CoverageSyntax   Coverage = "syntax"
 	CoverageExcluded Coverage = "excluded"
 )
+
+// CompleteCoverages are the coverages that extracting the same input again cannot improve:
+// everything typed, or nothing selected by the build. Partial and syntax coverage are degraded.
+var CompleteCoverages = []Coverage{CoverageIndexed, CoverageExcluded}
+
+func (coverage Coverage) Complete() bool { return slices.Contains(CompleteCoverages, coverage) }
 
 // SnapshotReason is why a snapshot was published. ReasonUnknown marks only rows published before
 // reasons were recorded; a publication must name one of the others.

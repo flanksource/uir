@@ -28,17 +28,27 @@ func discoverModules(ctx context.Context, path string, includeTests bool) ([]dis
 // discoverModule discovers the module rooted at checkout among the modules below path, reading only
 // its sources: path still decides the module's parent and mount path.
 func discoverModule(ctx context.Context, path, checkout string, includeTests bool) (discoveredRoot, error) {
+	root, found, err := discoverModuleAt(ctx, path, checkout, includeTests)
+	if err == nil && !found {
+		return discoveredRoot{}, fmt.Errorf("registered checkout %q is not a Go module below %q", checkout, path)
+	}
+	return root, err
+}
+
+// discoverModuleAt is discoverModule reporting whether a module is rooted at checkout instead of
+// failing when none is.
+func discoverModuleAt(ctx context.Context, path, checkout string, includeTests bool) (discoveredRoot, bool, error) {
 	roots, err := locateModuleRoots(path)
 	if err != nil {
-		return discoveredRoot{}, err
+		return discoveredRoot{}, false, err
 	}
 	for i := range roots {
 		if roots[i].LocalPath == checkout {
 			err := populateRoot(ctx, &roots[i], roots, includeTests)
-			return roots[i], err
+			return roots[i], true, err
 		}
 	}
-	return discoveredRoot{}, fmt.Errorf("registered checkout %q is not a Go module below %q", checkout, path)
+	return discoveredRoot{}, false, nil
 }
 
 // locateModuleRoots finds the go.mod roots below path, or the enclosing module when there are none,

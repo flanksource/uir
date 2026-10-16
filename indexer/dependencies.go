@@ -40,16 +40,9 @@ func readDependencies(ctx context.Context, root discoveredRoot) ([]dependencyObs
 	if err != nil {
 		return nil, fmt.Errorf("parse dependency manifest %q: %w", path, err)
 	}
-	var workspace *modfile.WorkFile
-	if root.WorkFile != "" {
-		content, err := os.ReadFile(root.WorkFile)
-		if err != nil {
-			return nil, fmt.Errorf("read workspace %q: %w", root.WorkFile, err)
-		}
-		workspace, err = modfile.ParseWork(root.WorkFile, content, nil)
-		if err != nil {
-			return nil, fmt.Errorf("parse workspace %q: %w", root.WorkFile, err)
-		}
+	workspace, uses, err := readWorkspace(root.WorkFile)
+	if err != nil {
+		return nil, err
 	}
 	selected, selectionError := selectedModules(ctx, root)
 	dependencies := make([]dependencyObservation, 0, len(manifest.Require))
@@ -82,7 +75,7 @@ func readDependencies(ctx context.Context, root discoveredRoot) ([]dependencyObs
 		} else {
 			observation.Edge.UnresolvedReason = "module is absent from the selected Go build list"
 		}
-		if local, localErr := localDependency(root, manifest, workspace, edge.ModulePath, edge.DeclaredVersion); localErr != nil {
+		if local, localErr := localDependency(root, manifest, workspace, uses, edge.ModulePath, edge.DeclaredVersion); localErr != nil {
 			return nil, localErr
 		} else if local != "" {
 			observation.LocalDir = local
@@ -94,20 +87,59 @@ func readDependencies(ctx context.Context, root discoveredRoot) ([]dependencyObs
 	return dependencies, nil
 }
 
-func localDependency(root discoveredRoot, manifest *modfile.File, workspace *modfile.WorkFile, path, version string) (string, error) {
+// workspaceUses finds the module a go.work uses for a module path, reading each used module's go.mod
+// at most once, in use order and only as far as a lookup needs.
+type workspaceUses struct {
+	base    string
+	pending []*modfile.Use
+	modules map[string]string
+}
+
+func (uses *workspaceUses) directory(path string) (string, error) {
+	if directory, found := uses.modules[path]; found {
+		return directory, nil
+	}
+	for len(uses.pending) > 0 {
+		directory := rootedPath(uses.base, uses.pending[0].Path)
+		content, err := os.ReadFile(filepath.Join(directory, "go.mod"))
+		if err != nil {
+			return "", fmt.Errorf("read workspace module %q: %w", directory, err)
+		}
+		uses.pending = uses.pending[1:]
+		module := modfile.ModulePath(content)
+		if _, found := uses.modules[module]; !found {
+			uses.modules[module] = directory
+		}
+		if module == path {
+			return directory, nil
+		}
+	}
+	return "", nil
+}
+
+// readWorkspace parses the go.work at path, when there is one.
+func readWorkspace(path string) (*modfile.WorkFile, *workspaceUses, error) {
+	if path == "" {
+		return nil, nil, nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read workspace %q: %w", path, err)
+	}
+	workspace, err := modfile.ParseWork(path, content, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse workspace %q: %w", path, err)
+	}
+	return workspace, &workspaceUses{base: filepath.Dir(path), pending: workspace.Use, modules: map[string]string{}}, nil
+}
+
+func localDependency(root discoveredRoot, manifest *modfile.File, workspace *modfile.WorkFile, uses *workspaceUses, path, version string) (string, error) {
 	if workspace != nil {
 		if replacement := applicableReplace(workspace.Replace, path, version); replacement != nil && replacement.New.Version == "" {
 			return rootedPath(filepath.Dir(root.WorkFile), replacement.New.Path), nil
 		}
-		for _, use := range workspace.Use {
-			directory := rootedPath(filepath.Dir(root.WorkFile), use.Path)
-			content, err := os.ReadFile(filepath.Join(directory, "go.mod"))
-			if err != nil {
-				return "", fmt.Errorf("read workspace module %q: %w", directory, err)
-			}
-			if modfile.ModulePath(content) == path {
-				return directory, nil
-			}
+		if directory, err := uses.directory(path); err != nil || directory != "" {
+			return directory, err
 		}
 	}
 	if !root.Historical {
