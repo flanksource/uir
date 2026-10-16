@@ -38,8 +38,8 @@ func gitIn(directory string, args ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-// indexedCommits indexes a one-file module at two commits and returns them.
-func indexedCommits(ctx context.Context, database *gorm.DB) (string, string) {
+// indexedCommits indexes a one-file module at two commits and returns them and its canonical checkout.
+func indexedCommits(ctx context.Context, database *gorm.DB) (string, string, string) {
 	GinkgoHelper()
 	workspace, err := filepath.EvalSymlinks(GinkgoT().TempDir())
 	Expect(err).To(Succeed())
@@ -54,7 +54,37 @@ func indexedCommits(ctx context.Context, database *gorm.DB) (string, string) {
 		_, err := addModules(ctx, database, workspace, false)
 		Expect(err).ToNot(HaveOccurred())
 	}
-	return commits[0], commits[1]
+	return commits[0], commits[1], workspace
+}
+
+// chdir makes directory the working directory for the rest of the spec.
+func chdir(directory string) {
+	GinkgoHelper()
+	original, err := os.Getwd()
+	Expect(err).To(Succeed())
+	Expect(os.Chdir(directory)).To(Succeed())
+	DeferCleanup(os.Chdir, original)
+}
+
+// runCLI runs the uir command line against runtime and returns what it printed.
+func runCLI(ctx context.Context, runtime *commandRuntime, args ...string) (string, error) {
+	GinkgoHelper()
+	root := newRootCommand(runtime)
+	root.SetErr(io.Discard)
+	root.SetArgs(args)
+	return captureStdout(func() error {
+		return root.ExecuteContext(context.WithValue(ctx, runtimeContextKey{}, runtime))
+	})
+}
+
+// decodeDiff runs a diff on the command line and decodes its JSON result.
+func decodeDiff(ctx context.Context, runtime *commandRuntime, args ...string) symboldiff.Result {
+	GinkgoHelper()
+	output, err := runCLI(ctx, runtime, append(append([]string{"diff"}, args...), "--format", "json")...)
+	Expect(err).ToNot(HaveOccurred(), output)
+	var result symboldiff.Result
+	Expect(json.Unmarshal([]byte(output), &result)).To(Succeed(), output)
+	return result
 }
 
 // captureStdout runs fn with os.Stdout redirected and returns what it wrote.
@@ -75,7 +105,7 @@ func captureStdout(fn func() error) (string, error) {
 var _ = Describe("uir diff", func() {
 	It("prints a commit diff as JSON with exported rows by default", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
-		from, to := indexedCommits(ctx, database)
+		from, to, _ := indexedCommits(ctx, database)
 		runtime := &commandRuntime{database: database}
 		root := newRootCommand(runtime)
 		root.SetArgs([]string{"diff", from + ".." + to, "--root", diffRoot, "--format", "json"})
@@ -91,19 +121,95 @@ var _ = Describe("uir diff", func() {
 		Expect([]string{string(file.Rows[0].Class), file.Rows[1].Group, file.Rows[1].ShapeAfter}).To(Equal([]string{"removed", "Run", diffRunAfter}))
 	})
 
-	It("rejects a range without two revisions", func(ctx SpecContext) {
+	It("reads two revisions and A...B as git diff does", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		from, to, workspace := indexedCommits(ctx, database)
+		runtime := &commandRuntime{database: database}
+		chdir(workspace)
+		ranged := decodeDiff(ctx, runtime, from+".."+to)
+
+		Expect([]symboldiff.Result{decodeDiff(ctx, runtime, from, to), decodeDiff(ctx, runtime, from+"..."+to)}).To(Equal([]symboldiff.Result{ranged, ranged}))
+	})
+
+	It("compares a single revision against the worktree of the current checkout", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		from, _, workspace := indexedCommits(ctx, database)
+		runtime := &commandRuntime{database: database}
+		chdir(workspace)
+		Expect(os.WriteFile(filepath.Join(workspace, "run.go"), []byte(diffAfter+"\nfunc Stop() {}\n"), 0o644)).To(Succeed())
+
+		result := decodeDiff(ctx, runtime, "HEAD~1")
+		_, err := runCLI(ctx, runtime, "diff", "HEAD~1", "--auto-index")
+
+		file := result.Packages[0].Files[0]
+		Expect([]any{result.RootKey, result.From.Commit, result.To.Commit, file.Path, len(file.Rows)}).To(Equal([]any{diffRoot, from, symboldiff.PatchWorktree, "run.go", 3}))
+		Expect(err).To(MatchError(ContainSubstring("--auto-index applies to a range of two commits")))
+	})
+
+	It("defaults --root and --location to the registered checkout of the working directory", func(ctx SpecContext) {
+		database := openCommandDatabase(ctx)
+		from, to, workspace := indexedCommits(ctx, database)
+		runtime := &commandRuntime{database: database}
+		explicit := decodeDiff(ctx, runtime, from+".."+to, "--root", diffRoot)
+		chdir(workspace)
+
+		implicit := decodeDiff(ctx, runtime, from+".."+to)
+		head := decodeDiff(ctx, runtime, "HEAD~1..HEAD")
+
+		Expect(implicit).To(Equal(explicit))
+		Expect([]any{head.RootKey, head.From.Commit, head.To.Commit, head.Packages}).To(Equal([]any{diffRoot, from, to, explicit.Packages}))
+	})
+
+	It("requires --root with a commit range outside any registered checkout", func(ctx SpecContext) {
 		runtime := &commandRuntime{database: openCommandDatabase(ctx)}
+		chdir(GinkgoT().TempDir())
+		_, err := runCLI(ctx, runtime, "diff", "HEAD~1..HEAD")
+		Expect(err).To(MatchError(ContainSubstring("--root is required")))
+	})
+
+	It("prints the symbol diff of a worktree patch piped on stdin, without an index", func(ctx SpecContext) {
+		workspace, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+		Expect(err).To(Succeed())
+		gitIn(workspace, "init", "--quiet", "--initial-branch=main")
+		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module "+diffRoot+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(workspace, "run.go"), []byte(diffBefore), 0o644)).To(Succeed())
+		gitIn(workspace, "add", "--all")
+		gitIn(workspace, "commit", "--quiet", "--message", "commit")
+		Expect(os.WriteFile(filepath.Join(workspace, "run.go"), []byte(diffAfter), 0o644)).To(Succeed())
+		patch := gitIn(workspace, "diff") + "\n"
+		original, err := os.Getwd()
+		Expect(err).To(Succeed())
+		Expect(os.Chdir(workspace)).To(Succeed())
+		DeferCleanup(os.Chdir, original)
+		runtime := &commandRuntime{}
 		root := newRootCommand(runtime)
-		root.SetArgs([]string{"diff", "main", "--root", diffRoot})
+		root.SetIn(strings.NewReader(patch))
+		root.SetArgs([]string{"diff", "--format", "json"})
+		output, err := captureStdout(func() error {
+			return root.ExecuteContext(context.WithValue(ctx, runtimeContextKey{}, runtime))
+		})
+		Expect(err).ToNot(HaveOccurred(), output)
+		var result symboldiff.Result
+		Expect(json.Unmarshal([]byte(output), &result)).To(Succeed(), output)
+		file := result.Packages[0].Files[0]
+		Expect([]any{result.RootKey, result.To.Commit, file.Path, file.HiddenRows, len(file.Rows)}).To(Equal([]any{diffRoot, symboldiff.PatchWorktree, "run.go", 1, 2}))
+		Expect([]string{string(file.Rows[0].Class), file.Rows[1].Group}).To(Equal([]string{"removed", "Run"}))
+	})
+
+	It("refuses commit range flags with a patch on stdin", func(ctx SpecContext) {
+		runtime := &commandRuntime{}
+		root := newRootCommand(runtime)
+		root.SetIn(strings.NewReader(""))
+		root.SetArgs([]string{"diff", "-", "--root", diffRoot})
 		_, err := captureStdout(func() error {
 			return root.ExecuteContext(context.WithValue(ctx, runtimeContextKey{}, runtime))
 		})
-		Expect(err).To(MatchError(ContainSubstring(`commit range "main" is not <from>..<to>`)))
+		Expect(err).To(MatchError(ContainSubstring("--root applies to a commit range, not a patch on stdin")))
 	})
 
 	It("serves the diff with line counts over the operations API", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
-		from, to := indexedCommits(ctx, database)
+		from, to, _ := indexedCommits(ctx, database)
 		runtime := &commandRuntime{database: database}
 		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
 		Expect(err).To(Succeed())
@@ -124,7 +230,7 @@ var _ = Describe("uir diff", func() {
 
 	It("serves branch and commit choices for the comparison view", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
-		from, to := indexedCommits(ctx, database)
+		from, to, _ := indexedCommits(ctx, database)
 		runtime := &commandRuntime{database: database}
 		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
 		Expect(err).To(Succeed())
