@@ -13,8 +13,9 @@ import (
 // modulePruneOptions names the root to prune, every registered root when none, and how many of its
 // newest snapshots to keep.
 type modulePruneOptions struct {
-	Root string `flag:"root" args:"true" help:"Module root to prune; every registered root when omitted; also the first argument"`
+	Root string `flag:"root" args:"true" help:"Module root to prune; defaults to the module of the current checkout, else every registered root; also the first argument"`
 	Keep int    `flag:"keep" help:"Newest snapshots of each root to keep, at least 1; location heads are always kept" required:"true"`
+	allRootsOption
 }
 
 func registerPruneCommand(root *cobra.Command) {
@@ -34,8 +35,12 @@ func registerPruneCommand(root *cobra.Command) {
 // pruneModules prunes the named root, or each registered root in root key order, each in its own
 // transaction; the first failure stops it.
 func pruneModules(ctx context.Context, database *gorm.DB, options modulePruneOptions) ([]storage.PruneResult, error) {
-	roots := []string{options.Root}
-	if options.Root == "" {
+	rootKey, _, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, All: options.All})
+	if err != nil {
+		return nil, err
+	}
+	roots := []string{rootKey}
+	if rootKey == "" {
 		roots = nil
 		if err := database.WithContext(ctx).Model(&storage.ModuleRoot{}).Order("root_key").Pluck("root_key", &roots).Error; err != nil {
 			return nil, fmt.Errorf("list module roots: %w", err)
