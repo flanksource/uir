@@ -111,6 +111,13 @@ func logVersionedMiss(ctx context.Context, name, miss string) {
 	}
 }
 
+// versionNotRegistered is the unavailable outcome of a version no registered checkout has. Its text
+// becomes the edge's unresolved reason, which the dependency set hash covers, so every resolver must
+// record this exact error.
+func versionNotRegistered(name string) error {
+	return fmt.Errorf("%w: no registered checkout contains %s", errVersionUnavailable, name)
+}
+
 func (indexer *Indexer) addVersionedNode(ctx context.Context, memo *runMemo, graph *versionedDependencyGraph, key versionMemoKey) error {
 	name := versionedKey(key.modulePath, key.version)
 	tag, err := indexer.versionTag(ctx, memo, key.modulePath, key.version)
@@ -118,7 +125,7 @@ func (indexer *Indexer) addVersionedNode(ctx context.Context, memo *runMemo, gra
 		return err
 	}
 	if !tag.found {
-		return fmt.Errorf("%w: no registered checkout contains %s", errVersionUnavailable, name)
+		return versionNotRegistered(name)
 	}
 	options := RevisionOptions{
 		RootKey: key.modulePath, Checkout: tag.checkout, Commit: tag.commit, Version: key.version, IncludeTests: key.includeTests,

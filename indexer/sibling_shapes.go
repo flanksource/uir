@@ -234,20 +234,26 @@ func (check *headCheck) confirmLocation(ctx context.Context, location string) (c
 	return check.reusedLocation(ctx, location)
 }
 
-// reusedLocation confirms a location the run has not indexed by checking its own head, after linking
-// its dependencies to the snapshots the run resolved or confirmed for them.
+// reusedLocation confirms a location the run has not indexed by checking its own head.
 func (check *headCheck) reusedLocation(ctx context.Context, location string) (confirmedLocation, string, error) {
-	if check.checking[location] {
-		return confirmedLocation{}, "its dependencies or siblings lead back to it", nil
-	}
-	check.checking[location] = true
-	defer delete(check.checking, location)
 	root, err := discoverModule(ctx, location, location, check.includeTests)
 	if err != nil {
 		return confirmedLocation{}, "", fmt.Errorf("discover %q: %w", location, err)
 	}
-	if root.Dependencies, err = readDependencies(ctx, root); err != nil {
-		return confirmedLocation{}, "", fmt.Errorf("read dependencies of %q: %w", location, err)
+	return check.reusedRoot(ctx, root)
+}
+
+// reusedRoot confirms a discovered root by checking its own head, after linking its dependencies to the
+// snapshots the run resolved or confirmed for them; otherwise it says why not.
+func (check *headCheck) reusedRoot(ctx context.Context, root discoveredRoot) (confirmedLocation, string, error) {
+	if check.checking[root.LocalPath] {
+		return confirmedLocation{}, "its dependencies or siblings lead back to it", nil
+	}
+	check.checking[root.LocalPath] = true
+	defer delete(check.checking, root.LocalPath)
+	var err error
+	if root.Dependencies, err = check.memo.dependencies(ctx, root); err != nil {
+		return confirmedLocation{}, "", fmt.Errorf("read dependencies of %q: %w", root.LocalPath, err)
 	}
 	reason, err := check.linkConfirmed(ctx, &root)
 	if err != nil || reason != "" {
@@ -257,7 +263,7 @@ func (check *headCheck) reusedLocation(ctx context.Context, location string) (co
 	if err != nil || miss != (headMiss{}) {
 		return confirmedLocation{}, "head not reusable: " + miss.detail, err
 	}
-	confirmed, err := check.confirmSnapshot(ctx, location, head)
+	confirmed, err := check.confirmSnapshot(ctx, root.LocalPath, head)
 	return confirmed, "", err
 }
 
