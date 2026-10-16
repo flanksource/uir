@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@flanksource/clicky-ui": ["../../clicky-ui/packages/ui/dist/index.d.ts"],
+      "@flanksource/clicky-ui/monaco/schema": ["../../clicky-ui/packages/ui/dist/monaco-schema.d.ts"],
+      "@flanksource/clicky-ui/expressions/playground": ["../../clicky-ui/packages/ui/dist/expressions/playground.d.ts"],
+      "@flanksource/clicky-ui/ai/runtime-profile": ["../../clicky-ui/packages/ui/dist/runtime-profile.d.ts"],
+      "@flanksource/clicky-ui/*": ["../../clicky-ui/packages/ui/dist/*.d.ts"],
+      "monaco-editor": ["./node_modules/monaco-editor/esm/vs/index.d.ts"],
+      "@monaco-editor/react": ["./node_modules/@monaco-editor/react/dist/index.d.ts"],
+      "react": ["./node_modules/@types/react"],
+      "@tanstack/react-query": ["./node_modules/@tanstack/react-query"]
+    }
+  }
+}
