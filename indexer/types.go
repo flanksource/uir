@@ -47,6 +47,7 @@ type nodeSpec struct {
 	Payload        storage.JSON
 	SemanticHash   string
 	Field          *storage.Field
+	node           uir.Node
 }
 
 type callSpec struct {
