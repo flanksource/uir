@@ -259,7 +259,29 @@ func (b *TypeBuilder) WithAnnotation(annotation Annotation) *TypeBuilder {
 	return b
 }
 
+// memberOf qualifies a member's identifier with its type, keeping the member's
+// own name and node type, so two types' "id" fields are distinct symbols.
+func (b *TypeBuilder) memberOf(member Identifier) Identifier {
+	member.Module = b.node.Module
+	member.Package = b.node.Package
+	member.Type = b.node.Type
+	return member
+}
+
+// Build qualifies every member with the type, as TableBuilder does for a
+// table's, at build time so WithPackage and WithModule may follow the members.
 func (b *TypeBuilder) Build() TypedNode {
+	for i := range b.node.Variables {
+		b.node.Variables[i].Identifier = b.memberOf(b.node.Variables[i].Identifier)
+	}
+	for i := range b.node.Methods {
+		b.node.Methods[i].Identifier = b.memberOf(b.node.Methods[i].Identifier)
+	}
+	for _, method := range []*MethodNode{b.node.Constructor, b.node.Destructor} {
+		if method != nil {
+			method.Identifier = b.memberOf(method.Identifier)
+		}
+	}
 	return b.node
 }
 
