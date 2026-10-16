@@ -31,11 +31,13 @@ type lineAttribution struct {
 }
 
 // blobSource reads one commit's files from a registered checkout that contains it, or one external
-// revision's files from the blobs its publication stored (stored is then set).
+// revision's files from the blobs its publication stored (stored is then set), or with inline set a
+// patch's files from the bytes each side already holds.
 type blobSource struct {
 	commit   string
 	checkout string
 	stored   *gorm.DB
+	inline   bool
 	err      error
 }
 
@@ -54,10 +56,13 @@ func (source blobSource) checkoutBytes(ctx context.Context, path string) ([]byte
 }
 
 // read returns the file's bytes at the commit, verified against the source revision's content hash:
-// the blob its publication stored, or the checkout's bytes.
+// the blob its publication stored, or the checkout's bytes. A patch side's bytes were verified when read.
 func (source blobSource) read(ctx context.Context, side *fileSide) ([]byte, error) {
 	if source.err != nil {
 		return nil, source.err
+	}
+	if source.inline {
+		return side.source, nil
 	}
 	if source.stored != nil {
 		content, err := storage.ReadSourceBlob(ctx, source.stored, side.active.Source.ContentHash)
