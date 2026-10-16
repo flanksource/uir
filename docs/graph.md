@@ -57,7 +57,6 @@ The root is one function or method. A selector that matches exactly one is drawn
 | `exclude` | The effective [exclusion patterns](#excluding-packages): the ones given, or the defaults. |
 | `packages` | Every package the walk reached, drawn or excluded: `path`, `external`, `nodes`, and `excluded`. |
 | `stages` | How the request was resolved: the scope, the index coverage, the root, and the size of the graph. |
-| `warnings` | Registered checkouts skipped because they have no indexed head. |
 | `candidates` | The functions and methods an ambiguous selector matched. |
 
 A node's `location` is where the symbol is declared: `root_key`, `checkout_path`, `snapshot_id`, `source_id`, `path`, `line`, `column`, and `identity_key`. `source_id` and `identity_key` together are the id of the same declaration in `GET /api/v1/modules/browse` (`<source_id>:<identity_key>`). A symbol declared outside the selected snapshots, such as `fmt.Errorf`, has no location. A symbol declared more than once, such as a function with one declaration per build tag, is located at the first by path, and `properties.declarations` counts them.

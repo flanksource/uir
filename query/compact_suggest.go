@@ -12,42 +12,42 @@ import (
 // SuggestSymbols returns active canonical symbols whose qualified spelling starts with a partial
 // subject. The subject is literal text, such as the unquoted content of a quoted symbol, so it may
 // contain spaces and punctuation but no wildcard.
-func (pipeline *Pipeline) SuggestSymbols(ctx context.Context, prefix string, options ModuleScopeOptions) (ItemsWithWarnings[ModuleSymbol], error) {
+func (pipeline *Pipeline) SuggestSymbols(ctx context.Context, prefix string, options ModuleScopeOptions) ([]ModuleSymbol, error) {
 	if pipeline == nil || pipeline.database == nil {
-		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("UIR query database is required")
+		return nil, fmt.Errorf("UIR query database is required")
 	}
 	if !partialSymbol.MatchString(prefix) || strings.Contains(prefix, "..") || len(prefix) > maximumSelectorPattern {
-		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("invalid partial symbol %q: expected literal text without a wildcard, leading whitespace, or an empty name part", prefix)
+		return nil, fmt.Errorf("invalid partial symbol %q: expected literal text without a wildcard, leading whitespace, or an empty name part", prefix)
 	}
 	if options.Limit == 0 {
 		options.Limit = 20
 	}
 	if options.Limit < 1 || options.Limit > 100 {
-		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("suggestion limit must be between 1 and 100, got %d", options.Limit)
+		return nil, fmt.Errorf("suggestion limit must be between 1 and 100, got %d", options.Limit)
 	}
 	if options.Location != "" && options.SnapshotID != "" {
-		return ItemsWithWarnings[ModuleSymbol]{}, fmt.Errorf("location and snapshot selectors are mutually exclusive")
+		return nil, fmt.Errorf("location and snapshot selectors are mutually exclusive")
 	}
 	session, _ := pipeline.session()
 	selection, err := session.moduleScopes(ctx, options, false)
 	if err != nil {
-		return ItemsWithWarnings[ModuleSymbol]{}, err
+		return nil, err
 	}
 	if len(selection.scopes) == 0 {
-		return ItemsWithWarnings[ModuleSymbol]{Items: []ModuleSymbol{}, Warnings: selection.warnings}, nil
+		return []ModuleSymbol{}, nil
 	}
 	base, err := newIndexContext(ctx, session, selection.scopes)
 	if err != nil {
-		return ItemsWithWarnings[ModuleSymbol]{}, err
+		return nil, err
 	}
 	index := newCompactIndex(base)
 	matched, err := index.symbolsWithPrefix(ctx, prefix)
 	if err != nil {
-		return ItemsWithWarnings[ModuleSymbol]{}, err
+		return nil, err
 	}
 	symbols, err := index.activeSymbols(ctx, matched)
 	if err != nil {
-		return ItemsWithWarnings[ModuleSymbol]{}, err
+		return nil, err
 	}
 	if len(symbols) > options.Limit {
 		symbols = symbols[:options.Limit]
@@ -55,7 +55,7 @@ func (pipeline *Pipeline) SuggestSymbols(ctx context.Context, prefix string, opt
 	if symbols == nil {
 		symbols = []ModuleSymbol{}
 	}
-	return ItemsWithWarnings[ModuleSymbol]{Items: symbols, Warnings: selection.warnings}, nil
+	return symbols, nil
 }
 
 // partialSymbol is a partial symbol spelling: printable text that starts with no whitespace and has

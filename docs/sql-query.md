@@ -68,7 +68,7 @@ Concrete HTTP, messaging, and Kubernetes extractors are separate producers. This
 
 ## API and browser
 
-`POST /api/v1/modules/query` accepts `args: [expression]`, `language: auto|compact|sql`, and existing root, location, snapshot, and limit options. Row responses add `columns` and `rows` beside the existing `matches`, `symbols`, `coverage`, `warnings`, and `stages`; paths use `path`, and graphs use `graph`. Native graph sites carry their own snapshot and source location so evidence opens the correct file.
+`POST /api/v1/modules/query` accepts `args: [expression]`, `language: auto|compact|sql`, and existing root, location, snapshot, and limit options. Row responses add `columns` and `rows` beside the existing `matches`, `symbols`, `coverage`, and `stages`; paths use `path`, and graphs use `graph`. Native graph sites carry their own snapshot and source location so evidence opens the correct file.
 
 SQL CLI JSON and YAML retain this result envelope, including pre-limit totals and source witnesses. Human-readable output renders projected values, paths, or graphs. Compact CLI JSON retains its existing row format.
 

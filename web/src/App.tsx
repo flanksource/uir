@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell, Button, Combobox, CommandPaletteTrigger, SegmentedControl, type CommandGroup } from "@flanksource/clicky-ui/components";
 import { DataTable, TaskManager, TaskManagerButton, type DataTableColumn } from "@flanksource/clicky-ui/data";
-import { addModules, browseModule, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleIndexRun, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type Page } from "./api";
+import { addModules, browseModule, getModuleStatus, listModuleHeads, listModuleLocations, listModuleRoots, listModuleSnapshots, reindexModules, runModuleQuery, type ModuleBrowse, type ModuleHead, type ModuleIndexRun, type ModuleLocation, type ModuleQueryResult, type ModuleRoot, type ModuleSnapshot, type ModuleStatus, type Page } from "./api";
 import { commandFileIcon, commandModuleIcon, commandNavigationIcons, commandSymbolIcon } from "./command-icons";
 import { queryExamples, queryScope, type QueryExample } from "./query-model";
 import { QueryCommandPalette } from "./QueryCommandPalette";
 import { ConnectionsView } from "./ConnectionsView";
+import { MissingHeads } from "./CoverageWarning";
 import { HistoryView } from "./HistoryView";
 import { QueryView } from "./QueryView";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue, type Route } from "./route";
@@ -123,7 +124,8 @@ export function App() {
   }, [route.location, route.snapshot, selectedLocation]);
   const snapshots = useLoad<Page<ModuleSnapshot>>(route.module && route.location ? () => listModuleSnapshots(route.module, route.location, route.offset) : null,
     `snapshots:${route.module}:${route.location}:${route.offset}:${refresh}`);
-  const heads = useLoad<ItemsWithWarnings<ModuleHead>>(route.view === "explorer" ? listModuleHeads : null, `heads:${route.view}:${refresh}`);
+  const status = useLoad<ModuleStatus>(route.view === "overview" ? getModuleStatus : null, `status:${route.view}:${refresh}`);
+  const heads = useLoad<ModuleHead[]>(route.view === "explorer" ? listModuleHeads : null, `heads:${route.view}:${refresh}`);
   const browseActive = route.view === "explorer" || route.view === "query" || searchOpen;
   const browse = useTimedLoad<ModuleBrowse>(route.snapshot && browseActive ? () => browseModule(route.snapshot) : null,
     `browse:${route.snapshot}:${browseActive ? "active" : "idle"}:${refresh}`);
@@ -168,6 +170,8 @@ export function App() {
       {roots.loading && <Muted>Loading module roots…</Muted>}
       <ErrorMessage error={roots.error} />
       {route.view === "overview" && <>
+        <ErrorMessage error={status.error} />
+        {status.data && <MissingHeads missing={status.data.missing_heads} />}
         <Section><Heading>Indexed module roots</Heading><Muted>Each Go module path has one root and can have multiple registered checkouts.</Muted>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{(roots.data ?? []).map((item) => <Card key={item.root_key}><strong>{item.name || item.root_key}</strong><div><Muted>{item.root_key}</Muted></div><div>{item.location}</div><Muted>{item.snapshot_id ? `Primary head v${item.head_version}` : "No current head"}</Muted></Card>)}</div>
           {roots.data?.length === 0 && <p>No modules are indexed yet. Add a local directory below.</p>}
