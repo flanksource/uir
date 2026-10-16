@@ -166,7 +166,7 @@ var _ = Describe("serve task runs", func() {
 
 	It("marks indexed commits in history and diffs from the checkout a request names", func(ctx SpecContext) {
 		runtime, handler := servedRuntime(ctx)
-		from, to := indexedCommits(ctx, runtime.database)
+		from, to, _ := indexedCommits(ctx, runtime.database)
 		locations, err := storage.ModuleLocations(ctx, runtime.database, diffRoot)
 		Expect(err).To(Succeed())
 		checkout := locations[0].CanonicalPath
