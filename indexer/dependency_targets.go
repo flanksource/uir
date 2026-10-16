@@ -5,17 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
+	"golang.org/x/mod/module"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-var pseudoVersionCommit = regexp.MustCompile(`-[0-9]{14}-([0-9a-f]{12,})$`)
 var errVersionUnavailable = errors.New("versioned dependency snapshot unavailable")
 
 type activeModulePaths struct{}
@@ -315,8 +314,12 @@ func versionCommit(ctx context.Context, checkout, version string) (string, error
 	if err != nil {
 		return "", err
 	}
-	if match := pseudoVersionCommit.FindStringSubmatch(version); match != nil {
-		return revisionGit(ctx, checkout, "rev-parse", "--verify", match[1]+"^{commit}")
+	if module.IsPseudoVersion(version) {
+		rev, err := module.PseudoVersionRev(version)
+		if err != nil {
+			return "", fmt.Errorf("pseudo-version %s: %w", version, err)
+		}
+		return revisionGit(ctx, checkout, "rev-parse", "--verify", rev+"^{commit}")
 	}
 	relative, err := filepath.Rel(top, checkout)
 	if err != nil {
