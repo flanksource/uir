@@ -32,7 +32,7 @@ var _ = Describe("layered classification", func() {
 			to := repo.commit("accounts after")
 			repo.index(ctx, database)
 			diff := func(visibility Visibility, stat bool) FileDiff {
-				result, err := Diff(ctx, database, Options{RootKey: accountRoot, From: from, To: to, Visibility: visibility, Stat: stat})
+				result, err := Diff(ctx, database, Options{RootKey: accountRoot, Revisions: []string{from, to}, Visibility: visibility, Stat: stat})
 				Expect(err).ToNot(HaveOccurred())
 				return result.file("accounts.go")
 			}
@@ -152,7 +152,7 @@ var _ = Describe("external roots", func() {
 				Expect(err).ToNot(HaveOccurred())
 			}
 
-			result, err := Diff(ctx, database, Options{RootKey: schemaRoot, From: "schema-v1", To: "schema-v2", Visibility: VisibilityAll, Stat: true})
+			result, err := Diff(ctx, database, Options{RootKey: schemaRoot, Revisions: []string{"schema-v1", "schema-v2"}, Visibility: VisibilityAll, Stat: true})
 			Expect(err).ToNot(HaveOccurred())
 			Expect([]string{result.From.Commit, result.To.Commit, result.From.WorktreeState, result.To.Checkout, result.LinesError}).To(
 				Equal([]string{"schema-v1", "schema-v2", "unknown", "", ""}))
@@ -169,9 +169,9 @@ var _ = Describe("external roots", func() {
 			Expect([]*LineCount{orders.Lines, orders.FileScope}).To(Equal([]*LineCount{{Added: 2, Removed: 1}, {}}))
 			Expect(result.Packages).To(HaveLen(1), "an external root has no manifests")
 
-			_, err = Diff(ctx, database, Options{RootKey: schemaRoot, From: "schema-v1", To: "schema-v2", Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+			_, err = Diff(ctx, database, Options{RootKey: schemaRoot, Revisions: []string{"schema-v1", "schema-v2"}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 			Expect(err).To(MatchError(And(ContainSubstring("published by an external producer"), ContainSubstring("uir import"))))
-			_, err = Diff(ctx, database, Options{RootKey: schemaRoot, From: "schema-v1", To: "schema-v9", Visibility: VisibilityAll})
+			_, err = Diff(ctx, database, Options{RootKey: schemaRoot, Revisions: []string{"schema-v1", "schema-v9"}, Visibility: VisibilityAll})
 			Expect(err).To(MatchError(And(ContainSubstring(`"schema-v9"`), ContainSubstring(schemaRoot))))
 			_, err = ListHistory(ctx, database, schemaRoot, "", 10)
 			Expect(err).To(MatchError(ContainSubstring("published by an external producer")))

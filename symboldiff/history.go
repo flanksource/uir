@@ -81,7 +81,7 @@ func DiffCommit(ctx context.Context, database *gorm.DB, options CommitOptions) (
 	if len(parents) == 1 {
 		return Result{}, fmt.Errorf("commit %s has no parent to compare", commit)
 	}
-	return Diff(ctx, database, Options{RootKey: options.RootKey, From: parents[1], To: commit,
+	return Diff(ctx, database, Options{RootKey: options.RootKey, Revisions: []string{parents[1], commit},
 		Visibility: options.Visibility, Stat: options.Stat, AutoIndex: true, IncludeTests: options.IncludeTests, TaskContext: options.TaskContext})
 }
 

@@ -1,12 +1,9 @@
 package symboldiff
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -214,13 +211,5 @@ func verifyCommit(ctx context.Context, directory, revision string) (string, erro
 }
 
 func git(ctx context.Context, directory string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...)
-	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git %s in %q: %w: %s", strings.Join(args, " "), directory, err, strings.TrimSpace(stderr.String()))
-	}
-	return output, nil
+	return runGit(ctx, directory, "", args...)
 }

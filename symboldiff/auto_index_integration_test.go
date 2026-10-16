@@ -72,7 +72,7 @@ var _ = Describe("auto-indexed diffs", func() {
 		indexed := []string{indexRevision(ctx, database, repo, from), indexRevision(ctx, database, repo, to)}
 		before := shopIndexRuns()
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect([]string{result.From.SnapshotID, result.To.SnapshotID}).To(Equal(indexed))
@@ -85,7 +85,7 @@ var _ = Describe("auto-indexed diffs", func() {
 		indexed := indexRevision(ctx, database, repo, to)
 		before := shopIndexRuns()
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.To.SnapshotID).To(Equal(indexed))
@@ -102,7 +102,7 @@ var _ = Describe("auto-indexed diffs", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 
 		Expect(err).ToNot(HaveOccurred())
 		indexed := snapshotOf(database, result.From.SnapshotID)
@@ -124,7 +124,7 @@ var _ = Describe("auto-indexed diffs", func() {
 			Eventually(func() []clickytask.RunMeta { return clickytask.Runs(running) }, 30*time.Second, time.Millisecond).ShouldNot(BeEmpty())
 		}()
 
-		_, err := Diff(request, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
+		_, err := Diff(request, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx})
 
 		Expect(err).To(MatchError(context.Canceled))
 		Eventually(func() int64 {
@@ -138,7 +138,7 @@ var _ = Describe("auto-indexed diffs", func() {
 		database := openDatabase(ctx, sqliteOptions())
 		_, from, to, _ := twoCommits(ctx, database)
 
-		_, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true})
+		_, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true})
 
 		Expect(err).To(MatchError(ContainSubstring("auto-index needs a task context")))
 	})
@@ -153,9 +153,9 @@ var _ = Describe("auto-indexed diffs", func() {
 		var location storage.ModuleLocation
 		Expect(database.Where("canonical_path = ?", clone).Take(&location).Error).To(Succeed())
 
-		result, err := Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx, Location: clone})
+		result, err := Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, AutoIndex: true, TaskContext: ctx, Location: clone})
 		Expect(err).ToNot(HaveOccurred())
-		_, err = Diff(ctx, database, Options{RootKey: shopRoot, From: from, To: to, Visibility: VisibilityAll, Location: filepath.Join(clone, "missing")})
+		_, err = Diff(ctx, database, Options{RootKey: shopRoot, Revisions: []string{from, to}, Visibility: VisibilityAll, Location: filepath.Join(clone, "missing")})
 
 		Expect(snapshotOf(database, result.From.SnapshotID).LocationID).To(Equal(location.ID))
 		Expect(err).To(MatchError(ContainSubstring("is not registered for root")))
