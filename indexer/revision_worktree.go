@@ -33,44 +33,72 @@ func (indexer *Indexer) prepareRevision(ctx context.Context, options RevisionOpt
 		Where("root.root_key = ? AND location.canonical_path = ?", options.RootKey, options.Checkout).Take(&location).Error; err != nil {
 		return prepared, fmt.Errorf("load registered checkout %q of %q: %w", options.Checkout, options.RootKey, err)
 	}
-	top, err := revisionGit(ctx, options.Checkout, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return prepared, err
-	}
-	commit, err := revisionGit(ctx, options.Checkout, "rev-parse", "--verify", "--quiet", "--end-of-options", options.Commit+"^{commit}")
-	if err != nil {
-		return prepared, err
-	}
-	relative, err := filepath.Rel(top, options.Checkout)
-	if err != nil {
-		return prepared, fmt.Errorf("locate module within checkout: %w", err)
-	}
-	scratch, err := revisionWorktree(ctx, revisionWorktreeOptions{Repository: top, Commit: commit, Directory: options.ScratchDirectory})
-	if err != nil {
+	var checkout revisionCheckout
+	if err = Phase(ctx, "checkout", func(ctx context.Context) (err error) {
+		checkout, err = checkoutRevision(ctx, options)
+		return err
+	}); err != nil {
 		return prepared, err
 	}
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, scratch.cleanup())
+			err = errors.Join(err, checkout.scratch.cleanup())
 		}
 	}()
-	modulePath, err := filepath.EvalSymlinks(filepath.Join(scratch.worktree, relative))
+	var root discoveredRoot
+	if err = Phase(ctx, "discover", func(ctx context.Context) (err error) {
+		if root, err = discoverRevisionRoot(ctx, checkout, options); err != nil {
+			return err
+		}
+		countDiscovered(ctx, []discoveredRoot{root})
+		return nil
+	}); err != nil {
+		return prepared, err
+	}
+	return preparedRevision{root: root, location: location, cleanup: checkout.scratch.cleanup}, nil
+}
+
+// revisionCheckout is the scratch worktree of a commit, and where the module lies within it.
+type revisionCheckout struct {
+	commit, relative string
+	scratch          revisionScratch
+}
+
+// checkoutRevision resolves options.Commit in the checkout's repository and adds its scratch worktree.
+func checkoutRevision(ctx context.Context, options RevisionOptions) (revisionCheckout, error) {
+	top, err := revisionGit(ctx, options.Checkout, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return prepared, fmt.Errorf("canonicalize historical module at %q: %w", relative, err)
+		return revisionCheckout{}, err
+	}
+	commit, err := revisionGit(ctx, options.Checkout, "rev-parse", "--verify", "--quiet", "--end-of-options", options.Commit+"^{commit}")
+	if err != nil {
+		return revisionCheckout{}, err
+	}
+	relative, err := filepath.Rel(top, options.Checkout)
+	if err != nil {
+		return revisionCheckout{}, fmt.Errorf("locate module within checkout: %w", err)
+	}
+	scratch, err := revisionWorktree(ctx, revisionWorktreeOptions{Repository: top, Commit: commit, Directory: options.ScratchDirectory})
+	return revisionCheckout{commit: commit, relative: relative, scratch: scratch}, err
+}
+
+// discoverRevisionRoot discovers the module options names in the checked-out commit as a historical
+// root.
+func discoverRevisionRoot(ctx context.Context, checkout revisionCheckout, options RevisionOptions) (discoveredRoot, error) {
+	modulePath, err := filepath.EvalSymlinks(filepath.Join(checkout.scratch.worktree, checkout.relative))
+	if err != nil {
+		return discoveredRoot{}, fmt.Errorf("canonicalize historical module at %q: %w", checkout.relative, err)
 	}
 	roots, err := discoverModules(ctx, modulePath, options.IncludeTests)
 	if err != nil {
-		return prepared, err
+		return discoveredRoot{}, err
 	}
 	for _, root := range roots {
 		if root.LocalPath == modulePath && root.RootKey == options.RootKey {
-			if root, err = historicalRoot(ctx, root, options, scratch.manifests); err != nil {
-				return prepared, err
-			}
-			return preparedRevision{root: root, location: location, cleanup: scratch.cleanup}, nil
+			return historicalRoot(ctx, root, options, checkout.scratch.manifests)
 		}
 	}
-	return prepared, fmt.Errorf("revision %s has no module %q at %q", commit, options.RootKey, relative)
+	return discoveredRoot{}, fmt.Errorf("revision %s has no module %q at %q", checkout.commit, options.RootKey, checkout.relative)
 }
 
 // historicalRoot turns a root discovered in a historical worktree into a clean, workspace-free root

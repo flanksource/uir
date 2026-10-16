@@ -36,9 +36,18 @@ func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptio
 		return result, err
 	}
 	defer func() { err = errors.Join(err, prepared.cleanup()) }()
+	return indexer.indexPreparedRevision(ctx, prepared, options)
+}
+
+// indexPreparedRevision is IndexRevision of the commit prepareRevision already checked out for
+// options; the caller still owns the worktree's cleanup.
+func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared preparedRevision, options RevisionOptions) (result ModuleResult, err error) {
 	root, location := prepared.root, prepared.location
 	selectedRoots := []discoveredRoot{root}
-	if err := indexer.indexVersionedDependencies(ctx, selectedRoots, options.IncludeTests); err != nil {
+	if err := Phase(ctx, "versioned-deps", func(ctx context.Context) error {
+		PhaseCount(ctx, "dependencies", int64(len(root.Dependencies)))
+		return indexer.indexVersionedDependencies(ctx, selectedRoots, options.IncludeTests)
+	}); err != nil {
 		return result, err
 	}
 	root = selectedRoots[0]
@@ -72,7 +81,7 @@ func (indexer *Indexer) ReusableRevision(ctx context.Context, options RevisionOp
 	return revisionResult(options, existing), true, nil
 }
 
-// reusableRevision is the fully indexed stored snapshot of a commit without dependencies. A commit
+// reusableRevision is the complete stored snapshot of a commit without dependencies. A commit
 // with dependencies is never reused without extracting.
 func (indexer *Indexer) reusableRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot) (storage.ModuleSnapshot, bool, error) {
 	if len(root.Dependencies) != 0 {
@@ -86,16 +95,29 @@ func revisionResult(options RevisionOptions, snapshot storage.ModuleSnapshot) Mo
 }
 
 // storedRevision is the newest clean snapshot of root's commit under its configuration and dependency
-// set (and version, when it has one). Without an extraction only a fully indexed snapshot qualifies;
+// set (and version, when it has one). Without an extraction only a complete snapshot qualifies;
 // with one, the snapshot must have the extraction's context hash and coverage.
-func (indexer *Indexer) storedRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (storage.ModuleSnapshot, bool, error) {
+func (indexer *Indexer) storedRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (existing storage.ModuleSnapshot, found bool, err error) {
+	err = Phase(ctx, "reuse-check", func(ctx context.Context) (err error) {
+		existing, found, err = indexer.loadStoredRevision(ctx, location, root, extraction)
+		var reused int64
+		if found {
+			reused = 1
+		}
+		PhaseCount(ctx, "reused", reused)
+		return err
+	})
+	return existing, found, err
+}
+
+func (indexer *Indexer) loadStoredRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (storage.ModuleSnapshot, bool, error) {
 	query := indexer.database.WithContext(ctx).Where("root_id = ? AND revision = ? AND configuration_hash = ? AND worktree_state = ? AND dependency_set_hash = ?",
 		location.RootID, root.GitCommit, root.ConfigurationHash, storage.WorktreeClean, dependencyHash(root.Dependencies))
 	if root.ModuleVersion != "" {
 		query = query.Where("module_version = ?", root.ModuleVersion)
 	}
 	if extraction == nil {
-		query = query.Where("coverage = ?", storage.CoverageIndexed)
+		query = query.Where("coverage IN ?", storage.CompleteCoverages)
 	} else {
 		query = query.Where("context_hash = ? AND coverage = ?", extraction.contextHash, extraction.coverage)
 	}
@@ -112,24 +134,26 @@ func (indexer *Indexer) storedRevision(ctx context.Context, location storage.Mod
 
 func (indexer *Indexer) publishRevision(ctx context.Context, location storage.ModuleLocation, extraction moduleExtraction, reason storage.SnapshotReason) (result ModuleResult, err error) {
 	root := extraction.root
-	err = storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
-		var stored storage.ModuleRoot
-		if loadErr := transaction.Where("id = ?", location.RootID).Take(&stored).Error; loadErr != nil {
-			return fmt.Errorf("load root of historical module: %w", loadErr)
-		}
-		base, loadErr := loadModuleBase(ctx, transaction, stored, location)
-		if loadErr != nil {
-			return loadErr
-		}
-		result = ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(root.Files)}
-		snapshot, publishErr := publishSnapshot(ctx, transaction, snapshotPublication{
-			root: stored, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(), reason: reason, preserveHead: true,
-		}, &result)
-		if publishErr != nil {
-			return publishErr
-		}
-		result.SnapshotID = snapshot.ID.String()
-		return nil
+	err = Phase(ctx, "publish", func(ctx context.Context) error {
+		return storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
+			var stored storage.ModuleRoot
+			if loadErr := transaction.Where("id = ?", location.RootID).Take(&stored).Error; loadErr != nil {
+				return fmt.Errorf("load root of historical module: %w", loadErr)
+			}
+			base, loadErr := loadModuleBase(ctx, transaction, stored, location)
+			if loadErr != nil {
+				return loadErr
+			}
+			result = ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(root.Files)}
+			snapshot, publishErr := publishSnapshot(ctx, transaction, snapshotPublication{
+				root: stored, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(), reason: reason, preserveHead: true,
+			}, &result)
+			if publishErr != nil {
+				return publishErr
+			}
+			result.SnapshotID = snapshot.ID.String()
+			return nil
+		})
 	})
 	return result, err
 }

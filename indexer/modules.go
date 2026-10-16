@@ -63,6 +63,7 @@ func (indexer *Indexer) indexModules(ctx context.Context, options ModuleOptions)
 	var roots []discoveredRoot
 	if err := Phase(ctx, "discover", func(ctx context.Context) (err error) {
 		roots, err = discoverRequestedModules(ctx, options)
+		countDiscovered(ctx, roots)
 		return err
 	}); err != nil {
 		return nil, err
@@ -78,6 +79,7 @@ func (indexer *Indexer) indexModules(ctx context.Context, options ModuleOptions)
 	var cyclic bool
 	if err := Phase(ctx, "dependencies", func(ctx context.Context) (err error) {
 		graph, cyclic, err = readModuleDependencies(ctx, roots, options.IncludeTests)
+		countDependencies(ctx, roots)
 		return err
 	}); err != nil {
 		return nil, err
@@ -106,9 +108,10 @@ func (indexer *Indexer) indexModules(ctx context.Context, options ModuleOptions)
 // readModuleDependencies reads every root's dependencies and, unless an enclosing IndexModules is
 // already indexing local dependencies, discovers their local dependency graph and whether it is cyclic.
 func readModuleDependencies(ctx context.Context, roots []discoveredRoot, includeTests bool) (localDependencyGraph, bool, error) {
+	ctx, memo := ensureRunMemo(ctx)
 	var err error
 	for i := range roots {
-		roots[i].Dependencies, err = readDependencies(ctx, roots[i])
+		roots[i].Dependencies, err = memo.dependencies(ctx, roots[i])
 		if err != nil {
 			return localDependencyGraph{}, false, fmt.Errorf("read dependencies of module %q: %w", roots[i].RootKey, err)
 		}
@@ -123,29 +126,44 @@ func readModuleDependencies(ctx context.Context, roots []discoveredRoot, include
 	return graph, graph.cyclic(), nil
 }
 
-// extractModules extracts every root whose head snapshot is not reusable.
+// extractModules extracts every root whose head snapshot is not reusable, visiting workspace siblings
+// before the roots that import them, so an importer is checked against its sibling's current shapes.
 func (indexer *Indexer) extractModules(ctx context.Context, roots []discoveredRoot, options ModuleOptions) ([]moduleExtraction, error) {
-	extractions := make([]moduleExtraction, 0, len(roots))
-	for _, root := range roots {
-		var head uuid.UUID
-		var reusable bool
-		if err := Phase(ctx, "unchanged-check", func(ctx context.Context) (err error) {
-			head, reusable, err = reusableHead(ctx, indexer.database, root, options.Force)
-			return err
-		}); err != nil {
-			return nil, fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, err)
+	ctx, memo := ensureRunMemo(ctx)
+	check := newHeadCheck(indexer, memo, options.IncludeTests)
+	order, err := check.siblingOrder(roots, options.Force)
+	if err != nil {
+		return nil, err
+	}
+	extractions := make([]moduleExtraction, len(roots))
+	for _, index := range order {
+		if extractions[index], err = indexer.extractOrReuse(ctx, check, roots[index], options); err != nil {
+			return nil, fmt.Errorf("index module %q at %q: %w", roots[index].RootKey, roots[index].LocalPath, err)
 		}
-		if reusable {
-			extractions = append(extractions, moduleExtraction{root: root, reusedHead: head})
-			continue
-		}
-		extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
-		if err != nil {
-			return nil, fmt.Errorf("index module %q at %q: %w", root.RootKey, root.LocalPath, err)
-		}
-		extractions = append(extractions, extraction)
 	}
 	return extractions, nil
+}
+
+// extractOrReuse reuses the root's head when it is reusable and otherwise extracts the root, recording
+// the shapes either confirms in check.
+func (indexer *Indexer) extractOrReuse(ctx context.Context, check *headCheck, root discoveredRoot, options ModuleOptions) (moduleExtraction, error) {
+	var head uuid.UUID
+	var reusable bool
+	if err := Phase(ctx, "unchanged-check", func(ctx context.Context) (err error) {
+		head, reusable, err = reusableHead(ctx, check, root, options.Force)
+		return err
+	}); err != nil {
+		return moduleExtraction{}, err
+	}
+	if reusable {
+		_, err := check.confirmSnapshot(ctx, root.LocalPath, head)
+		return moduleExtraction{root: root, reusedHead: head}, err
+	}
+	extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
+	if err == nil {
+		check.confirmExtraction(extraction)
+	}
+	return extraction, err
 }
 
 // publishModules publishes every extraction in one transaction, after verifying the inputs it was
@@ -174,6 +192,21 @@ func (indexer *Indexer) publishModules(ctx context.Context, roots []discoveredRo
 		return nil, err
 	}
 	return results, nil
+}
+
+// countDiscovered counts the discovered modules and their files in the running phase.
+func countDiscovered(ctx context.Context, roots []discoveredRoot) {
+	PhaseCount(ctx, "modules", int64(len(roots)))
+	for _, root := range roots {
+		PhaseCount(ctx, "files", int64(len(root.Files)))
+	}
+}
+
+// countDependencies counts the modules' dependencies in the running phase.
+func countDependencies(ctx context.Context, roots []discoveredRoot) {
+	for _, root := range roots {
+		PhaseCount(ctx, "dependencies", int64(len(root.Dependencies)))
+	}
 }
 
 func discoverRequestedModules(ctx context.Context, options ModuleOptions) ([]discoveredRoot, error) {

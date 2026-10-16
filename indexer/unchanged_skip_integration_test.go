@@ -79,7 +79,7 @@ var _ = Describe("unchanged run", func() {
 		Entry("PostgreSQL", indexerPostgresOptions),
 	)
 
-	DescribeTable("type-checks a module that imports a workspace sibling and republishes it when the sibling's export shape changes",
+	DescribeTable("reuses a module that imports a workspace sibling until the sibling's export shape changes, then republishes it",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openIndexerDB(ctx, options())
 			workspace := GinkgoT().TempDir()
@@ -93,19 +93,19 @@ var _ = Describe("unchanged run", func() {
 			again := indexWorkspace(ctx, engine, workspace)
 			Expect(outcomeOf(again["example.org/pricing"])).To(Equal(triggerOutcome{Unchanged: true, HeadVersion: 1, ReusedFiles: 1}))
 			Expect(outcomeOf(again["example.org/shop"])).To(Equal(triggerOutcome{Unchanged: true, HeadVersion: 1, ReusedFiles: 1}))
-			Expect(*loads).To(Equal(3), "only shop, which imports a sibling, is type-checked")
+			Expect(*loads).To(Equal(2), "shop's recorded shape of pricing still holds, so neither is type-checked")
 
 			writeFile(filepath.Join(workspace, "pricing", "pricing.go"), "package pricing\n\nfunc Base() int { return 11 }\n")
 			body := indexWorkspace(ctx, engine, workspace)
 			Expect(outcomeOf(body["example.org/pricing"])).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 1}))
 			Expect(outcomeOf(body["example.org/shop"])).To(Equal(triggerOutcome{Unchanged: true, HeadVersion: 1, ReusedFiles: 1}), "a sibling body change keeps shop's context")
-			Expect(*loads).To(Equal(5))
+			Expect(*loads).To(Equal(3), "only pricing is type-checked")
 
 			writeFile(filepath.Join(workspace, "pricing", "pricing.go"), "package pricing\n\nfunc Base() int { return 11 }\n\nfunc Discount() int { return 1 }\n")
 			shaped := indexWorkspace(ctx, engine, workspace)
 			Expect(outcomeOf(shaped["example.org/pricing"])).To(Equal(triggerOutcome{HeadVersion: 3, ParsedFiles: 1}))
 			Expect(outcomeOf(shaped["example.org/shop"])).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 1}), "a sibling export change re-keys shop's document")
-			Expect(*loads).To(Equal(7))
+			Expect(*loads).To(Equal(5))
 			before, after := loadSnapshot(database, first["example.org/shop"].SnapshotID), loadSnapshot(database, shaped["example.org/shop"].SnapshotID)
 			Expect([]string{after.ContentSetHash, after.ConfigurationHash}).To(Equal([]string{before.ContentSetHash, before.ConfigurationHash}))
 			Expect(after.ContextHash).ToNot(Equal(before.ContextHash))

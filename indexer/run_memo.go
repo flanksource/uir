@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/flanksource/uir/storage"
@@ -24,6 +23,7 @@ type runMemo struct {
 	versions map[versionMemoKey]versionOutcome
 	closure  map[uuid.UUID]closureNode
 	tags     map[tagMemoKey]tagCommit
+	local    localDependencyMemo
 	// versionCommit resolves a version to a commit of a checkout; tests count calls through it.
 	versionCommit func(ctx context.Context, checkout, version string) (string, error)
 }
@@ -46,17 +46,17 @@ type versionOutcome struct {
 	unavailable error
 }
 
-// closureNode is one snapshot of a versioned closure: whether the snapshot itself is complete, and
-// the snapshots its dependency edges target.
+// closureNode is one snapshot of a versioned closure: why the snapshot itself is not complete, or ""
+// when it is, and the snapshots its dependency edges target.
 type closureNode struct {
-	complete bool
-	targets  []uuid.UUID
+	miss    string
+	targets []uuid.UUID
 }
 
 // tagCommit is the commit a version names in the first registered checkout that has it.
 type tagCommit struct {
-	commit string
-	found  bool
+	commit, checkout string
+	found            bool
 }
 
 type runMemoKey struct{}
@@ -89,6 +89,7 @@ func (memo *runMemo) forget() {
 	memo.versions = map[versionMemoKey]versionOutcome{}
 	memo.closure = map[uuid.UUID]closureNode{}
 	memo.tags = map[tagMemoKey]tagCommit{}
+	memo.local = newLocalDependencyMemo()
 }
 
 func (memo *runMemo) module(location string, includeTests bool) (ModuleResult, bool) {
@@ -106,24 +107,19 @@ func (memo *runMemo) rememberModules(results []ModuleResult, includeTests bool) 
 	}
 }
 
-// version is the remembered outcome of resolving modulePath at version, as resolve returns it, and
-// resolves and remembers it first when the run has not: a snapshot, or an errVersionUnavailable.
-// Any other error is returned without being remembered.
-func (memo *runMemo) version(key versionMemoKey, resolve func() (storage.ModuleSnapshot, error)) (storage.ModuleSnapshot, error) {
+// version is the remembered outcome of resolving a versioned dependency, and whether the run has one.
+func (memo *runMemo) version(key versionMemoKey) (versionOutcome, bool) {
 	memo.mu.Lock()
+	defer memo.mu.Unlock()
 	outcome, found := memo.versions[key]
-	memo.mu.Unlock()
-	if found {
-		return outcome.snapshot, outcome.unavailable
-	}
-	snapshot, err := resolve()
-	if err != nil && !errors.Is(err, errVersionUnavailable) {
-		return storage.ModuleSnapshot{}, err
-	}
+	return outcome, found
+}
+
+// rememberVersion records the outcome of resolving a versioned dependency.
+func (memo *runMemo) rememberVersion(key versionMemoKey, outcome versionOutcome) {
 	memo.mu.Lock()
-	memo.versions[key] = versionOutcome{snapshot: snapshot, unavailable: err}
-	memo.mu.Unlock()
-	return snapshot, err
+	defer memo.mu.Unlock()
+	memo.versions[key] = outcome
 }
 
 func (memo *runMemo) closureNode(id uuid.UUID, load func() (closureNode, error)) (closureNode, error) {

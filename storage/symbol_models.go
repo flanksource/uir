@@ -133,3 +133,15 @@ type PackageCoverage struct {
 }
 
 func (PackageCoverage) TableName() string { return "package_coverage" }
+
+// SnapshotSiblingShape records a workspace sibling package a snapshot's typed load read: the export
+// shape it presented when the snapshot imports it directly, and the digest of its sources for every
+// package of the closure. Both are nil for a direct import written only in files no variant compiled.
+type SnapshotSiblingShape struct {
+	SnapshotID      uuid.UUID `gorm:"column:snapshot_id;primaryKey"`
+	ImportPath      string    `gorm:"column:import_path;primaryKey"`
+	ExportShapeHash *string   `gorm:"column:export_shape_hash"`
+	SourceDigest    *string   `gorm:"column:source_digest"`
+}
+
+func (SnapshotSiblingShape) TableName() string { return "snapshot_sibling_shapes" }

@@ -3,7 +3,9 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 )
 
 type localDependencyGraph struct {
@@ -13,6 +15,7 @@ type localDependencyGraph struct {
 }
 
 func discoverLocalDependencyGraph(ctx context.Context, roots []discoveredRoot, includeTests bool) (localDependencyGraph, error) {
+	ctx, memo := ensureRunMemo(ctx)
 	graph := localDependencyGraph{roots: roots, byPath: make(map[string]int, len(roots))}
 	for index, root := range roots {
 		graph.byPath[root.LocalPath] = index
@@ -32,42 +35,67 @@ func discoverLocalDependencyGraph(ctx context.Context, roots []discoveredRoot, i
 			if _, found := graph.byPath[path]; found {
 				continue
 			}
-			discovered, err := discoverModules(ctx, path, includeTests)
+			target, err := memo.localDependencyRoot(ctx, path, includeTests)
 			if err != nil {
-				return localDependencyGraph{}, fmt.Errorf("discover local dependency %q: %w", path, err)
+				return localDependencyGraph{}, err
 			}
-			var target *discoveredRoot
-			for rootIndex := range discovered {
-				if discovered[rootIndex].LocalPath == path {
-					target = &discovered[rootIndex]
-					break
-				}
-			}
-			if target == nil {
-				return localDependencyGraph{}, fmt.Errorf("local dependency %q has no module at its root", path)
-			}
-			target.Dependencies, err = readDependencies(ctx, *target)
-			if err != nil {
+			if target.Dependencies, err = memo.dependencies(ctx, target); err != nil {
 				return localDependencyGraph{}, fmt.Errorf("read dependencies of %q: %w", path, err)
 			}
 			graph.byPath[path] = len(graph.roots)
-			graph.roots = append(graph.roots, *target)
+			graph.roots = append(graph.roots, target)
 		}
 	}
 	graph.groups = graph.components()
-	return graph, nil
+	if !graph.cyclic() {
+		return graph, nil
+	}
+	return graph, graph.orderSiblingsFirst()
+}
+
+// orderSiblingsFirst orders the groups so a group follows the groups its members depend on and, where
+// that leaves a choice, the groups whose members they import as workspace siblings. Sibling imports
+// only order the groups: they are not dependency edges, so they never join or split a group.
+func (graph *localDependencyGraph) orderSiblingsFirst() error {
+	edges, err := siblingEdges(graph.roots, siblingLocations)
+	if err != nil {
+		return err
+	}
+	groupOf := make([]int, len(graph.roots))
+	for group, members := range graph.groups {
+		for _, member := range members {
+			groupOf[member] = group
+		}
+	}
+	linked := func(edges func(int) []int) func(node, other int) bool {
+		return func(node, other int) bool {
+			return slices.ContainsFunc(graph.groups[node], func(member int) bool {
+				return slices.ContainsFunc(edges(member), func(target int) bool { return groupOf[target] == other })
+			})
+		}
+	}
+	order := orderAfter(len(graph.groups), linked(graph.dependencyTargets), linked(func(member int) []int { return slices.Collect(maps.Keys(edges[member])) }))
+	groups := make([][]int, 0, len(order))
+	for _, index := range order {
+		groups = append(groups, graph.groups[index])
+	}
+	graph.groups = groups
+	return nil
 }
 
 func (graph localDependencyGraph) components() [][]int {
-	return dependencyComponents(len(graph.roots), func(node int) []int {
-		var targets []int
-		for _, dependency := range graph.roots[node].Dependencies {
-			if target, found := graph.byPath[dependency.LocalDir]; found {
-				targets = append(targets, target)
-			}
+	return dependencyComponents(len(graph.roots), graph.dependencyTargets)
+}
+
+// dependencyTargets is the indexes of the roots a root depends on through a local directory.
+func (graph localDependencyGraph) dependencyTargets(node int) []int {
+	var targets []int
+	for _, dependency := range graph.roots[node].Dependencies {
+		if target, found := graph.byPath[dependency.LocalDir]; found {
+			targets = append(targets, target)
 		}
-		return targets
-	})
+	}
+	return targets
 }
 
 func (graph localDependencyGraph) cyclic() bool {

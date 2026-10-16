@@ -17,10 +17,15 @@ type exportShapes struct {
 	load      *typedLoad
 	toolchain string
 	memo      map[string]string
+	// siblings is every workspace package of another module than the root the recorded variants
+	// import, transitively, by package path.
+	siblings map[string]*packages.Package
 }
 
 func newExportShapes(resolver *symbolResolver, load *typedLoad) *exportShapes {
-	return &exportShapes{resolver: resolver, load: load, toolchain: load.root.Variant.GoVersion, memo: map[string]string{}}
+	return &exportShapes{
+		resolver: resolver, load: load, toolchain: load.root.Variant.GoVersion, memo: map[string]string{}, siblings: map[string]*packages.Package{},
+	}
 }
 
 // of is a package's export shape. A package loaded from source in the workspace digests its

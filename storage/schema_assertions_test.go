@@ -57,6 +57,8 @@ var moduleSchema = []tableSchema{
 	{model: &storage.PackageCoverage{}, indexes: []string{"package_coverage_input_idx"},
 		constraints: []string{"package_coverage_snapshot_fkey", "package_coverage_input_hash_check", "package_coverage_export_shape_hash_check",
 			"package_coverage_coverage_check", "package_coverage_indexed_check", "package_coverage_package_path_check", "package_coverage_file_count_check"}},
+	{model: &storage.SnapshotSiblingShape{}, constraints: []string{"snapshot_sibling_shapes_snapshot_fkey", "snapshot_sibling_shapes_import_path_check",
+		"snapshot_sibling_shapes_export_shape_hash_check", "snapshot_sibling_shapes_source_digest_check"}},
 	{model: &taskruns.Run{}, indexes: []string{"task_runs_kind_started_idx"}, constraints: []string{"task_runs_id_check", "task_runs_status_check"}},
 }
 

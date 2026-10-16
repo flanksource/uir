@@ -24,6 +24,8 @@ const (
 	moduleExportShapeVersion     = "uir-export-module-v1"
 	unprovenExportShapeVersion   = "uir-export-unproven-v1"
 	unresolvedExportShapeVersion = "uir-export-unresolved-v1"
+
+	siblingSourceVersion = "uir-sibling-source-v1"
 )
 
 // canonicalHash digests a versioned, length-delimited encoding, so no two field sequences share bytes.

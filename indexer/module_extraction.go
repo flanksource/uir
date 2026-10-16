@@ -29,6 +29,10 @@ type moduleExtraction struct {
 	symbols        map[string]storage.Symbol
 	coverage       storage.Coverage
 	diagnostics    storage.JSON
+	// siblingShapes is every workspace sibling package the load read, keyed by package path, with the
+	// shape a direct import presented and the digest of its sources; the map is nil when one import
+	// path presented two shapes, so the snapshot records none.
+	siblingShapes map[string]siblingRecord
 }
 
 // extractedPackage is one package_coverage row.
@@ -67,6 +71,9 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 	var load typedLoad
 	err := Phase(ctx, "typecheck", func(ctx context.Context) (err error) {
 		load, err = loadTyped(ctx, loadPackages, root, includeTests)
+		PhaseCount(ctx, "packages", int64(len(load.origins)))
+		PhaseCount(ctx, "files", int64(len(load.files)))
+		PhaseCount(ctx, "parsed", int64(len(load.parsed)))
 		return err
 	})
 	if err != nil {
@@ -83,33 +90,45 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 		}
 	}
 	var extraction moduleExtraction
-	err = Phase(ctx, "extract", func(context.Context) (err error) {
-		extraction, err = extractTypedLoad(&load, startedAt)
+	err = Phase(ctx, "extract", func(ctx context.Context) (err error) {
+		extraction, err = extractTypedLoad(ctx, &load, startedAt)
 		return err
 	})
 	return extraction, err
 }
 
 // extractTypedLoad hashes each package's inputs of a type-checked root and renders every document.
-func extractTypedLoad(load *typedLoad, startedAt time.Time) (moduleExtraction, error) {
+func extractTypedLoad(ctx context.Context, load *typedLoad, startedAt time.Time) (moduleExtraction, error) {
 	root := load.root
 	resolver := newSymbolResolver(load.origins)
-	shapes, builder := newExportShapes(resolver, load), newDocumentBuilder(resolver)
-	grouped := map[string][]discoveredFile{}
-	for _, file := range root.Files {
-		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
+	extraction := moduleExtraction{
+		root: root, indexerVersion: IndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{}, siblingShapes: map[string]siblingRecord{},
 	}
-	extraction := moduleExtraction{root: root, indexerVersion: IndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{}}
 	inputHashes := map[string]string{}
 	var coverages []storage.Coverage
-	for _, packagePath := range sortedKeys(grouped) {
-		extracted, err := extractPackage(load, shapes, builder, &extraction, packagePath, grouped[packagePath])
-		if err != nil {
-			return moduleExtraction{}, fmt.Errorf("extract package %q: %w", packagePath, err)
+	if err := Phase(ctx, "render-documents", func(ctx context.Context) error {
+		shapes, builder := newExportShapes(resolver, load), newDocumentBuilder(resolver)
+		grouped := map[string][]discoveredFile{}
+		for _, file := range root.Files {
+			grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
 		}
-		inputHashes[packagePath] = extracted.inputHash
-		coverages = append(coverages, extracted.coverage)
-		extraction.packages = append(extraction.packages, extracted)
+		for _, packagePath := range sortedKeys(grouped) {
+			extracted, err := extractPackage(load, shapes, builder, &extraction, packagePath, grouped[packagePath])
+			if err != nil {
+				return fmt.Errorf("extract package %q: %w", packagePath, err)
+			}
+			inputHashes[packagePath] = extracted.inputHash
+			coverages = append(coverages, extracted.coverage)
+			extraction.packages = append(extraction.packages, extracted)
+		}
+		if err := shapes.recordSiblingSources(extraction.siblingShapes); err != nil {
+			return err
+		}
+		PhaseCount(ctx, "packages", int64(len(extraction.packages)))
+		PhaseCount(ctx, "documents", int64(len(extraction.documents)))
+		return nil
+	}); err != nil {
+		return moduleExtraction{}, err
 	}
 	extraction.symbols = resolver.rows
 	extraction.contextHash = contextHash(root.ConfigurationHash, inputHashes)
@@ -118,11 +137,17 @@ func extractTypedLoad(load *typedLoad, startedAt time.Time) (moduleExtraction, e
 	if extraction.diagnostics, err = snapshotDiagnostics(extraction.packages); err != nil {
 		return moduleExtraction{}, err
 	}
-	for path, document := range extraction.documents {
-		if document, err = withSymbolFacts(document, resolver.rows); err != nil {
-			return moduleExtraction{}, fmt.Errorf("document for %q: %w", path, err)
+	if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
+		PhaseCount(ctx, "symbols", int64(len(resolver.rows)))
+		for path, document := range extraction.documents {
+			if document, err = withSymbolFacts(document, resolver.rows); err != nil {
+				return fmt.Errorf("document for %q: %w", path, err)
+			}
+			extraction.documents[path] = document
 		}
-		extraction.documents[path] = document
+		return nil
+	}); err != nil {
+		return moduleExtraction{}, err
 	}
 	return extraction, nil
 }
@@ -138,6 +163,15 @@ func extractPackage(load *typedLoad, shapes *exportShapes, builder *documentBuil
 	imports, err := shapes.importsOf(state.variants)
 	if err != nil {
 		return extractedPackage{}, err
+	}
+	if extraction.siblingShapes != nil {
+		conflict, err := shapes.recordSiblings(state.variants, extraction.siblingShapes)
+		if err != nil {
+			return extractedPackage{}, err
+		}
+		if conflict {
+			extraction.siblingShapes = nil
+		}
 	}
 	extracted := extractedPackage{
 		path: packagePath, inputHash: packageInputHash(load.root.ConfigurationHash, packagePath, files, imports),

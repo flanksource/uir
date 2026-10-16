@@ -118,8 +118,8 @@ var _ = Describe("module index run memo", func() {
 				To(Equal(dependencyTarget(ctx, engine, first["example.org/app2"].SnapshotID, "example.org/library")))
 
 			again := runTargets(ctx, engine, fixture.app1, fixture.app2)
-			Expect(loads.snapshot()).To(Equal(map[string]int{"base": 1, "library": 2, "app1": 1, "app2": 1}),
-				"an unchanged run type-checks library, which imports a sibling, once, and reuses every other head")
+			Expect(loads.snapshot()).To(Equal(map[string]int{"base": 1, "library": 1, "app1": 1, "app2": 1}),
+				"an unchanged run reuses every head: library's dependency set already names base's snapshot")
 			for _, root := range []string{"example.org/app1", "example.org/app2"} {
 				Expect(again[root]).To(And(HaveField("Unchanged", true), HaveField("SnapshotID", first[root].SnapshotID)))
 			}

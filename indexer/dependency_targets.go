@@ -12,13 +12,13 @@ import (
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var pseudoVersionCommit = regexp.MustCompile(`-[0-9]{14}-([0-9a-f]{12,})$`)
 var errVersionUnavailable = errors.New("versioned dependency snapshot unavailable")
 
 type activeModulePaths struct{}
-type activeModuleVersions struct{}
 
 func withActivePaths(ctx context.Context, roots []discoveredRoot) context.Context {
 	active, _ := ctx.Value(activeModulePaths{}).(map[string]bool)
@@ -62,18 +62,24 @@ func (indexer *Indexer) indexLocalDependencies(ctx context.Context, roots []disc
 			if err := indexer.database.WithContext(ctx).Where("id = ?", uuid.MustParse(results[0].SnapshotID)).Take(&snapshot).Error; err != nil {
 				return fmt.Errorf("load local dependency snapshot %q: %w", results[0].SnapshotID, err)
 			}
-			dependency.Edge.TargetSnapshotID = &snapshot.ID
-			dependency.Edge.UnresolvedReason = ""
-			if root.GitCommit != "" && snapshot.WorktreeState != storage.WorktreeClean {
-				root.WorktreeState = storage.WorktreeDirty
-				if snapshot.LastModifiedAt != nil {
-					root.LastModifiedAt = maxTime(root.LastModifiedAt, *snapshot.LastModifiedAt)
-				}
-				root.Revision = dirtyRevision(root.GitCommit, root.LastModifiedAt)
-			}
+			linkLocalSnapshot(root, dependency, snapshot)
 		}
 	}
 	return nil
+}
+
+// linkLocalSnapshot points a local dependency's edge at snapshot; a committed root whose dependency's
+// snapshot is not clean becomes dirty as of the later of their modification times.
+func linkLocalSnapshot(root *discoveredRoot, dependency *dependencyObservation, snapshot storage.ModuleSnapshot) {
+	dependency.Edge.TargetSnapshotID = &snapshot.ID
+	dependency.Edge.UnresolvedReason = ""
+	if root.GitCommit != "" && snapshot.WorktreeState != storage.WorktreeClean {
+		root.WorktreeState = storage.WorktreeDirty
+		if snapshot.LastModifiedAt != nil {
+			root.LastModifiedAt = maxTime(root.LastModifiedAt, *snapshot.LastModifiedAt)
+		}
+		root.Revision = dirtyRevision(root.GitCommit, root.LastModifiedAt)
+	}
 }
 
 // localDependencyResults is the outcome of indexing the local dependency at path: the run's
@@ -83,29 +89,31 @@ func (indexer *Indexer) localDependencyResults(ctx context.Context, path string,
 	if result, found := memo.module(path, includeTests); found {
 		return []ModuleResult{result}, nil
 	}
-	return indexStep(ctx, "local dependency "+path, func() ([]ModuleResult, error) {
+	return indexStep(ctx, "local dependency "+path, func(ctx context.Context) ([]ModuleResult, error) {
 		return indexer.IndexModules(ctx, ModuleOptions{Path: path, ExactLocation: path, IncludeTests: includeTests, Reason: storage.ReasonLocalDependency})
 	})
 }
 
+// indexVersionedDependencies links every root's versioned dependencies to their snapshots, resolving
+// those the run has not resolved yet together, as one versioned dependency graph.
 func (indexer *Indexer) indexVersionedDependencies(ctx context.Context, roots []discoveredRoot, includeTests bool) error {
-	ctx, _ = ensureRunMemo(ctx)
+	ctx, memo := ensureRunMemo(ctx)
+	var keys []versionMemoKey
+	for _, root := range roots {
+		for _, dependency := range root.Dependencies {
+			if key, versioned := versionedRequirement(dependency, includeTests); versioned {
+				keys = append(keys, key)
+			}
+		}
+	}
+	if err := indexer.resolveVersions(ctx, memo, keys, includeTests); err != nil {
+		return err
+	}
 	for rootIndex := range roots {
 		for dependencyIndex := range roots[rootIndex].Dependencies {
-			dependency := &roots[rootIndex].Dependencies[dependencyIndex]
-			if dependency.LocalDir != "" || dependency.TargetVersion == "" || dependency.TargetModulePath == "" {
-				continue
+			if err := linkVersionedDependency(memo, &roots[rootIndex].Dependencies[dependencyIndex], includeTests); err != nil {
+				return err
 			}
-			snapshot, err := indexer.versionedSnapshot(ctx, dependency.TargetModulePath, dependency.TargetVersion, includeTests)
-			if err != nil {
-				if !errors.Is(err, errVersionUnavailable) {
-					return err
-				}
-				dependency.Edge.UnresolvedReason = err.Error()
-				continue
-			}
-			dependency.Edge.TargetSnapshotID = &snapshot.ID
-			dependency.Edge.UnresolvedReason = ""
 		}
 	}
 	return nil
@@ -115,70 +123,78 @@ func (indexer *Indexer) indexVersionedDependencies(ctx context.Context, roots []
 // in the same run gets the same snapshot, or the same errVersionUnavailable.
 func (indexer *Indexer) versionedSnapshot(ctx context.Context, modulePath, version string, includeTests bool) (storage.ModuleSnapshot, error) {
 	ctx, memo := ensureRunMemo(ctx)
-	return memo.version(versionMemoKey{modulePath: modulePath, version: version, includeTests: includeTests}, func() (storage.ModuleSnapshot, error) {
-		return indexer.resolveVersionedSnapshot(ctx, memo, modulePath, version, includeTests)
-	})
+	key := versionMemoKey{modulePath: modulePath, version: version, includeTests: includeTests}
+	if err := indexer.resolveVersions(ctx, memo, []versionMemoKey{key}, includeTests); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	outcome, err := resolvedVersion(memo, key)
+	if err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	return outcome.snapshot, outcome.unavailable
 }
 
-// resolveVersionedSnapshot finds or indexes the snapshot of modulePath at version. A stored, fully
-// indexed snapshot whose dependency closure is still complete is reused as is; anything else, a
-// degraded snapshot or one whose tag has moved or whose closure has a gap, is indexed again from a
-// registered checkout, which reuses the stored snapshot only when the new extraction is identical to it.
-func (indexer *Indexer) resolveVersionedSnapshot(ctx context.Context, memo *runMemo, modulePath, version string, includeTests bool) (snapshot storage.ModuleSnapshot, err error) {
-	snapshot, found, err := indexer.storedVersionSnapshot(ctx, modulePath, version)
+// resolveVersions resolves every versioned dependency of keys, and of their closures, that the run has
+// not resolved yet, recording each outcome in memo. Each version is checked out at most once.
+func (indexer *Indexer) resolveVersions(ctx context.Context, memo *runMemo, keys []versionMemoKey, includeTests bool) error {
+	graph, err := indexer.discoverVersionedGraph(ctx, memo, keys, includeTests)
 	if err != nil {
-		return storage.ModuleSnapshot{}, err
+		return err
 	}
-	if found && snapshot.Coverage == storage.CoverageIndexed {
-		complete, err := indexer.versionedClosureComplete(ctx, memo, snapshot.ID)
-		if err != nil {
-			return storage.ModuleSnapshot{}, err
-		}
-		if complete {
-			return snapshot, nil
-		}
+	return errors.Join(indexer.resolveVersionedGraph(ctx, memo, graph), graph.close())
+}
+
+// versionedRequirement is the version a dependency selects, unless it is local or selects none.
+func versionedRequirement(dependency dependencyObservation, includeTests bool) (versionMemoKey, bool) {
+	if dependency.LocalDir != "" || dependency.TargetVersion == "" || dependency.TargetModulePath == "" {
+		return versionMemoKey{}, false
 	}
-	graph, err := indexer.discoverVersionedGraph(ctx, modulePath, version, includeTests)
+	return versionMemoKey{modulePath: dependency.TargetModulePath, version: dependency.TargetVersion, includeTests: includeTests}, true
+}
+
+// linkVersionedDependency points a versioned dependency's edge at the snapshot the run resolved its
+// version to, or records why none is available.
+func linkVersionedDependency(memo *runMemo, dependency *dependencyObservation, includeTests bool) error {
+	key, versioned := versionedRequirement(*dependency, includeTests)
+	if !versioned {
+		return nil
+	}
+	outcome, err := resolvedVersion(memo, key)
 	if err != nil {
-		if found && errors.Is(err, errVersionUnavailable) {
-			return snapshot, nil
-		}
-		return storage.ModuleSnapshot{}, err
+		return err
 	}
-	defer func() { err = errors.Join(err, graph.close()) }()
-	if graph.cyclic() {
-		return indexer.publishVersionedComponents(ctx, graph, includeTests)
+	if outcome.unavailable != nil {
+		dependency.Edge.UnresolvedReason = outcome.unavailable.Error()
+		return nil
 	}
-	key := modulePath + "@" + version
-	active, _ := ctx.Value(activeModuleVersions{}).(map[string]bool)
-	if active[key] {
-		return storage.ModuleSnapshot{}, fmt.Errorf("versioned dependency cycle at %s escaped graph publication", key)
+	id := outcome.snapshot.ID
+	dependency.Edge.TargetSnapshotID = &id
+	dependency.Edge.UnresolvedReason = ""
+	return nil
+}
+
+func resolvedVersion(memo *runMemo, key versionMemoKey) (versionOutcome, error) {
+	outcome, found := memo.version(key)
+	if !found {
+		return versionOutcome{}, fmt.Errorf("versioned dependency %s was not resolved before it was linked", versionedKey(key.modulePath, key.version))
 	}
-	next := make(map[string]bool, len(active)+1)
-	for existing := range active {
-		next[existing] = true
-	}
-	next[key] = true
-	ctx = context.WithValue(ctx, activeModuleVersions{}, next)
-	prepared := graph.nodes[0].prepared
-	result, err := indexer.IndexRevision(ctx, RevisionOptions{
-		RootKey: modulePath, Checkout: prepared.location.CanonicalPath, Commit: prepared.root.GitCommit, Version: version, IncludeTests: includeTests,
-		Reason: storage.ReasonVersionedDependency,
-	})
-	if err != nil {
-		return storage.ModuleSnapshot{}, fmt.Errorf("index version %s from %q: %w", key, prepared.location.CanonicalPath, err)
-	}
-	var indexed storage.ModuleSnapshot
-	if err := indexer.database.WithContext(ctx).Where("id = ?", result.SnapshotID).Take(&indexed).Error; err != nil {
-		return storage.ModuleSnapshot{}, fmt.Errorf("load version snapshot %s: %w", result.SnapshotID, err)
-	}
-	return indexed, nil
+	return outcome, nil
 }
 
 // versionTagMatches reports whether version still names storedCommit in the first registered checkout
-// of modulePath that has it, or no checkout has it; the commit is looked up once per run.
+// of modulePath that has it, or no checkout has it.
 func (indexer *Indexer) versionTagMatches(ctx context.Context, memo *runMemo, modulePath, version, storedCommit string) (bool, error) {
-	tag, err := memo.tagCommit(tagMemoKey{modulePath: modulePath, version: version}, func() (tagCommit, error) {
+	tag, err := indexer.versionTag(ctx, memo, modulePath, version)
+	if err != nil {
+		return false, err
+	}
+	return !tag.found || tag.commit == storedCommit, nil
+}
+
+// versionTag is the commit version names in the first registered checkout of modulePath that has it,
+// looked up once per run.
+func (indexer *Indexer) versionTag(ctx context.Context, memo *runMemo, modulePath, version string) (tagCommit, error) {
+	return memo.tagCommit(tagMemoKey{modulePath: modulePath, version: version}, func() (tagCommit, error) {
 		var locations []storage.ModuleLocation
 		if err := indexer.database.WithContext(ctx).Table("locations AS location").Select("location.*").
 			Joins("JOIN modules AS root ON root.id = location.root_id").Where("root.root_key = ?", modulePath).
@@ -187,25 +203,21 @@ func (indexer *Indexer) versionTagMatches(ctx context.Context, memo *runMemo, mo
 		}
 		for _, location := range locations {
 			if commit, err := memo.versionCommit(ctx, location.CanonicalPath, version); err == nil {
-				return tagCommit{commit: commit, found: true}, nil
+				return tagCommit{commit: commit, checkout: location.CanonicalPath, found: true}, nil
 			}
 		}
 		return tagCommit{}, nil
 	})
-	if err != nil {
-		return false, err
-	}
-	return !tag.found || tag.commit == storedCommit, nil
 }
 
-// storedVersionSnapshot is the newest clean snapshot of modulePath at version, a fully indexed one
-// before any degraded one. A caller that reuses it without extracting must check its coverage.
+// storedVersionSnapshot is the newest clean snapshot of modulePath at version, a complete one before
+// any degraded one. A caller that reuses it without extracting must check its coverage.
 func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, version string) (storage.ModuleSnapshot, bool, error) {
 	var snapshot storage.ModuleSnapshot
 	err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
 		Joins("JOIN modules AS root ON root.id = snapshot.root_id").
 		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ?", modulePath, version, storage.WorktreeClean).
-		Order(fmt.Sprintf("CASE WHEN snapshot.coverage = '%s' THEN 0 ELSE 1 END, snapshot.completed_at DESC", storage.CoverageIndexed)).
+		Order(clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN snapshot.coverage IN ? THEN 0 ELSE 1 END, snapshot.completed_at DESC", Vars: []any{storage.CompleteCoverages}}}).
 		Take(&snapshot).Error
 	if err == nil {
 		return snapshot, true, nil
@@ -216,9 +228,9 @@ func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, v
 	return storage.ModuleSnapshot{}, false, nil
 }
 
-// versionedClosureComplete reports whether every snapshot reachable from snapshotID through dependency
-// edges is complete, reading each snapshot's node once per run.
-func (indexer *Indexer) versionedClosureComplete(ctx context.Context, memo *runMemo, snapshotID uuid.UUID) (bool, error) {
+// versionedClosureMiss is why the closure of snapshotID, every snapshot reachable from it through
+// dependency edges, is not complete, or "" when it is. It reads each snapshot's node once per run.
+func (indexer *Indexer) versionedClosureMiss(ctx context.Context, memo *runMemo, snapshotID uuid.UUID) (string, error) {
 	visited := map[uuid.UUID]bool{}
 	queue := []uuid.UUID{snapshotID}
 	for len(queue) > 0 {
@@ -230,35 +242,37 @@ func (indexer *Indexer) versionedClosureComplete(ctx context.Context, memo *runM
 		visited[id] = true
 		node, err := memo.closureNode(id, func() (closureNode, error) { return indexer.loadClosureNode(ctx, memo, id) })
 		if err != nil {
-			return false, err
+			return "", err
 		}
-		if !node.complete {
-			return false, nil
+		if node.miss != "" {
+			return node.miss, nil
 		}
 		queue = append(queue, node.targets...)
 	}
-	return true, nil
+	return "", nil
 }
 
 // loadClosureNode reads whether snapshot id is itself complete: its dependencies were captured, its
-// version, when it has one, still names its commit, and every dependency edge has a target. Snapshot
-// rows and edges never change once committed, so the node holds for the rest of the run.
+// version, when it has one, still names its commit, and every dependency edge has a target or could
+// not get one by indexing again. Snapshot rows and edges never change once committed, and the run looks
+// each version tag up once, so the node holds for the rest of the run.
 func (indexer *Indexer) loadClosureNode(ctx context.Context, memo *runMemo, id uuid.UUID) (closureNode, error) {
 	var snapshot storage.ModuleSnapshot
 	if err := indexer.database.WithContext(ctx).Where("id = ?", id).Take(&snapshot).Error; err != nil {
 		return closureNode{}, fmt.Errorf("load version snapshot %s: %w", id, err)
 	}
+	var root storage.ModuleRoot
+	if err := indexer.database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
+		return closureNode{}, fmt.Errorf("load root of snapshot %s: %w", id, err)
+	}
+	name := versionedKey(root.RootKey, snapshot.ModuleVersion)
 	if snapshot.DependencySetHash == nil {
-		return closureNode{}, nil
+		return closureNode{miss: fmt.Sprintf("%s (snapshot %s) recorded no dependency set", name, id)}, nil
 	}
 	if snapshot.ModuleVersion != "" {
-		var root storage.ModuleRoot
-		if err := indexer.database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
-			return closureNode{}, fmt.Errorf("load root of version snapshot %s: %w", id, err)
-		}
 		matching, err := indexer.versionTagMatches(ctx, memo, root.RootKey, snapshot.ModuleVersion, snapshot.GitCommit)
 		if err != nil || !matching {
-			return closureNode{}, err
+			return closureNode{miss: fmt.Sprintf("%s no longer names commit %s", name, snapshot.GitCommit)}, err
 		}
 	}
 	var edges []storage.SnapshotDependency
@@ -267,12 +281,33 @@ func (indexer *Indexer) loadClosureNode(ctx context.Context, memo *runMemo, id u
 	}
 	targets := make([]uuid.UUID, 0, len(edges))
 	for _, edge := range edges {
-		if edge.TargetSnapshotID == nil {
-			return closureNode{}, nil
+		if edge.TargetSnapshotID != nil {
+			targets = append(targets, *edge.TargetSnapshotID)
+			continue
 		}
-		targets = append(targets, *edge.TargetSnapshotID)
+		if resolvable, err := indexer.unlinkedEdgeResolvable(ctx, memo, snapshot, edge); err != nil || resolvable {
+			return closureNode{miss: fmt.Sprintf("%s: edge to %s %q has no target but could get one (%s)", name, edge.ModulePath, edge.SelectedVersion, edge.UnresolvedReason)}, err
+		}
 	}
-	return closureNode{complete: true, targets: targets}, nil
+	return closureNode{targets: targets}, nil
+}
+
+// unlinkedEdgeResolvable reports whether indexing owner again could give its edge without a target
+// one: a registered checkout of the module it selects has the selected version, the rule
+// addVersionedNode follows. A version's root is workspace-free and drops local replacements
+// (historicalRoot), so module selection over its commit is all that decides an edge of it that selects
+// no version, and indexing that commit again, which the caller verified the version still names when
+// a checkout has it, selects none again. Any other edge that selects no version cannot be decided, so it counts as resolvable.
+func (indexer *Indexer) unlinkedEdgeResolvable(ctx context.Context, memo *runMemo, owner storage.ModuleSnapshot, edge storage.SnapshotDependency) (bool, error) {
+	modulePath, version := edge.ModulePath, edge.SelectedVersion
+	if edge.ReplacePath != "" && edge.ReplaceVersion != "" {
+		modulePath, version = edge.ReplacePath, edge.ReplaceVersion
+	}
+	if version == "" {
+		return owner.ModuleVersion == "", nil
+	}
+	tag, err := indexer.versionTag(ctx, memo, modulePath, version)
+	return tag.found, err
 }
 
 func versionCommit(ctx context.Context, checkout, version string) (string, error) {

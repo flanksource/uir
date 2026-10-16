@@ -43,9 +43,19 @@ type Run struct {
 
 func (Run) TableName() string { return "task_runs" }
 
-// RunDetails is the part of a run's group details the store reads: the snapshots the run published.
+// RunDetails is a run's group details: the snapshots the run published, which the store reads, and
+// the time and counts of each indexing phase, summed over the run.
 type RunDetails struct {
-	SnapshotIDs []string `json:"snapshot_ids"`
+	SnapshotIDs []string      `json:"snapshot_ids"`
+	Phases      []PhaseTiming `json:"phases"`
+}
+
+// PhaseTiming is one indexing phase's total wall time over a run, and its summed counters, calls among
+// them.
+type PhaseTiming struct {
+	Name       string           `json:"name"`
+	DurationMS float64          `json:"duration_ms"`
+	Counters   map[string]int64 `json:"counters"`
 }
 
 // Store is a clicky RunStore over task_runs.

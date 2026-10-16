@@ -147,7 +147,7 @@ var _ = Describe("serve task runs", func() {
 		Expect(listedRuns(handler)).To(ContainElement(And(HaveField("ID", stored), HaveField("Status", "success"))))
 		detail := finishedRun(handler, stored)
 		Expect(detail).To(HaveLen(2))
-		Expect(detail[0].Details).To(Equal(map[string]any{"snapshot_ids": []any{snapshotID}}))
+		Expect(detail[0].Details).To(Equal(map[string]any{"snapshot_ids": []any{snapshotID}, "phases": nil}))
 		control := postJSON(ctx, handler, "/api/v1/tasks/"+stored+"/control", `{"action":"stop"}`)
 		Expect(control.Code).To(Equal(http.StatusConflict), control.Body.String())
 	})
@@ -185,5 +185,26 @@ var _ = Describe("serve task runs", func() {
 		Expect(history.Commits[1]).To(And(HaveField("Commit", from), HaveField("SnapshotID", Not(BeEmpty()))))
 		Expect(diffed.Code).To(Equal(http.StatusOK), diffed.Body.String())
 		Expect(elsewhere.Code).ToNot(Equal(http.StatusOK))
+	})
+
+	It("reports the phases of the index runs an auto-index diff waited on in its Server-Timing header", func(ctx SpecContext) {
+		runtime, handler := servedRuntime(ctx)
+		indexedCommits(ctx, runtime.database)
+		locations, err := storage.ModuleLocations(ctx, runtime.database, diffRoot)
+		Expect(err).To(Succeed())
+		checkout := locations[0].CanonicalPath
+		unindexed := make([]string, 0, 2)
+		for _, source := range []string{diffBefore, diffAfter} {
+			Expect(os.WriteFile(filepath.Join(checkout, "run.go"), []byte(source), 0o644)).To(Succeed())
+			gitIn(checkout, "commit", "--quiet", "--all", "--message", "unindexed")
+			unindexed = append(unindexed, gitIn(checkout, "rev-parse", "HEAD"))
+		}
+
+		diffed := postJSON(ctx, handler, "/api/v1/modules/diff",
+			`{"args":["`+unindexed[0]+`..`+unindexed[1]+`"],"root":"`+diffRoot+`","visibility":"all","auto-index":true,"location":"`+checkout+`"}`)
+
+		Expect(diffed.Code).To(Equal(http.StatusOK), diffed.Body.String())
+		Expect(diffed.Header().Get("Server-Timing")).To(And(ContainSubstring("total;dur="), ContainSubstring("checkout;dur="),
+			MatchRegexp(`typecheck;dur=[\d.]+;desc="calls=2 files=\d+ packages=\d+ parsed=\d+"`)))
 	})
 })

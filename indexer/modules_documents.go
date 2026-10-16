@@ -54,6 +54,29 @@ func createPackageCoverage(ctx context.Context, database *gorm.DB, snapshot stor
 	return nil
 }
 
+// createSiblingShapes records the workspace sibling packages the snapshot's load read. An extraction
+// whose context equals an existing snapshot's describes exactly what that snapshot holds against the
+// siblings' current sources, so it records, or refreshes, the snapshot's rows from what it read.
+func createSiblingShapes(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, siblings map[string]siblingRecord) error {
+	if len(siblings) == 0 {
+		return nil
+	}
+	rows := make([]storage.SnapshotSiblingShape, 0, len(siblings))
+	for _, path := range sortedKeys(siblings) {
+		rows = append(rows, storage.SnapshotSiblingShape{
+			SnapshotID: snapshot.ID, ImportPath: path, ExportShapeHash: siblings[path].shape, SourceDigest: siblings[path].digest,
+		})
+	}
+	upsert := clause.OnConflict{
+		Columns:   []clause.Column{{Name: "snapshot_id"}, {Name: "import_path"}},
+		DoUpdates: clause.AssignmentColumns([]string{"export_shape_hash", "source_digest"}),
+	}
+	if err := database.WithContext(ctx).Clauses(upsert).CreateInBatches(rows, publicationBatch).Error; err != nil {
+		return fmt.Errorf("record sibling export shapes of snapshot %s: %w", snapshot.ID, err)
+	}
+	return nil
+}
+
 // pendingDocument is a document publication will insert or, under force, verify.
 type pendingDocument struct {
 	document  storage.Document

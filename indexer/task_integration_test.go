@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 
+	rpchttp "github.com/flanksource/clicky/rpc/http"
 	clickytask "github.com/flanksource/clicky/task"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/taskruns"
@@ -127,7 +129,38 @@ var _ = Describe("module index tasks", func() {
 				good0 = result
 			}
 		}
-		Expect(group.Details).To(Equal(taskruns.RunDetails{SnapshotIDs: []string{good0.SnapshotID}}), "the run records the snapshots it published")
+		Expect(group.Details).To(HaveField("SnapshotIDs", Equal([]string{good0.SnapshotID})), "the run records the snapshots it published")
+	})
+
+	It("records each phase's time and counts in the run's details and merges them into the waiter's timings", func(ctx SpecContext) {
+		database := openIndexerDB(ctx, indexerSQLiteOptions())
+		workspace := canonicalTempDir()
+		writeTwoPackageModule(workspace)
+		engine, err := New(database)
+		Expect(err).ToNot(HaveOccurred())
+
+		run, err := StartModulesTask(ctx, engine, []ModuleOptions{{Path: workspace, Reason: storage.ReasonAdd}})
+		Expect(err).ToNot(HaveOccurred())
+		waiting, timings := rpchttp.WithTimings(ctx)
+		_, err = run.Wait(waiting)
+
+		Expect(err).ToNot(HaveOccurred())
+		tasks, group := runTasks(run.ID())
+		details, isDetails := group.Details.(taskruns.RunDetails)
+		Expect(isDetails).To(BeTrue())
+		Expect(details.Phases).To(ContainElements(
+			And(HaveField("Name", "typecheck"), HaveField("Counters", And(HaveKeyWithValue("packages", BeNumerically(">", 0)), HaveKeyWithValue("files", BeNumerically(">", 0))))),
+			And(HaveField("Name", "documents"), HaveField("Counters", HaveKey("parsed"))),
+		))
+		files, merged := timings.Counter("typecheck", "files")
+		Expect(merged).To(BeTrue(), "the waiter's timings gained the run's typecheck phase")
+		Expect(files).To(Equal(details.Phases[slices.IndexFunc(details.Phases, func(phase taskruns.PhaseTiming) bool { return phase.Name == "typecheck" })].Counters["files"]))
+		Expect(tasks).To(HaveKeyWithValue(ContainSubstring("example.org"), HaveField("Logs", ContainElement(HaveField("Message", MatchRegexp(`^typecheck \S+ packages=\d+ files=\d+`))))))
+		for name, task := range tasks {
+			Expect(task.MaxValue).To(BeNumerically(">", 0), "task %s has bounded progress", name)
+			Expect(task.Progress).To(Equal(task.MaxValue), "finished task %s is at its maximum", name)
+			Expect(task.Description).To(Equal(workspace), "finished task %s describes its location again", name)
+		}
 	})
 
 	It("shows each local dependency it indexes on the way as a step of the run", func(ctx SpecContext) {
