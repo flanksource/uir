@@ -90,6 +90,9 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	bindProfileFlags(root, runtime)
 	properties.BindFlags(root.PersistentFlags())
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
+	if _, err := bindConnectionService(runtime); err != nil {
+		panic(fmt.Sprintf("create the connection service: %v", err))
+	}
 	clicky.GenerateCLI(root)
 	registerModuleCommands(root)
 	registerRefactorCommands(root, runtime)
