@@ -78,9 +78,6 @@ func (display moduleQueryDisplay) Tree() api.TreeNode {
 	for _, coverage := range display.result.Coverage {
 		root.children = append(root.children, &moduleQueryTreeNode{label: api.Text{}.Add(icons.Warning).Space().Append(coverage.PackagePath, uir.StyleWarning).Space().Append(coverage.Coverage, uir.StyleMuted)})
 	}
-	for _, warning := range display.result.Warnings {
-		root.children = append(root.children, &moduleQueryTreeNode{label: missingHeadLabel(warning)})
-	}
 	return root
 }
 

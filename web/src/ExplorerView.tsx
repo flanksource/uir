@@ -4,9 +4,8 @@ import { Button, DropdownMenu, Select, Tabs, Workspace, type WorkspacePaneSpec }
 import { ServerTimingBadge, Tree } from "@flanksource/clicky-ui/data";
 import { UiDotsVertical, UiFolder, UiListTree } from "@flanksource/clicky-ui/icons";
 import { MonacoProvider } from "@flanksource/clicky-ui/monaco";
-import { browseModule, readModuleSource, type ItemsWithWarnings, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleRoot, type ModuleSource, type ModuleSourceContent } from "./api";
+import { browseModule, readModuleSource, type ModuleBrowse, type ModuleHead, type ModuleLocation, type ModuleNode, type ModuleRoot, type ModuleSource, type ModuleSourceContent } from "./api";
 import { CallGraphPane } from "./CallGraphPane";
-import { MissingHeadWarnings } from "./CoverageWarning";
 import { ExplorerDependencies } from "./ExplorerDependencies";
 import { ExplorerRefactorDialog } from "./ExplorerRefactorDialog";
 import { moduleHeadTree, packageSymbolTree, scopedHeads, symbolModuleHeads, symbolTree, type HeadFileItem, type PackageSymbolItem, type SymbolItem } from "./explorer-model";
@@ -83,7 +82,7 @@ function CenterTabs({ route, source, onRoute, children }: { route: Route; source
   </div>;
 }
 
-function FilePane({ files, selected, heads, route, onRoute }: { files: HeadFileItem[]; selected?: HeadFileItem; heads: Load<ItemsWithWarnings<ModuleHead>>; route: Route; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
+function FilePane({ files, selected, heads, route, onRoute }: { files: HeadFileItem[]; selected?: HeadFileItem; heads: Load<ModuleHead[]>; route: Route; onRoute: (patch: Partial<Route>, replace?: boolean) => void }) {
   const locallySelectedSource = useRef("");
   const [revealVersion, setRevealVersion] = useState(0);
   useEffect(() => {
@@ -208,20 +207,20 @@ function SymbolModulePane({ roots, route, browse, onRoute }: { roots: Load<Modul
   </div>;
 }
 
-export function ExplorerView({ route, roots, heads, browse, locations, onRoute, onRefresh }: { route: Route; roots: Load<ModuleRoot[]>; heads: Load<ItemsWithWarnings<ModuleHead>>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void; onRefresh: () => void }) {
+export function ExplorerView({ route, roots, heads, browse, locations, onRoute, onRefresh }: { route: Route; roots: Load<ModuleRoot[]>; heads: Load<ModuleHead[]>; browse: TimedLoad<ModuleBrowse>; locations: Load<ModuleLocation[]>; onRoute: (patch: Partial<Route>, replace?: boolean) => void; onRefresh: () => void }) {
   const [refactorAction, setRefactorAction] = useState<"rename" | "move" | null>(null);
   const sources = browse.data?.sources ?? EMPTY_SOURCES;
   const nodes = browse.data?.nodes ?? EMPTY_NODES;
   const selectedNode = nodes.find((node) => node.id === route.node);
   const selectedSource = sources.find((source) => source.id === route.source);
-  const currentHead = heads.data?.items.find((head) => head.root_key === selectedSource?.root_key && head.location === selectedSource.location);
+  const currentHead = heads.data?.find((head) => head.root_key === selectedSource?.root_key && head.location === selectedSource.location);
   const canRefactor = Boolean(selectedSource && (!route.node || selectedNode?.source_id === selectedSource.id) &&
     (!selectedNode || selectedNode.identifier.field || selectedNode.identifier.method || selectedNode.identifier.type) &&
     currentHead?.snapshot_id === route.snapshot);
   const canMove = !selectedNode?.identifier.field;
   useEffect(() => setRefactorAction(null), [route.snapshot, route.source, route.node]);
   const files = useMemo(() => {
-    const selected = [...scopedHeads(heads.data?.items ?? EMPTY_HEADS, route.module)];
+    const selected = [...scopedHeads(heads.data ?? EMPTY_HEADS, route.module)];
     if (browse.data && route.module && route.location && route.snapshot && !selected.some((head) => head.snapshot_id === route.snapshot)) {
       const currentIndex = selected.findIndex((head) => head.root_key === route.module && head.location === route.location);
       const historical = { root_key: route.module, name: currentIndex >= 0 ? selected[currentIndex].name : route.module.split("/").at(-1) ?? route.module,
@@ -281,7 +280,6 @@ export function ExplorerView({ route, roots, heads, browse, locations, onRoute, 
       {canRefactor && <div className="ml-auto flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setRefactorAction("rename")}>Rename {selectedNode ? "symbol" : "file"}</Button>
         {canMove && <Button type="button" size="sm" variant="outline" onClick={() => setRefactorAction("move")}>Move {selectedNode ? "symbol" : "file"}</Button>}</div>}
     </div>
-    {heads.data && <div className="shrink-0 px-3 py-2"><MissingHeadWarnings warnings={heads.data.warnings} /></div>}
     {browse.loading && <div className="p-3"><Muted>Loading snapshot…</Muted></div>}
     {browse.error && <div className="p-3"><ErrorMessage error={browse.error} /></div>}
     {browse.data && route.source && !selectedSource && <div className="p-3"><ErrorMessage error={`Source ${route.source} is not in this snapshot`} /></div>}

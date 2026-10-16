@@ -21,7 +21,7 @@ import (
 )
 
 var _ = Describe("serve", func() {
-	It("returns skipped checkout warnings from unscoped readers", func(ctx SpecContext) {
+	It("reports a skipped checkout from status, not from unscoped readers", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
 		checkout := GinkgoT().TempDir()
 		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/headless", Name: "headless", CreatedAt: time.Now().UTC()}
@@ -47,13 +47,15 @@ var _ = Describe("serve", func() {
 			}
 			handler.ServeHTTP(response, request)
 			Expect(response.Code).To(Equal(http.StatusOK), "%s: %s", test.path, response.Body.String())
-			var result struct {
-				Warnings []query.MissingHeadWarning `json:"warnings"`
-			}
-			Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
-			Expect(result.Warnings).To(Equal([]query.MissingHeadWarning{{RootKey: root.RootKey, Location: canonical,
-				Message: "registered checkout has no indexed head; run `uir reindex --all`"}}), test.path)
+			Expect(response.Body.String()).ToNot(ContainSubstring(canonical), test.path)
 		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/status", nil))
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var status moduleStatus
+		Expect(json.Unmarshal(response.Body.Bytes(), &status)).To(Succeed())
+		Expect(status).To(Equal(moduleStatus{MissingHeads: []query.MissingHead{{RootKey: root.RootKey, Location: canonical,
+			Message: "registered checkout has no indexed head; run `uir reindex --all`"}}}))
 	})
 	It("returns query syntax failures with a useful hint and position", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
@@ -102,12 +104,11 @@ var _ = Describe("serve", func() {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/heads", nil))
 		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
-		var heads query.ItemsWithWarnings[query.ModuleHeadFiles]
+		var heads []query.ModuleHeadFiles
 		Expect(json.Unmarshal(response.Body.Bytes(), &heads)).To(Succeed())
-		Expect(heads.Items).To(HaveLen(3))
-		Expect(heads.Warnings).To(BeEmpty())
-		filesByHead := make(map[string][]string, len(heads.Items))
-		for _, head := range heads.Items {
+		Expect(heads).To(HaveLen(3))
+		filesByHead := make(map[string][]string, len(heads))
+		for _, head := range heads {
 			Expect(head.SnapshotID).ToNot(BeEmpty())
 			for _, source := range head.Sources {
 				Expect(source.RootKey).To(Equal(head.RootKey))
@@ -416,18 +417,16 @@ var _ = Describe("serve", func() {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/suggest?prefix=store.Store.S&root="+referencesRoot, nil))
 		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
-		var symbols query.ItemsWithWarnings[query.ModuleSymbol]
+		var symbols []query.ModuleSymbol
 		Expect(json.Unmarshal(response.Body.Bytes(), &symbols)).To(Succeed())
-		Expect(symbols.Items).To(HaveLen(1))
-		Expect(symbols.Warnings).To(BeEmpty())
-		Expect(symbols.Items[0].QueryName).To(Equal(referencesRoot + "/store.Store.Save"))
+		Expect(symbols).To(HaveLen(1))
+		Expect(symbols[0].QueryName).To(Equal(referencesRoot + "/store.Store.Save"))
 		response = httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/modules/suggest-selectors?prefix=pkg:"+referencesRoot+":st&root="+referencesRoot, nil))
 		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
-		var selectors query.ItemsWithWarnings[string]
+		var selectors []string
 		Expect(json.Unmarshal(response.Body.Bytes(), &selectors)).To(Succeed())
-		Expect(selectors.Items).To(Equal([]string{"pkg:" + referencesRoot + ":store"}))
-		Expect(selectors.Warnings).To(BeEmpty())
+		Expect(selectors).To(Equal([]string{"pkg:" + referencesRoot + ":store"}))
 	})
 
 	It("serves the browser and omits removed project routes", func(ctx SpecContext) {

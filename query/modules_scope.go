@@ -30,28 +30,59 @@ func unindexedError(subject string) error {
 	return fmt.Errorf("%s is registered but not indexed; run `uir reindex` on its checkout", subject)
 }
 
-type MissingHeadWarning struct {
+// MissingHead is a registered location without a current head. Queries skip it and only count it;
+// MissingHeads lists them for the status report.
+type MissingHead struct {
 	RootKey  string `json:"root_key"`
 	Location string `json:"location"`
 	Message  string `json:"message"`
 }
 
-type ItemsWithWarnings[T any] struct {
-	Items    []T                  `json:"items"`
-	Warnings []MissingHeadWarning `json:"warnings"`
-}
-
+// moduleScopeSelection is the snapshots a query reads and how many selected locations it skipped
+// for lacking a head.
 type moduleScopeSelection struct {
-	scopes   []moduleScope
-	warnings []MissingHeadWarning
+	scopes       []moduleScope
+	missingHeads int
 }
 
-func missingHeadWarning(root string, location storage.ModuleLocation) MissingHeadWarning {
+func missingHead(root string, location storage.ModuleLocation) MissingHead {
 	message := "registered checkout has no indexed head; run `uir reindex --all`"
 	if location.Kind == storage.LocationExternal {
 		message = "external location has no current head; select a historical snapshot or publish a current catalog"
 	}
-	return MissingHeadWarning{RootKey: root, Location: location.CanonicalPath, Message: message}
+	return MissingHead{RootKey: root, Location: location.CanonicalPath, Message: message}
+}
+
+// MissingHeads lists every registered location without a current head, ordered by root and path.
+func (pipeline *Pipeline) MissingHeads(ctx context.Context) ([]MissingHead, error) {
+	if pipeline == nil || pipeline.database == nil {
+		return nil, errors.New("UIR query database is required")
+	}
+	var roots []storage.ModuleRoot
+	if err := pipeline.database.WithContext(ctx).Order("root_key").Find(&roots).Error; err != nil {
+		return nil, fmt.Errorf("load module roots: %w", err)
+	}
+	var headLocations []uuid.UUID
+	if err := pipeline.database.WithContext(ctx).Model(&storage.ModuleLocationHead{}).Pluck("location_id", &headLocations).Error; err != nil {
+		return nil, fmt.Errorf("load location heads: %w", err)
+	}
+	indexed := make(map[uuid.UUID]bool, len(headLocations))
+	for _, id := range headLocations {
+		indexed[id] = true
+	}
+	missing := []MissingHead{}
+	for _, root := range roots {
+		var locations []storage.ModuleLocation
+		if err := pipeline.database.WithContext(ctx).Where("root_id = ?", root.ID).Order("canonical_path").Find(&locations).Error; err != nil {
+			return nil, fmt.Errorf("load locations for root %q: %w", root.RootKey, err)
+		}
+		for _, location := range locations {
+			if !indexed[location.ID] {
+				missing = append(missing, missingHead(root.RootKey, location))
+			}
+		}
+	}
+	return missing, nil
 }
 
 // moduleScopes selects the snapshots a query reads. A selection by root or snapshot is kept for the
@@ -94,7 +125,7 @@ func (pipeline *Pipeline) selectModuleScopes(ctx context.Context, options Module
 		if options.RootKey != "" && scope.root.RootKey != options.RootKey {
 			return moduleScopeSelection{}, fmt.Errorf("snapshot %s belongs to root %q, not %q", id, scope.root.RootKey, options.RootKey)
 		}
-		return moduleScopeSelection{scopes: []moduleScope{scope}, warnings: []MissingHeadWarning{}}, nil
+		return moduleScopeSelection{scopes: []moduleScope{scope}}, nil
 	}
 	if options.Location != "" {
 		path, err := canonicalLocation(options.Location)
@@ -121,7 +152,7 @@ func (pipeline *Pipeline) selectModuleScopes(ctx context.Context, options Module
 			return moduleScopeSelection{}, headError(err, fmt.Sprintf("location %q", path))
 		}
 		scopes, err := pipeline.scopesFromHeads(ctx, []storage.ModuleLocationHead{head})
-		return moduleScopeSelection{scopes: scopes, warnings: []MissingHeadWarning{}}, err
+		return moduleScopeSelection{scopes: scopes}, err
 	}
 	return pipeline.broadModuleScopes(ctx, options.RootKey, allHeads)
 }
@@ -139,7 +170,7 @@ func (pipeline *Pipeline) broadModuleScopes(ctx context.Context, rootKey string,
 		return moduleScopeSelection{}, fmt.Errorf("no indexed module roots match %q", rootKey)
 	}
 	var heads []storage.ModuleLocationHead
-	selection := moduleScopeSelection{warnings: []MissingHeadWarning{}}
+	var selection moduleScopeSelection
 	for _, root := range roots {
 		if allHeads {
 			var locations []storage.ModuleLocation
@@ -161,7 +192,7 @@ func (pipeline *Pipeline) broadModuleScopes(ctx context.Context, rootKey string,
 				if head, found := byLocation[location.ID]; found {
 					heads = append(heads, head)
 				} else {
-					selection.warnings = append(selection.warnings, missingHeadWarning(root.RootKey, location))
+					selection.missingHeads++
 				}
 			}
 			continue
@@ -175,11 +206,7 @@ func (pipeline *Pipeline) broadModuleScopes(ctx context.Context, rootKey string,
 			if !errors.Is(err, gorm.ErrRecordNotFound) || rootKey != "" {
 				return moduleScopeSelection{}, headError(err, fmt.Sprintf("root %q", root.RootKey))
 			}
-			var location storage.ModuleLocation
-			if err := pipeline.database.WithContext(ctx).Where("id = ? AND root_id = ?", primary.LocationID, root.ID).First(&location).Error; err != nil {
-				return moduleScopeSelection{}, lookupError(err, fmt.Sprintf("primary location for root %q", root.RootKey))
-			}
-			selection.warnings = append(selection.warnings, missingHeadWarning(root.RootKey, location))
+			selection.missingHeads++
 			continue
 		}
 		heads = append(heads, head)

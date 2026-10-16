@@ -105,7 +105,7 @@ func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options Modu
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	result := ModuleQueryResult{Operation: OperationSet, Matches: []ModuleMatch{}, Warnings: selection.warnings, Coverage: coverage, Stages: []ResolutionStage{{Name: "parse", Value: "sql"}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, selectionCoverageStage(selection, coverage)}}
+	result := ModuleQueryResult{Operation: OperationSet, Matches: []ModuleMatch{}, Coverage: coverage, Stages: []ResolutionStage{{Name: "parse", Value: "sql"}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, selectionCoverageStage(selection, coverage)}}
 	base, err := newIndexContext(ctx, session, selection.scopes)
 	if err != nil {
 		return ModuleQueryResult{}, err

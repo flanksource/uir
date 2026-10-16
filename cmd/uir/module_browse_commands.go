@@ -43,18 +43,16 @@ func registerModuleBrowseCommands(root *cobra.Command) {
 	setModuleRoute(dependencies, "modules/dependencies")
 	dependencies.Annotations["clicky/operation-method"] = http.MethodGet
 
-	heads := clicky.AddNamedCommandWithContext("heads", root, struct{}{}, func(ctx context.Context, _ struct{}) (query.ItemsWithWarnings[query.ModuleHeadFiles], error) {
+	heads := clicky.AddNamedCommandWithContext("heads", root, struct{}{}, func(ctx context.Context, _ struct{}) ([]query.ModuleHeadFiles, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleHeadFiles]{}, err
+			return nil, err
 		}
 		pipeline, err := query.NewPipeline(database)
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleHeadFiles]{}, err
+			return nil, err
 		}
-		result, err := pipeline.BrowseModuleHeads(ctx)
-		warnMissingHeads(ctx, result.Warnings)
-		return result, err
+		return pipeline.BrowseModuleHeads(ctx)
 	})
 	heads.Short = "List files from every published module checkout head"
 	setModuleRoute(heads, "modules/heads")

@@ -154,7 +154,7 @@ func (generation *cacheGeneration) keepSelection(key selectionKey, selection mod
 }
 
 func (selection moduleScopeSelection) clone() moduleScopeSelection {
-	return moduleScopeSelection{scopes: append([]moduleScope(nil), selection.scopes...), warnings: append([]MissingHeadWarning{}, selection.warnings...)}
+	return moduleScopeSelection{scopes: append([]moduleScope(nil), selection.scopes...), missingHeads: selection.missingHeads}
 }
 
 // symbolFacts are the symbol rows, query names, and handles the pipeline's queries have read.

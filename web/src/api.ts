@@ -166,8 +166,8 @@ export type ModuleQuerySymbol = {
   parameter_types: unknown;
 };
 export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: number };
-export type MissingHeadWarning = { root_key: string; location: string; message: string };
-export type ItemsWithWarnings<T> = { items: T[]; warnings: MissingHeadWarning[] };
+export type MissingHead = { root_key: string; location: string; message: string };
+export type ModuleStatus = { missing_heads: MissingHead[] };
 export type ModuleQueryResult = {
   operation: unknown;
   total: number;
@@ -175,7 +175,6 @@ export type ModuleQueryResult = {
   declarations: ModuleQueryRow[];
   symbols: ModuleQuerySymbol[];
   coverage: ModuleQueryCoverage[];
-  warnings: MissingHeadWarning[];
   stages: { name: string; value: string }[];
   path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
   columns?: { name: string; field: string; type: string }[];
@@ -221,7 +220,7 @@ export type ModuleGraphResult = ModuleGraph & {
   /** The effective exclusion patterns. */
   exclude: string[];
   packages: ModuleGraphPackage[];
-  stages: { name: string; value: string }[]; warnings: MissingHeadWarning[]; candidates: ModuleQuerySymbol[];
+  stages: { name: string; value: string }[]; candidates: ModuleQuerySymbol[];
 };
 export type ModuleGraphOptions = {
   selector?: string; symbol?: string; direction?: ModuleGraphDirection; depth?: number; limit?: number;
@@ -355,8 +354,12 @@ export function listModuleRoots(): Promise<ModuleRoot[]> {
   return request(moduleURL(""));
 }
 
-export function listModuleHeads(): Promise<ItemsWithWarnings<ModuleHead>> {
+export function listModuleHeads(): Promise<ModuleHead[]> {
   return request(moduleURL("heads"));
+}
+
+export function getModuleStatus(): Promise<ModuleStatus> {
+  return request(moduleURL("status"));
 }
 
 export function getSystemInfo(): Promise<SystemInfo> {
@@ -417,18 +420,18 @@ export async function runModuleQuery(expression: string, root: string, snapshot:
   return { data: result.data, timing: result.timing };
 }
 
-export async function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
-  return (await request<ItemsWithWarnings<ModuleQuerySymbol>>(moduleURL("suggest", { prefix, root, snapshot }), { signal })).items;
+export function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
+  return request<ModuleQuerySymbol[]>(moduleURL("suggest", { prefix, root, snapshot }), { signal });
 }
 
-export async function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal, language?: QueryLanguage): Promise<string[]> {
-  return (await request<ItemsWithWarnings<string>>(moduleURL("suggest-selectors", { prefix, root, snapshot, ...(language ? { language } : {}) }), { signal })).items;
+export function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal, language?: QueryLanguage): Promise<string[]> {
+  return request<string[]>(moduleURL("suggest-selectors", { prefix, root, snapshot, ...(language ? { language } : {}) }), { signal });
 }
 
 function isQueryResult(value: unknown): value is ModuleQueryResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
-  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "warnings", "stages"].every((key) => Array.isArray(result[key]));
+  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "stages"].every((key) => Array.isArray(result[key]));
 }
 
 const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot"] as const;
@@ -449,7 +452,7 @@ function isGraphResult(value: unknown): value is ModuleGraphResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
   return typeof result.omitted === "object" && result.omitted !== null
-    && ["roots", "nodes", "edges", "exclude", "packages", "stages", "warnings", "candidates"].every((key) => Array.isArray(result[key]));
+    && ["roots", "nodes", "edges", "exclude", "packages", "stages", "candidates"].every((key) => Array.isArray(result[key]));
 }
 
 export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexRun> {

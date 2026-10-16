@@ -30,7 +30,7 @@ type moduleGraphOptions struct {
 }
 
 // moduleGraphResult is the graph envelope: the graph's own fields at the top level beside the
-// stages, warnings and candidates. JSON and YAML retain every field while human-readable formats
+// stages and candidates. JSON and YAML retain every field while human-readable formats
 // render the tree of callers and callees.
 type moduleGraphResult struct {
 	query.GraphResult
@@ -78,7 +78,6 @@ func graphModules(ctx context.Context, database *gorm.DB, options moduleGraphOpt
 	if err != nil {
 		return moduleGraphResult{}, queryStatusError(err)
 	}
-	warnMissingHeads(ctx, result.Warnings)
 	return moduleGraphResult{GraphResult: result}, nil
 }
 

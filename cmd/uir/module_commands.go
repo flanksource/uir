@@ -9,8 +9,6 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
-	"github.com/flanksource/clicky/entity"
-	"github.com/flanksource/commons/logger"
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
@@ -88,18 +86,17 @@ type moduleCallPath struct {
 // moduleQueryResult is the query envelope. JSON and YAML retain every field while human-readable
 // formats render the symbol tree.
 type moduleQueryResult struct {
-	Columns      []query.QueryColumn        `json:"columns,omitempty"`
-	Rows         []map[string]any           `json:"rows,omitempty"`
-	Graph        *query.GraphResult         `json:"graph,omitempty"`
-	Operation    query.Operation            `json:"operation"`
-	Total        int                        `json:"total"`
-	Matches      []moduleQueryRow           `json:"matches"`
-	Declarations []moduleQueryRow           `json:"declarations"`
-	Symbols      []query.ModuleSymbol       `json:"symbols"`
-	Coverage     []query.ModuleCoverage     `json:"coverage"`
-	Warnings     []query.MissingHeadWarning `json:"warnings"`
-	Stages       []query.ResolutionStage    `json:"stages"`
-	Path         *moduleCallPath            `json:"path,omitempty"`
+	Columns      []query.QueryColumn     `json:"columns,omitempty"`
+	Rows         []map[string]any        `json:"rows,omitempty"`
+	Graph        *query.GraphResult      `json:"graph,omitempty"`
+	Operation    query.Operation         `json:"operation"`
+	Total        int                     `json:"total"`
+	Matches      []moduleQueryRow        `json:"matches"`
+	Declarations []moduleQueryRow        `json:"declarations"`
+	Symbols      []query.ModuleSymbol    `json:"symbols"`
+	Coverage     []query.ModuleCoverage  `json:"coverage"`
+	Stages       []query.ResolutionStage `json:"stages"`
+	Path         *moduleCallPath         `json:"path,omitempty"`
 	sql          bool
 	limit        int
 	groupBy      []string
@@ -199,6 +196,7 @@ func registerModuleCommands(root *cobra.Command) {
 	registerModuleBrowseCommands(root)
 	registerModuleGraphCommand(root)
 	registerModuleIndexCommands(root)
+	registerModuleStatusCommand(root)
 
 	list := clicky.AddNamedCommandWithContext("list", root, struct{}{}, func(ctx context.Context, _ struct{}) ([]moduleRootRow, error) {
 		database, err := databaseFor(ctx)
@@ -247,44 +245,40 @@ func registerModuleCommands(root *cobra.Command) {
 	catalog.Short = "List query functions, symbol kinds, and property schemas"
 	setModuleRoute(catalog, "modules/query-catalog")
 	catalog.Annotations["clicky/operation-method"] = http.MethodGet
-	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) (query.ItemsWithWarnings[query.ModuleSymbol], error) {
+	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]query.ModuleSymbol, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
+			return nil, err
 		}
 		pipeline, err := query.NewPipeline(database)
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
+			return nil, err
 		}
 		scope, err := moduleScope(ctx, database, options.checkoutDefaults())
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleSymbol]{}, err
+			return nil, err
 		}
 		scope.Limit = options.Limit
-		result, err := pipeline.SuggestSymbols(ctx, options.Prefix, scope)
-		warnMissingHeads(ctx, result.Warnings)
-		return result, err
+		return pipeline.SuggestSymbols(ctx, options.Prefix, scope)
 	})
 	suggest.Short = "Complete a Go symbol name from indexed snapshots"
 	setModuleRoute(suggest, "modules/suggest")
 	suggest.Annotations["clicky/operation-method"] = http.MethodGet
-	selectors := clicky.AddNamedCommandWithContext("suggest-selectors", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) (query.ItemsWithWarnings[string], error) {
+	selectors := clicky.AddNamedCommandWithContext("suggest-selectors", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]string, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return query.ItemsWithWarnings[string]{}, err
+			return nil, err
 		}
 		pipeline, err := query.NewPipeline(database)
 		if err != nil {
-			return query.ItemsWithWarnings[string]{}, err
+			return nil, err
 		}
 		scope, err := moduleScope(ctx, database, options.checkoutDefaults())
 		if err != nil {
-			return query.ItemsWithWarnings[string]{}, err
+			return nil, err
 		}
 		scope.Limit, scope.Language = options.Limit, options.Language
-		result, err := pipeline.SuggestSelectors(ctx, options.Prefix, scope)
-		warnMissingHeads(ctx, result.Warnings)
-		return result, err
+		return pipeline.SuggestSelectors(ctx, options.Prefix, scope)
 	})
 	selectors.Short = "Complete typed selectors from indexed snapshots"
 	setModuleRoute(selectors, "modules/suggest-selectors")
@@ -364,7 +358,6 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 	if err != nil {
 		return moduleQueryResult{}, queryStatusError(err)
 	}
-	warnMissingHeads(ctx, result.Warnings)
 	symbols := result.Symbols
 	if symbols == nil {
 		symbols = []query.ModuleSymbol{}
@@ -382,7 +375,7 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 		Columns: result.Columns, Rows: result.Rows, Graph: result.Graph,
 		Operation: result.Operation, Total: result.Total, Matches: matches,
 		Declarations: moduleQueryRows(result.Declarations), Symbols: symbols, Coverage: result.Coverage,
-		Warnings: result.Warnings, Stages: result.Stages, Path: path, limit: options.Limit, groupBy: groups,
+		Stages: result.Stages, Path: path, limit: options.Limit, groupBy: groups,
 	}, nil
 }
 
@@ -415,15 +408,6 @@ func populateQueryUsage(ctx context.Context, pipeline *query.Pipeline, rows []mo
 		}
 	}
 	return nil
-}
-
-func warnMissingHeads(ctx context.Context, warnings []query.MissingHeadWarning) {
-	if entity.OperationSurfaceFromContext(ctx) != "cli" {
-		return
-	}
-	for _, warning := range warnings {
-		logger.Warnf("root %q at %q: %s", warning.RootKey, warning.Location, warning.Message)
-	}
 }
 
 func moduleQueryRows(matches []query.ModuleMatch) []moduleQueryRow {
