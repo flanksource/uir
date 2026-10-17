@@ -155,6 +155,20 @@ it("sorts nested type members by name instead of source order", () => {
   ]);
 });
 
+it("places packages named outside the module path, like database schemas, directly under the module", () => {
+  const root = "database/4e16376b-a7b0-4620-b216-17ac1bdab70b";
+  const schema = "OMCORE\\XY49511";
+  const sources = [{ ...source("schema", "schemas/abc.sql"), root_key: root, package_path: schema }];
+  const table = node("Orders", "schema");
+  expect(packageSymbolTree(root, { sources, nodes: [table] })).toEqual([
+    { id: `package:${root}`, kind: "package", label: "4e16376b-a7b0-4620-b216-17ac1bdab70b", packagePath: root, children: [
+      { id: `package:${schema}`, kind: "package", label: schema, packagePath: schema, children: [
+        { id: table.id, kind: "symbol", label: "Orders()", node: table, children: [] },
+      ] },
+    ] },
+  ]);
+});
+
 it("rejects a symbol whose source is absent from the selected snapshot", () => {
   expect(() => packageSymbolTree("example.org/service", { sources: [source("root", "main.go")], nodes: [node("Run", "missing")] }))
     .toThrow(/missing source/);
