@@ -27,8 +27,7 @@ export function packageSymbolTree(rootKey: string, browse: ModuleBrowse): Packag
     }
   }
   for (const source of browse.sources) {
-    if (source.root_key !== rootKey || !source.package_path ||
-      (source.package_path !== rootKey && !source.package_path.startsWith(`${rootKey}/`))) {
+    if (source.root_key !== rootKey || !source.package_path) {
       throw new Error(`Source ${source.path} has invalid package ${source.package_path} for module ${rootKey}`);
     }
   }
@@ -40,10 +39,12 @@ export function packageSymbolTree(rootKey: string, browse: ModuleBrowse): Packag
   function packageFor(path: string): PackageSymbolItem & { kind: "package" } {
     const existing = packages.get(path);
     if (existing) return existing;
-    const parentPath = path.slice(0, path.lastIndexOf("/"));
+    // Packages outside the module path (database schemas) are opaque names directly under the module.
+    const parentPath = path.startsWith(`${rootKey}/`) ? path.slice(0, path.lastIndexOf("/")) : rootKey;
     const parent = packageFor(parentPath);
     const pkg: PackageSymbolItem & { kind: "package" } = {
-      id: `package:${path}`, label: path.slice(parentPath.length + 1), kind: "package", packagePath: path, children: [],
+      id: `package:${path}`, label: parentPath === rootKey && !path.startsWith(`${rootKey}/`) ? path : path.slice(parentPath.length + 1),
+      kind: "package", packagePath: path, children: [],
     };
     packages.set(path, pkg);
     parent.children.push(pkg);
