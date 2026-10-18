@@ -47,6 +47,7 @@ type CommitOptions struct {
 	RootKey      string
 	Commit       string
 	Visibility   Visibility
+	ChangeTypes  ChangeTypes
 	Stat         bool
 	IncludeTests bool
 	// TaskContext bounds the module-index runs for the commit and its parent; see Options.
@@ -82,7 +83,7 @@ func DiffCommit(ctx context.Context, database *gorm.DB, options CommitOptions) (
 		return Result{}, fmt.Errorf("commit %s has no parent to compare", commit)
 	}
 	return Diff(ctx, database, Options{RootKey: options.RootKey, Revisions: []string{parents[1], commit},
-		Visibility: options.Visibility, Stat: options.Stat, AutoIndex: true, IncludeTests: options.IncludeTests, TaskContext: options.TaskContext})
+		Visibility: options.Visibility, ChangeTypes: options.ChangeTypes, Stat: options.Stat, AutoIndex: true, IncludeTests: options.IncludeTests, TaskContext: options.TaskContext})
 }
 
 func ListHistory(ctx context.Context, database *gorm.DB, rootKey, location string, limit int) (History, error) {

@@ -104,7 +104,10 @@ func (row Row) tree(stat bool) api.TextTree {
 		label = label.Append("  ").Add(lineCountText(row.Lines))
 	}
 	label = label.Append(markerSuffix(row.Coverage))
-	if row.Class == ClassMoved || (row.PathBefore != "" && row.PathAfter != "" && row.PathBefore != row.PathAfter) {
+	switch {
+	case row.MovedAway:
+		label = label.Append("  to "+row.PathAfter, uir.StyleDim)
+	case row.Class == ClassMoved || (row.PathBefore != "" && row.PathAfter != "" && row.PathBefore != row.PathAfter):
 		label = label.Append("  from "+row.PathBefore, uir.StyleDim)
 	}
 	if row.Note != "" {

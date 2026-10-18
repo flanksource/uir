@@ -325,6 +325,7 @@ const tallyExported = `├── 📦 example.org/tally/report
     ├── ➕ tally/count.go (added)
     │   ╰── 🔀 Count  moved  from tally/tally.go
     ╰── ✏️ tally/tally.go (modified)  (1 hidden row)
+        ├── 🔀 Count  moved  to tally/count.go
         ├── 💻 Store.Add  body
         ╰── 💻 Total  body
 `
@@ -335,6 +336,7 @@ const tallyAll = `├── 📦 example.org/tally/report
     ├── ➕ tally/count.go (added)
     │   ╰── 🔀 Count  moved  from tally/tally.go
     ╰── ✏️ tally/tally.go (modified)
+        ├── 🔀 Count  moved  to tally/count.go
         ├── 💻 Store.Add  body
         ├── 💻 Total  body
         ╰── ➕ later  added  func later() int
@@ -348,6 +350,7 @@ const tallyStatAll = `├── 📦 example.org/tally/report  +1 -0
     │   ├── 🔀 Count  moved  +0 -0  from tally/tally.go
     │   ╰── (file scope)  +2 -0
     ╰── ✏️ tally/tally.go (modified)  +3 -2
+        ├── 🔀 Count  moved  to tally/count.go
         ├── 💻 Store.Add  body  +1 -1
         ├── 💻 Total  body  +1 -1
         ├── ➕ later  added  +1 -0  func later() int
