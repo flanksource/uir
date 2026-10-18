@@ -84,6 +84,65 @@ var _ = Describe("historical revision reuse", func() {
 			Expect(*loads).To(Equal(4), "pricing at its moved tag, then the shop, are type-checked")
 		})
 
+	DescribeTable("probes an indexed commit with a versioned dependency as reusable without loading packages or publishing, until the dependency's tag moves",
+		func(ctx SpecContext, options func() storage.DBOptions) {
+			database := openIndexerDB(ctx, options())
+			engine, err := New(database)
+			Expect(err).ToNot(HaveOccurred())
+			history := writeRevisionHistory(ctx, engine)
+			first, err := engine.IndexRevision(ctx, history.options(history.first))
+			Expect(err).ToNot(HaveOccurred())
+			loads := countLoads(engine)
+			snapshots := countRows(database, &storage.ModuleSnapshot{}, "1 = 1")
+
+			probe, found, err := engine.ReusableRevision(ctx, history.options(history.first))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(found).To(BeTrue(), "the dependency's stored version snapshot resolves the same dependency set without indexing")
+			Expect(probe).To(And(HaveField("SnapshotID", first.SnapshotID), HaveField("Unchanged", true)))
+
+			writeFile(filepath.Join(history.pricing, "source.go"), "package source\n\nfunc Value() int { return 2 }\n")
+			commitPaths(ctx, history.pricing, "test: move tag", "source.go")
+			gitOutput(ctx, history.pricing, "tag", "-f", "v1.0.0")
+			_, found, err = engine.ReusableRevision(ctx, history.options(history.first))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(found).To(BeFalse(), "a moved tag needs its version indexed, which a probe never does")
+			Expect(*loads).To(Equal(0))
+			Expect(countRows(database, &storage.ModuleSnapshot{}, "1 = 1")).To(Equal(snapshots), "a probe publishes nothing")
+		},
+		Entry("on SQLite", indexerSQLiteOptions),
+		Entry("on PostgreSQL", indexerPostgresOptions),
+	)
+
+	It("reuses a versioned dependency snapshot of deterministic syntax coverage without loading, and indexes one of undecided syntax coverage again", func(ctx SpecContext) {
+		database := openIndexerDB(ctx, indexerSQLiteOptions())
+		engine, err := New(database)
+		Expect(err).ToNot(HaveOccurred())
+		history := writeRevisionHistory(ctx, engine)
+		first, err := engine.IndexRevision(ctx, history.options(history.first))
+		Expect(err).ToNot(HaveOccurred())
+		pricing, found, err := engine.storedVersionSnapshot(ctx, "example.org/pricing", "v1.0.0")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(found).To(BeTrue())
+		markCoverage := func(deterministic bool) {
+			Expect(database.Model(&storage.ModuleSnapshot{}).Where("id = ?", pricing.ID).
+				Updates(map[string]any{"coverage": storage.CoverageSyntax, "coverage_deterministic": deterministic}).Error).To(Succeed())
+		}
+		loads := countLoads(engine)
+
+		markCoverage(true)
+		timed, timings := rpchttp.WithTimings(ctx)
+		again, err := engine.IndexRevision(timed, history.options(history.first))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(again.SnapshotID).To(Equal(first.SnapshotID))
+		checkouts, _ := timings.Counter("checkout", "calls")
+		Expect([]int64{int64(*loads), checkouts}).To(Equal([]int64{0, 1}), "only the shop's commit is checked out: extracting the version again must reach the same syntax coverage")
+
+		markCoverage(false)
+		_, err = engine.IndexRevision(ctx, history.options(history.first))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(*loads).To(Equal(2), "pricing, whose coverage extracting again may improve, then the shop, are type-checked")
+	})
+
 	It("bases a historical commit on its nearest indexed ancestor and renders only the packages whose inputs changed", func(ctx SpecContext) {
 		database := openIndexerDB(ctx, indexerSQLiteOptions())
 		engine, err := New(database)

@@ -103,22 +103,16 @@ var _ = Describe("deterministic degraded coverage", func() {
 		Entry("on PostgreSQL", indexerPostgresOptions),
 	)
 
-	It("extracts a repeat of a commit whose degraded coverage an infrastructure failure caused", func(ctx SpecContext) {
+	It("fails the index of a commit whose load reports an infrastructure failure for one package, publishing nothing", func(ctx SpecContext) {
 		database := openIndexerDB(ctx, indexerSQLiteOptions())
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
 		revision := writeAbsentImportCommit(ctx, engine)
-		loads := failAuditLoads(engine)
-		first, err := engine.IndexRevision(ctx, revision)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(loadSnapshot(database, first.SnapshotID)).To(HaveField("CoverageDeterministic", HaveValue(BeFalse())))
+		failAuditLoads(engine)
 
-		timed, timings := rpchttp.WithTimings(ctx)
-		again, err := engine.IndexRevision(timed, revision)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(again).To(And(HaveField("Unchanged", true), HaveField("SnapshotID", first.SnapshotID)), "the identical re-extraction is not published twice")
-		Expect(*loads).To(Equal(2), "an unreachable proxy is not a fact of the commit, so the repeat is type-checked")
-		Expect(reuseCounters(timings, "miss-coverage")).To(Equal(map[string]int64{"miss-coverage": 1}))
+		_, err = engine.IndexRevision(ctx, revision)
+		Expect(err).To(MatchError(And(ContainSubstring(absentPackage), ContainSubstring(proxyFailure))))
+		Expect(countRows(database, &storage.ModuleSnapshot{}, "revision = ?", revision.Commit)).To(BeZero(), "a transient failure is never cached as coverage")
 	})
 
 	It("extracts and reclassifies a repeat of a degraded snapshot published before coverage causes were recorded", func(ctx SpecContext) {
