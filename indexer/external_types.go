@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
@@ -135,16 +136,16 @@ func (document PublishedDocument) validate() error {
 func externalInputHash(configuration, packagePath string, files []discoveredFile, contents map[string]storage.JSON) string {
 	sorted := append([]discoveredFile(nil), files...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].PathKey < sorted[j].PathKey })
-	digest := newCanonicalHash(externalPackageInputVersion)
-	digest.text(configuration)
-	digest.text(packagePath)
-	digest.count(len(sorted))
+	digest := canonicalhash.New(externalPackageInputVersion)
+	digest.Text(configuration)
+	digest.Text(packagePath)
+	digest.Count(len(sorted))
 	for _, file := range sorted {
-		digest.text(file.PathKey)
-		digest.text(file.ContentHash)
-		digest.text(string(contents[file.PathKey]))
+		digest.Text(file.PathKey)
+		digest.Text(file.ContentHash)
+		digest.Text(string(contents[file.PathKey]))
 	}
-	return digest.sum()
+	return digest.Sum()
 }
 
 // externalExportShape digests the sorted (id, public_hash) of a package's exported declarations.
@@ -158,10 +159,10 @@ func externalExportShape(documents []storage.DocumentContent) string {
 		}
 	}
 	sort.Strings(declared)
-	digest := newCanonicalHash(externalExportShapeVersion)
-	digest.count(len(declared))
+	digest := canonicalhash.New(externalExportShapeVersion)
+	digest.Count(len(declared))
 	for _, entry := range declared {
-		digest.text(entry)
+		digest.Text(entry)
 	}
-	return digest.sum()
+	return digest.Sum()
 }

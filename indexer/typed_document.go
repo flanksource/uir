@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/tools/go/packages"
 )
@@ -30,7 +31,7 @@ type typedSource struct {
 	file        *ast.File
 	tokens      *token.File
 	content     []byte
-	lines       lineIndex
+	lines       syntax.LineIndex
 	packagePath string
 }
 
@@ -49,7 +50,7 @@ type declaration struct {
 // the explorer projection of every declaration it knows, matched by name span. In a partial package
 // a declaration whose type is invalid keeps only its syntax facts and a null id.
 func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFile, diagnostics []storage.DocumentDiagnostic, partial bool) (storage.DocumentContent, error) {
-	syntax, err := extractGoFile(file.PathKey, file.PackagePath, file.Content)
+	extracted, err := syntax.Extract(file.PathKey, file.PackagePath, file.Content)
 	if err != nil {
 		return storage.DocumentContent{}, err
 	}
@@ -59,10 +60,10 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 	}
 	source := typedSource{
 		pkg: typed.pkg, file: typed.file, tokens: tokens, content: file.Content,
-		lines: newLineIndex(file.Content), packagePath: syntax.PackagePath,
+		lines: syntax.NewLineIndex(file.Content), packagePath: extracted.PackagePath,
 	}
-	projections := make(map[storage.ByteSpan]nodeSpec, len(syntax.Nodes))
-	for _, node := range syntax.Nodes {
+	projections := make(map[storage.ByteSpan]syntax.Node, len(extracted.Nodes))
+	for _, node := range extracted.Nodes {
 		projections[node.Name] = node
 	}
 	symbols, err := builder.symbols(source, projections, partial)
@@ -75,12 +76,12 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 	}
 	assignEnclosing(symbols, occurrences)
 	return storage.DocumentContent{
-		Version: storage.DocumentFormatVersion, PackagePath: syntax.PackagePath,
+		Version: storage.DocumentFormatVersion, PackagePath: extracted.PackagePath,
 		Symbols: symbols, Occurrences: occurrences, Diagnostics: diagnostics,
 	}, nil
 }
 
-func (builder *documentBuilder) symbols(source typedSource, projections map[storage.ByteSpan]nodeSpec, partial bool) ([]storage.DocumentSymbol, error) {
+func (builder *documentBuilder) symbols(source typedSource, projections map[storage.ByteSpan]syntax.Node, partial bool) ([]storage.DocumentSymbol, error) {
 	symbols := []storage.DocumentSymbol{}
 	bindings, err := typedBindings(source.file, source.tokens, source.pkg.TypesInfo)
 	if err != nil {
@@ -88,7 +89,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 	}
 	for _, declared := range fileDeclarations(source.file, source.pkg.TypesInfo) {
 		name, extent := source.span(declared.name.Pos(), declared.name.End()), source.span(declared.start, declared.end)
-		contentHash, err := declarationContentHash(source.content, extent, bindings)
+		contentHash, err := syntax.DeclarationContentHash(source.content, extent, bindings)
 		if err != nil {
 			return nil, fmt.Errorf("hash %s: %w", declared.name.Name, err)
 		}
@@ -107,7 +108,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 			symbol = storage.DocumentSymbol{Kind: projection.Kind, Visibility: projection.Visibility, Shape: projection.Shape}
 		}
 		symbol.ContentHash, symbol.NameBytes, symbol.ExtentBytes = contentHash, name, extent
-		symbol.Name, symbol.Extent = source.lines.rangeOf(name), source.lines.rangeOf(extent)
+		symbol.Name, symbol.Extent = source.lines.RangeOf(name), source.lines.RangeOf(extent)
 		if projected {
 			symbol.Identifier, symbol.ParentKey, symbol.ChildSlot = projection.Identifier, projection.ParentIdentity, projection.ChildSlot
 			symbol.Ordinal, symbol.Payload, symbol.SemanticHash, symbol.Field = projection.Ordinal, projection.Payload, projection.SemanticHash, projection.Field
@@ -242,7 +243,7 @@ func fileDeclarations(file *ast.File, info *types.Info) []declaration {
 	for _, declared := range file.Decls {
 		switch declared := declared.(type) {
 		case *ast.FuncDecl:
-			add(declared.Name, documentStart(declared.Doc, declared.Pos()), declared.End())
+			add(declared.Name, syntax.DocumentStart(declared.Doc, declared.Pos()), declared.End())
 		case *ast.GenDecl:
 			for _, spec := range declared.Specs {
 				start, end := specExtent(declared, spec)
@@ -262,11 +263,12 @@ func fileDeclarations(file *ast.File, info *types.Info) []declaration {
 	return declarations
 }
 
-// typedBindings is syntaxBindings read from the type checker: every identifier whose object is a
-// receiver, parameter, result, local variable, or a local constant or type, mapped to the object's
-// position. Identifier keys of composite literals stay unresolved, as syntaxBindings leaves them.
-func typedBindings(file *ast.File, tokens *token.File, info *types.Info) (localBindings, error) {
-	bindings, keys := localBindings{}, map[*ast.Ident]bool{}
+// typedBindings is the syntax extraction's bindings read from the type checker: every identifier
+// whose object is a receiver, parameter, result, local variable, or a local constant or type, mapped
+// to the object's position. Identifier keys of composite literals stay unresolved, as the syntax
+// walk leaves them.
+func typedBindings(file *ast.File, tokens *token.File, info *types.Info) (syntax.Bindings, error) {
+	bindings, keys := syntax.Bindings{}, map[*ast.Ident]bool{}
 	var err error
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch node := node.(type) {
@@ -316,13 +318,13 @@ func localObject(object types.Object) bool {
 
 func specExtent(declared *ast.GenDecl, spec ast.Spec) (token.Pos, token.Pos) {
 	if !declared.Lparen.IsValid() {
-		return documentStart(declared.Doc, declared.Pos()), declared.End()
+		return syntax.DocumentStart(declared.Doc, declared.Pos()), declared.End()
 	}
 	switch spec := spec.(type) {
 	case *ast.TypeSpec:
-		return documentStart(spec.Doc, spec.Pos()), spec.End()
+		return syntax.DocumentStart(spec.Doc, spec.Pos()), spec.End()
 	case *ast.ValueSpec:
-		return documentStart(spec.Doc, spec.Pos()), spec.End()
+		return syntax.DocumentStart(spec.Doc, spec.Pos()), spec.End()
 	}
 	return spec.Pos(), spec.End()
 }
@@ -331,10 +333,10 @@ func addMembers(add func(*ast.Ident, token.Pos, token.Pos), expression ast.Expr)
 	switch literal := expression.(type) {
 	case *ast.StructType:
 		for _, field := range literal.Fields.List {
-			start, end := documentStart(field.Doc, field.Pos()), field.End()
+			start, end := syntax.DocumentStart(field.Doc, field.Pos()), field.End()
 			names := field.Names
 			if len(names) == 0 {
-				if embedded := typeNameIdent(field.Type); embedded != nil {
+				if embedded := syntax.TypeNameIdent(field.Type); embedded != nil {
 					names = []*ast.Ident{embedded}
 				}
 			}
@@ -346,7 +348,7 @@ func addMembers(add func(*ast.Ident, token.Pos, token.Pos), expression ast.Expr)
 	case *ast.InterfaceType:
 		for _, method := range literal.Methods.List {
 			for _, name := range method.Names {
-				add(name, documentStart(method.Doc, method.Pos()), method.End())
+				add(name, syntax.DocumentStart(method.Doc, method.Pos()), method.End())
 			}
 		}
 	}

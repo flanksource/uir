@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
@@ -215,7 +216,7 @@ func namedLine(node uir.Node, line string) (string, error) {
 
 // content is the typed document of everything written, symbols in extent order.
 func (writer *sourceWriter) content(packagePath string) (storage.DocumentContent, error) {
-	lines := newLineIndex([]byte(writer.text.String()))
+	lines := syntax.NewLineIndex([]byte(writer.text.String()))
 	content := storage.DocumentContent{
 		Version: storage.DocumentFormatVersion, PackagePath: packagePath, Symbols: make([]storage.DocumentSymbol, len(writer.written)),
 		Occurrences: []storage.DocumentOccurrence{}, Diagnostics: []storage.DocumentDiagnostic{},
@@ -230,7 +231,7 @@ func (writer *sourceWriter) content(packagePath string) (storage.DocumentContent
 	return content, nil
 }
 
-func (written writtenSymbol) documentSymbol(lines lineIndex) (storage.DocumentSymbol, error) {
+func (written writtenSymbol) documentSymbol(lines syntax.LineIndex) (storage.DocumentSymbol, error) {
 	node, symbol := written.symbol.node, written.symbol
 	prints := uir.Fingerprint(node)
 	if prints.Content == "" {
@@ -250,7 +251,7 @@ func (written writtenSymbol) documentSymbol(lines lineIndex) (storage.DocumentSy
 		ID: &id, Key: node.GetIdentifier().IdentityKey(), Kind: symbol.identity.Kind, Visibility: symbol.visibility,
 		Shape: uir.Shape(node, uir.LayerPrivate), PublicShape: uir.Shape(node, uir.LayerPublic),
 		PublicHash: prints.Public, PrivateHash: prints.Private, ContentHash: prints.Content,
-		Name: lines.rangeOf(written.name), NameBytes: written.name, Extent: lines.rangeOf(written.extent), ExtentBytes: written.extent,
+		Name: lines.RangeOf(written.name), NameBytes: written.name, Extent: lines.RangeOf(written.extent), ExtentBytes: written.extent,
 		Identifier: node.GetIdentifier(), ParentKey: symbol.parentKey, ChildSlot: symbol.slot, Ordinal: symbol.ordinal,
 		Payload: storage.JSON(payload), SemanticHash: node.Hash(),
 	}

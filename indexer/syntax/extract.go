@@ -1,4 +1,6 @@
-package indexer
+// Package syntax extracts a Go file's declarations, struct fields, and calls from its syntax alone,
+// with no type information, and renders them in the document format.
+package syntax
 
 import (
 	"bytes"
@@ -16,32 +18,70 @@ import (
 	"github.com/flanksource/uir/storage"
 )
 
-func extractGoFile(pathKey, packagePath string, content []byte) (fileIndex, error) {
+// File is the syntax extraction of one Go file: its declarations in source order, each struct's
+// fields after their type, and the calls its function bodies make.
+type File struct {
+	PackagePath string
+	PackageName string
+	Nodes       []Node
+	Calls       []Call
+	fileSet     *token.FileSet
+	content     []byte
+	bindings    Bindings
+}
+
+// Node is one extracted declaration: its diff facts, explorer projection, and UIR node.
+type Node struct {
+	Declaration
+	Identifier     uir.Identifier
+	ParentIdentity string
+	ChildSlot      string
+	Ordinal        int
+	Payload        storage.JSON
+	SemanticHash   string
+	Field          *storage.Field
+	node           uir.Node
+}
+
+// Call is one call a function body makes, with the target its syntax reads.
+type Call struct {
+	FromIdentity  string
+	ToIdentifier  uir.Identifier
+	LocalRoot     bool
+	Resolvable    bool
+	StatementPath string
+	Span          storage.ByteSpan
+	Text          string
+}
+
+// Extract parses one Go file and extracts its declarations and calls. A _test package's path gains
+// the _test suffix.
+func Extract(pathKey, packagePath string, content []byte) (File, error) {
 	fileSet := token.NewFileSet()
 	file, err := parser.ParseFile(fileSet, pathKey, content, parser.AllErrors|parser.ParseComments)
 	if err != nil {
-		return fileIndex{}, fmt.Errorf("parse Go source %q: %w", pathKey, err)
+		return File{}, fmt.Errorf("parse Go source %q: %w", pathKey, err)
 	}
 	if strings.HasSuffix(file.Name.Name, "_test") {
 		packagePath += "_test"
 	}
-	indexed := fileIndex{
+	indexed := File{
 		PackagePath: packagePath, PackageName: file.Name.Name, fileSet: fileSet, content: content,
 		bindings: syntaxBindings(file, fileSet.File(file.Pos())),
 	}
 	imports, err := goImports(file)
 	if err != nil {
-		return fileIndex{}, fmt.Errorf("read imports from %q: %w", pathKey, err)
+		return File{}, fmt.Errorf("read imports from %q: %w", pathKey, err)
 	}
 	for _, declaration := range file.Decls {
 		switch declaration := declaration.(type) {
 		case *ast.GenDecl:
 			if err := indexed.addTypes(pathKey, declaration); err != nil {
-				return fileIndex{}, err
+				return File{}, err
 			}
 		case *ast.FuncDecl:
 			if err := indexed.addFunction(pathKey, declaration, imports); err != nil {
-				return fileIndex{}, err
+				return File{}, err
 			}
 		}
 	}
@@ -66,7 +106,7 @@ func goImports(file *ast.File) (map[string]string, error) {
 	return imports, nil
 }
 
-func (indexed *fileIndex) addTypes(pathKey string, declaration *ast.GenDecl) error {
+func (indexed *File) addTypes(pathKey string, declaration *ast.GenDecl) error {
 	if declaration.Tok != token.TYPE {
 		return nil
 	}
@@ -81,13 +121,13 @@ func (indexed *fileIndex) addTypes(pathKey string, declaration *ast.GenDecl) err
 			WithVisibility(goVisibility(spec.Name.Name))
 		startLine, endLine := indexed.lines(spec)
 		builder = builder.WithSource(pathKey, startLine, endLine)
-		start, end := documentStart(spec.Doc, spec.Pos()), spec.End()
+		start, end := DocumentStart(spec.Doc, spec.Pos()), spec.End()
 		if !declaration.Lparen.IsValid() {
-			start, end = documentStart(declaration.Doc, declaration.Pos()), declaration.End()
+			start, end = DocumentStart(declaration.Doc, declaration.Pos()), declaration.End()
 		}
 		unannotated := *spec
 		unannotated.Doc, unannotated.Comment = nil, nil
-		shape, err := formatNode(indexed.fileSet, &unannotated)
+		shape, err := FormatNode(indexed.fileSet, &unannotated)
 		if err != nil {
 			return fmt.Errorf("format type %s in %q: %w", spec.Name.Name, pathKey, err)
 		}
@@ -104,18 +144,18 @@ func (indexed *fileIndex) addTypes(pathKey string, declaration *ast.GenDecl) err
 			builder.WithVariables(fields...)
 		}
 		node := builder.Build()
-		fieldNodes := append([]nodeSpec(nil), indexed.Nodes[fieldStart:]...)
+		fieldNodes := append([]Node(nil), indexed.Nodes[fieldStart:]...)
 		indexed.Nodes = indexed.Nodes[:fieldStart]
-		indexed.Nodes = append(indexed.Nodes, newNodeSpec(node, "types", len(indexed.Nodes), "", facts))
+		indexed.Nodes = append(indexed.Nodes, newNode(node, "types", len(indexed.Nodes), "", facts))
 		indexed.Nodes = append(indexed.Nodes, fieldNodes...)
 	}
 	return nil
 }
 
-func (indexed *fileIndex) addStructFields(pathKey string, parent uir.Identifier, structType *ast.StructType, ownerExported bool) (uir.ParamsDef, error) {
+func (indexed *File) addStructFields(pathKey string, parent uir.Identifier, structType *ast.StructType, ownerExported bool) (uir.ParamsDef, error) {
 	fields := make(uir.ParamsDef, 0, len(structType.Fields.List))
 	for _, field := range structType.Fields.List {
-		nativeType, err := formatNode(indexed.fileSet, field.Type)
+		nativeType, err := FormatNode(indexed.fileSet, field.Type)
 		if err != nil {
 			return nil, fmt.Errorf("format field in %q: %w", pathKey, err)
 		}
@@ -125,7 +165,7 @@ func (indexed *fileIndex) addStructFields(pathKey string, parent uir.Identifier,
 		}
 		for index, name := range fieldNames(field, nativeType) {
 			facts, err := indexed.declaration("field", ownerExported && ast.IsExported(nameNodes[index].Name),
-				fieldShape(field, name, nativeType), nameNodes[index], documentStart(field.Doc, field.Pos()), field.End())
+				fieldShape(field, name, nativeType), nameNodes[index], DocumentStart(field.Doc, field.Pos()), field.End())
 			if err != nil {
 				return nil, fmt.Errorf("describe field %s in %q: %w", name, pathKey, err)
 			}
@@ -139,7 +179,7 @@ func (indexed *fileIndex) addStructFields(pathKey string, parent uir.Identifier,
 				EnumValues: storage.JSON(`[]`), TypeRef: storage.JSON(`{}`), DefaultValue: storage.JSON(`null`),
 				Validation: storage.JSON(`{}`), Visibility: string(fieldNode.Visibility),
 			}
-			indexed.Nodes = append(indexed.Nodes, newNodeSpec(fieldNode, "fields", len(indexed.Nodes), parent.IdentityKey(), facts))
+			indexed.Nodes = append(indexed.Nodes, newNode(fieldNode, "fields", len(indexed.Nodes), parent.IdentityKey(), facts))
 			indexed.Nodes[len(indexed.Nodes)-1].Field = &projection
 			fields = append(fields, fieldNode)
 		}
@@ -147,7 +187,7 @@ func (indexed *fileIndex) addStructFields(pathKey string, parent uir.Identifier,
 	return fields, nil
 }
 
-func (indexed *fileIndex) addFunction(pathKey string, declaration *ast.FuncDecl, imports map[string]string) error {
+func (indexed *File) addFunction(pathKey string, declaration *ast.FuncDecl, imports map[string]string) error {
 	identifier := uir.Identifier{
 		Package: indexed.PackagePath, Method: declaration.Name.Name,
 		Signature: functionSignature(indexed.fileSet, declaration.Type), NodeType: uir.NodeTypeMethod,
@@ -177,21 +217,21 @@ func (indexed *fileIndex) addFunction(pathKey string, declaration *ast.FuncDecl,
 	}
 	startLine, endLine := indexed.lines(declaration)
 	builder = builder.WithSource(pathKey, startLine, endLine)
-	shape, err := formatNode(indexed.fileSet, &ast.FuncDecl{Recv: declaration.Recv, Name: declaration.Name, Type: declaration.Type})
+	shape, err := FormatNode(indexed.fileSet, &ast.FuncDecl{Recv: declaration.Recv, Name: declaration.Name, Type: declaration.Type})
 	if err != nil {
 		return fmt.Errorf("format signature of %s in %q: %w", declaration.Name.Name, pathKey, err)
 	}
 	exported := ast.IsExported(declaration.Name.Name) && (identifier.Type == "" || ast.IsExported(identifier.Type))
-	facts, err := indexed.declaration(kind, exported, shape, declaration.Name, documentStart(declaration.Doc, declaration.Pos()), declaration.End())
+	facts, err := indexed.declaration(kind, exported, shape, declaration.Name, DocumentStart(declaration.Doc, declaration.Pos()), declaration.End())
 	if err != nil {
 		return fmt.Errorf("describe %s in %q: %w", declaration.Name.Name, pathKey, err)
 	}
-	indexed.Nodes = append(indexed.Nodes, newNodeSpec(builder.Build(), "methods", len(indexed.Nodes), parentIdentity, facts))
+	indexed.Nodes = append(indexed.Nodes, newNode(builder.Build(), "methods", len(indexed.Nodes), parentIdentity, facts))
 	indexed.addCalls(declaration, identifier, imports)
 	return nil
 }
 
-func (indexed *fileIndex) addCalls(declaration *ast.FuncDecl, from uir.Identifier, imports map[string]string) {
+func (indexed *File) addCalls(declaration *ast.FuncDecl, from uir.Identifier, imports map[string]string) {
 	callIndex := 0
 	ast.Inspect(declaration.Body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -202,7 +242,7 @@ func (indexed *fileIndex) addCalls(declaration *ast.FuncDecl, from uir.Identifie
 		if !ok {
 			return true
 		}
-		indexed.Calls = append(indexed.Calls, callSpec{
+		indexed.Calls = append(indexed.Calls, Call{
 			FromIdentity: from.IdentityKey(), ToIdentifier: target,
 			LocalRoot: localRoot, Resolvable: resolvable, StatementPath: fmt.Sprintf("calls/%06d", callIndex),
 			Span: indexed.span(call.Fun.Pos(), call.Fun.End()), Text: text,
@@ -213,7 +253,7 @@ func (indexed *fileIndex) addCalls(declaration *ast.FuncDecl, from uir.Identifie
 }
 
 func callTarget(fileSet *token.FileSet, expression ast.Expr, packagePath string, imports map[string]string) (uir.Identifier, string, bool, bool, bool) {
-	text, err := formatNode(fileSet, expression)
+	text, err := FormatNode(fileSet, expression)
 	if err != nil {
 		return uir.Identifier{}, "", false, false, false
 	}
@@ -237,19 +277,19 @@ func callTarget(fileSet *token.FileSet, expression ast.Expr, packagePath string,
 	}
 }
 
-func newNodeSpec(node uir.Node, slot string, ordinal int, parent string, facts declarationFacts) nodeSpec {
+func newNode(node uir.Node, slot string, ordinal int, parent string, facts Declaration) Node {
 	payload, err := json.Marshal(node)
 	if err != nil {
 		panic(fmt.Sprintf("marshal extracted %T: %v", node, err))
 	}
-	return nodeSpec{
-		declarationFacts: facts, Identifier: node.GetIdentifier(), ParentIdentity: parent, ChildSlot: slot,
+	return Node{
+		Declaration: facts, Identifier: node.GetIdentifier(), ParentIdentity: parent, ChildSlot: slot,
 		Ordinal: ordinal, Payload: storage.JSON(payload), SemanticHash: node.Hash(), node: node,
 	}
 }
 
 func functionSignature(fileSet *token.FileSet, function *ast.FuncType) string {
-	signature, err := formatNode(fileSet, function)
+	signature, err := FormatNode(fileSet, function)
 	if err != nil {
 		return ""
 	}
@@ -262,7 +302,7 @@ func goFields(fileSet *token.FileSet, list *ast.FieldList, unnamed string) (uir.
 	}
 	fields := make(uir.ParamsDef, 0, len(list.List))
 	for _, field := range list.List {
-		nativeType, err := formatNode(fileSet, field.Type)
+		nativeType, err := FormatNode(fileSet, field.Type)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +317,8 @@ func goFields(fileSet *token.FileSet, list *ast.FieldList, unnamed string) (uir.
 	return fields, nil
 }
 
-func formatNode(fileSet *token.FileSet, node any) (string, error) {
+// FormatNode prints a syntax node as gofmt would.
+func FormatNode(fileSet *token.FileSet, node any) (string, error) {
 	var output bytes.Buffer
 	if err := format.Node(&output, fileSet, node); err != nil {
 		return "", err
@@ -285,7 +326,7 @@ func formatNode(fileSet *token.FileSet, node any) (string, error) {
 	return output.String(), nil
 }
 
-func (indexed *fileIndex) lines(node ast.Node) (int, int) {
+func (indexed *File) lines(node ast.Node) (int, int) {
 	return indexed.fileSet.Position(node.Pos()).Line, indexed.fileSet.Position(node.End()).Line
 }
 
@@ -306,22 +347,22 @@ func receiverName(expression ast.Expr) string {
 	}
 }
 
-// typeNameIdent finds the identifier naming an embedded field's type, through pointers,
+// TypeNameIdent finds the identifier naming an embedded field's type, through pointers,
 // parentheses, qualifiers, and type arguments.
-func typeNameIdent(expression ast.Expr) *ast.Ident {
+func TypeNameIdent(expression ast.Expr) *ast.Ident {
 	switch expression := expression.(type) {
 	case *ast.Ident:
 		return expression
 	case *ast.StarExpr:
-		return typeNameIdent(expression.X)
+		return TypeNameIdent(expression.X)
 	case *ast.SelectorExpr:
 		return expression.Sel
 	case *ast.IndexExpr:
-		return typeNameIdent(expression.X)
+		return TypeNameIdent(expression.X)
 	case *ast.IndexListExpr:
-		return typeNameIdent(expression.X)
+		return TypeNameIdent(expression.X)
 	case *ast.ParenExpr:
-		return typeNameIdent(expression.X)
+		return TypeNameIdent(expression.X)
 	default:
 		return nil
 	}
@@ -349,7 +390,7 @@ func fieldNameNodes(field *ast.Field) ([]*ast.Ident, error) {
 	if len(field.Names) > 0 {
 		return field.Names, nil
 	}
-	embedded := typeNameIdent(field.Type)
+	embedded := TypeNameIdent(field.Type)
 	if embedded == nil {
 		return nil, fmt.Errorf("embedded field type %T has no name", field.Type)
 	}

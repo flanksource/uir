@@ -8,6 +8,8 @@ import (
 	"go/types"
 	"strconv"
 	"strings"
+
+	"github.com/flanksource/uir/internal/canonicalhash"
 )
 
 // errUnprovenType marks a declaration whose type involves an invalid type: its facts are not proven.
@@ -169,13 +171,13 @@ func sameShapes(shape string) symbolShapes { return symbolShapes{Public: shape, 
 // layerHashes digests the shapes as the layers nest: public_hash is the public shape's digest and
 // private_hash digests public_hash and the private shape, so a public change is a private change too.
 func layerHashes(shapes symbolShapes) (public, private string) {
-	publicDigest := newCanonicalHash(publicHashVersion)
-	publicDigest.text(shapes.Public)
-	public = publicDigest.sum()
-	privateDigest := newCanonicalHash(privateHashVersion)
-	privateDigest.text(public)
-	privateDigest.text(shapes.Private)
-	return public, privateDigest.sum()
+	publicDigest := canonicalhash.New(publicHashVersion)
+	publicDigest.Text(shapes.Public)
+	public = publicDigest.Sum()
+	privateDigest := canonicalhash.New(privateHashVersion)
+	privateDigest.Text(public)
+	privateDigest.Text(shapes.Private)
+	return public, privateDigest.Sum()
 }
 
 // shapes renders an object's declared type in the canonical layout, in both layers: one line per

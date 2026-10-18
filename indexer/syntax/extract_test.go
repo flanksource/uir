@@ -1,9 +1,10 @@
-package indexer
+package syntax_test
 
 import (
 	"encoding/json"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -40,7 +41,7 @@ func Build() *Service {
 	return &Service{}
 }
 `)
-		indexed, err := extractGoFile("worker/service.go", "example.org/acme/worker", content)
+		indexed, err := syntax.Extract("worker/service.go", "example.org/acme/worker", content)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(indexed.PackageName).To(Equal("worker"))
 		Expect(indexed.PackagePath).To(Equal("example.org/acme/worker"))
@@ -69,7 +70,7 @@ func Build() *Service {
 		}))
 		Expect(indexed.Calls[1].Resolvable).To(BeFalse())
 		Expect(indexed.Calls[0].Text).To(Equal("helper.Notify"))
-		Expect(indexed.syntaxDocument().Occurrences[0].Range).To(Equal(storage.Range{10, 2, 10, 15}))
+		Expect(indexed.Document().Occurrences[0].Range).To(Equal(storage.Range{10, 2, 10, 15}))
 		Expect(json.Valid(indexed.Nodes[0].Payload)).To(BeTrue())
 	})
 })

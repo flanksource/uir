@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 )
@@ -283,11 +284,11 @@ func renderDocument(builder *documentBuilder, state packageState, file discovere
 		}, storage.CoverageExcluded, nil
 	}
 	if state.coverage == storage.CoverageSyntax {
-		indexed, err := extractGoFile(file.PathKey, file.PackagePath, file.Content)
+		indexed, err := syntax.Extract(file.PathKey, file.PackagePath, file.Content)
 		if err != nil {
 			return storage.DocumentContent{}, "", err
 		}
-		content := indexed.syntaxDocument()
+		content := indexed.Document()
 		content.Diagnostics = diagnostics
 		return content, storage.CoverageSyntax, nil
 	}

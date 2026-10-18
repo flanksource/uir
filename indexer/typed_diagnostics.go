@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/tools/go/packages"
 )
@@ -75,12 +76,13 @@ func cutTrailingNumber(value string) (string, int, bool) {
 // positionRange is the one-byte range at a one-based line and byte column, or nil when the file
 // has no such position.
 func positionRange(content []byte, line, column int) *storage.Range {
-	lines := newLineIndex(content)
-	if len(content) == 0 || line < 1 || line > len(lines.starts) || column < 1 {
+	lines := syntax.NewLineIndex(content)
+	lineStart, found := lines.LineStart(line)
+	if len(content) == 0 || !found || column < 1 {
 		return nil
 	}
-	start := min(lines.starts[line-1]+column-1, len(content)-1)
-	value := lines.rangeOf(storage.ByteSpan{start, start + 1})
+	start := min(lineStart+column-1, len(content)-1)
+	value := lines.RangeOf(storage.ByteSpan{start, start + 1})
 	return &value
 }
 
