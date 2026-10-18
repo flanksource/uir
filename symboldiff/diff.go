@@ -70,7 +70,7 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	result.Packages = assemble(files, rows, attribution, markers, manifests, scope.root.RootKey)
+	result.Packages = assemble(files, rows, attribution, markers, manifests, scope.root.RootKey, len(changeTypes) > 0)
 	return result, nil
 }
 
@@ -151,7 +151,33 @@ func compareSnapshots(ctx context.Context, database *gorm.DB, sides [2]selectedS
 		return nil, nil, coverageMarkers{}, err
 	}
 	pairings, err := pairSymbols(ctx, database, files, plan, stat)
+	if err != nil {
+		return nil, nil, coverageMarkers{}, err
+	}
+	if unread := unreadMoveSides(moveCandidates(pairings)); len(unread) > 0 {
+		if err := readDocuments(ctx, database, files, unread); err != nil {
+			return nil, nil, coverageMarkers{}, err
+		}
+		if pairings, err = pairSymbols(ctx, database, files, plan, stat); err != nil {
+			return nil, nil, coverageMarkers{}, err
+		}
+	}
+	pairings, err = pairAcrossPackages(pairings)
 	return files, pairings, coverageMarkers{before: headers[0], after: headers[1]}, err
+}
+
+// unreadMoveSides are the documents of move candidates that were not read: pairing them across
+// packages compares their shapes and hashes.
+func unreadMoveSides(candidates [][2]*pairing) map[*fileSide]bool {
+	unread := map[*fileSide]bool{}
+	for _, candidate := range candidates {
+		for _, side := range []*entry{candidate[0].before, candidate[1].after} {
+			if !side.decoded() {
+				unread[side.file] = true
+			}
+		}
+	}
+	return unread
 }
 
 // statLines locates both commits' checkouts, attributes lines, and compares the manifests. A missing

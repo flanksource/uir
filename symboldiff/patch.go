@@ -103,7 +103,11 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 	if worktree {
 		result.To.Commit = PatchWorktree
 	}
-	pairings, markers := patchPairings(files), patchMarkers(files)
+	pairings, err := patchPairings(files)
+	if err != nil {
+		return Result{}, err
+	}
+	markers := patchMarkers(files)
 	var attribution *lineAttribution
 	if options.Stat {
 		inline := blobSource{inline: true}
@@ -114,7 +118,7 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	result.Packages = assemble(files, rows, attribution, markers, nil, rootKey)
+	result.Packages = assemble(files, rows, attribution, markers, nil, rootKey, len(changeTypes) > 0)
 	return result, nil
 }
 
@@ -229,8 +233,9 @@ func patchSymbolID(identifier uir.Identifier) (string, error) {
 	return identifier.IdentityKey(), nil
 }
 
-// patchPairings matches every declaration of the patched files by its stand-in id.
-func patchPairings(files []changedFile) []*pairing {
+// patchPairings matches every declaration of the patched files by its stand-in id, then pairs symbols
+// moved between packages.
+func patchPairings(files []changedFile) ([]*pairing, error) {
 	var entries [2][]*entry
 	for _, file := range files {
 		for side, document := range file.sides() {
@@ -242,7 +247,7 @@ func patchPairings(files []changedFile) []*pairing {
 			}
 		}
 	}
-	return matchSymbols(entries[0], entries[1])
+	return pairAcrossPackages(matchSymbols(entries[0], entries[1]))
 }
 
 func patchMarkers(files []changedFile) coverageMarkers {

@@ -2,6 +2,8 @@ package symboldiff
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
@@ -105,6 +107,82 @@ func matchByKey(before, after []*entry, matched map[*entry]bool) []*pairing {
 		}
 	}
 	return pairings
+}
+
+// moveKey groups the removed and added symbols that could be one symbol moved between packages: the
+// identity a move keeps, which is everything but the package.
+func moveKey(symbol storage.DocumentSymbol) string {
+	owner, name := ownerAndName(symbol.Identifier)
+	return symbol.Kind + "|" + owner + "|" + name
+}
+
+// moveCandidates are the removed and added pairings, by moveKey, whose key names exactly one removed
+// and one added symbol in different packages. Any other count is ambiguous and is never guessed.
+func moveCandidates(pairings []*pairing) [][2]*pairing {
+	removed, added := map[string][]*pairing{}, map[string][]*pairing{}
+	var keys []string
+	for _, pair := range pairings {
+		switch pair.class {
+		case ClassRemoved:
+			key := moveKey(pair.before.symbol)
+			if len(removed[key]) == 0 && len(added[key]) == 0 {
+				keys = append(keys, key)
+			}
+			removed[key] = append(removed[key], pair)
+		case ClassAdded:
+			key := moveKey(pair.after.symbol)
+			if len(removed[key]) == 0 && len(added[key]) == 0 {
+				keys = append(keys, key)
+			}
+			added[key] = append(added[key], pair)
+		}
+	}
+	var candidates [][2]*pairing
+	for _, key := range keys {
+		if len(removed[key]) != 1 || len(added[key]) != 1 {
+			continue
+		}
+		old, current := removed[key][0], added[key][0]
+		if old.before.file.active.Source.PackagePath != current.after.file.active.Source.PackagePath {
+			candidates = append(candidates, [2]*pairing{old, current})
+		}
+	}
+	return candidates
+}
+
+// pairAcrossPackages pairs each move candidate whose shapes are equal but for the qualifiers of the two
+// packages, since a move turns models.Item into Item and back. The pair is classified by its layer
+// hashes like any other: moved when nothing but its file changed, else its changed layer. Both sides
+// must be decoded, for their shapes and hashes.
+func pairAcrossPackages(pairings []*pairing) ([]*pairing, error) {
+	merged := map[*pairing]bool{}
+	var result []*pairing
+	for _, candidate := range moveCandidates(pairings) {
+		old, current := candidate[0].before, candidate[1].after
+		if !old.decoded() || !current.decoded() {
+			return nil, fmt.Errorf("symbol %s moved from %q to %q, but its documents were not read to compare their shapes", moveKey(old.symbol), old.file.path, current.file.path)
+		}
+		if !movedShapeEqual(old.symbol.Shape, current.symbol.Shape, old.file.active.Source.PackagePath, current.file.active.Source.PackagePath) {
+			continue
+		}
+		pair := &pairing{before: old, after: current}
+		pair.class = classify(pair)
+		merged[candidate[0]], merged[candidate[1]] = true, true
+		result = append(result, pair)
+	}
+	for _, pair := range pairings {
+		if !merged[pair] {
+			result = append(result, pair)
+		}
+	}
+	return result, nil
+}
+
+// movedShapeEqual reports whether two shapes are equal once the qualifiers naming either package, by
+// its last import path element, are removed.
+func movedShapeEqual(before, after, fromPackage, toPackage string) bool {
+	qualifiers := regexp.MustCompile(`\b(?:` + regexp.QuoteMeta(path.Base(fromPackage)) + `|` + regexp.QuoteMeta(path.Base(toPackage)) + `)\.`)
+	return qualifiers.ReplaceAllString(before, "") == qualifiers.ReplaceAllString(after, "")
 }
 
 // classify compares the documents' layer hashes. The public and private hashes are comparable only
