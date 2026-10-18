@@ -87,7 +87,8 @@ var _ = Describe("snapshot trigger", func() {
 
 			GinkgoT().Setenv("CGO_ENABLED", "0")
 			variant := indexOnce(ctx, engine, workspace)
-			Expect(outcomeOf(variant)).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 3}), "a new configuration re-keys every document")
+			Expect(outcomeOf(variant)).To(Equal(triggerOutcome{HeadVersion: 2, ReusedFiles: 3}),
+				"a new configuration re-keys every package, whose files render the documents they had")
 			Expect(countRows(database, &storage.SourceDelta{}, "snapshot_id = ?", variant.SnapshotID)).To(BeZero())
 			before, after := loadSnapshot(database, first.SnapshotID), loadSnapshot(database, variant.SnapshotID)
 			Expect(after.ContentSetHash).To(Equal(before.ContentSetHash))

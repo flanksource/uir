@@ -13,14 +13,15 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// documentBuilder renders typed documents from one load, sharing the resolver across the module.
+// documentBuilder renders typed documents from one load, sharing the resolver across the module. A
+// document holds only facts of its own file and the API its package imports; implements, which
+// depends on every interface the load declares, is the snapshot-level snapshotImplements pass.
 type documentBuilder struct {
-	resolver   *symbolResolver
-	interfaces map[string][]*types.TypeName
+	resolver *symbolResolver
 }
 
 func newDocumentBuilder(resolver *symbolResolver) *documentBuilder {
-	return &documentBuilder{resolver: resolver, interfaces: map[string][]*types.TypeName{}}
+	return &documentBuilder{resolver: resolver}
 }
 
 // typedSource is one root file with its syntax tree, token file, and bytes.
@@ -92,7 +93,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 			return nil, fmt.Errorf("hash %s: %w", declared.name.Name, err)
 		}
 		projection, projected := projections[name]
-		symbol, proven, err := builder.typedSymbol(declared, source.pkg)
+		symbol, proven, err := builder.typedSymbol(declared)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +126,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 
 // typedSymbol is a declaration's canonical facts, or proven=false when its identity or shape
 // involves an invalid type.
-func (builder *documentBuilder) typedSymbol(declared declaration, variant *packages.Package) (storage.DocumentSymbol, bool, error) {
+func (builder *documentBuilder) typedSymbol(declared declaration) (storage.DocumentSymbol, bool, error) {
 	resolved, err := builder.resolver.resolve(declared.object)
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
@@ -143,10 +144,6 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
 	}
-	implements, err := builder.implements(declared.object, variant)
-	if err != nil {
-		return storage.DocumentSymbol{}, false, err
-	}
 	embeds, err := builder.embeds(declared.object)
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
@@ -155,7 +152,7 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 	public, private := layerHashes(shapes)
 	return storage.DocumentSymbol{
 		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shapes.Private, PublicShape: shapes.Public, TypeForm: typeFormOf(declared.object),
-		PublicHash: public, PrivateHash: private, Implements: implements, Embeds: embeds,
+		PublicHash: public, PrivateHash: private, Embeds: embeds,
 	}, true, nil
 }
 
@@ -231,76 +228,6 @@ func (builder *documentBuilder) typedIdentifier(id, packagePath string) (uir.Ide
 		owners = append([]string{builder.resolver.rows[*owner].Name}, owners...)
 	}
 	return storage.DeclarationIdentifier(packagePath, row, owners)
-}
-
-// implements lists the interfaces, among the variant and its transitive imports, that a declared
-// non-interface, non-generic named type satisfies by value or by pointer.
-func (builder *documentBuilder) implements(object types.Object, variant *packages.Package) ([]string, error) {
-	typeName, ok := object.(*types.TypeName)
-	if !ok || typeName.IsAlias() {
-		return nil, nil
-	}
-	named, ok := typeName.Type().(*types.Named)
-	if !ok || named.TypeParams().Len() > 0 || types.IsInterface(named) {
-		return nil, nil
-	}
-	pointer := types.NewPointer(named)
-	found := map[string]bool{}
-	for _, candidate := range builder.candidateInterfaces(variant) {
-		iface := candidate.Type().Underlying().(*types.Interface)
-		if !types.Implements(named, iface) && !types.Implements(pointer, iface) {
-			continue
-		}
-		resolved, err := builder.resolver.resolve(candidate)
-		if err != nil {
-			return nil, err
-		}
-		if resolved.ID != "" {
-			found[resolved.ID] = true
-		}
-	}
-	if len(found) == 0 {
-		return nil, nil
-	}
-	return sortedKeys(found), nil
-}
-
-// candidateInterfaces are the non-empty, non-generic, method-set interfaces declared at package
-// level in the variant and its transitive imports. Restricting them to the import closure keeps a
-// document a function of its package input hash.
-func (builder *documentBuilder) candidateInterfaces(variant *packages.Package) []*types.TypeName {
-	if candidates, found := builder.interfaces[variant.ID]; found {
-		return candidates
-	}
-	var candidates []*types.TypeName
-	visited := map[string]bool{}
-	var visit func(*packages.Package)
-	visit = func(pkg *packages.Package) {
-		if visited[pkg.ID] {
-			return
-		}
-		visited[pkg.ID] = true
-		for _, path := range sortedKeys(pkg.Imports) {
-			visit(pkg.Imports[path])
-		}
-		scope := pkg.Types.Scope()
-		for _, name := range scope.Names() {
-			typeName, ok := scope.Lookup(name).(*types.TypeName)
-			if !ok || typeName.IsAlias() {
-				continue
-			}
-			named, ok := typeName.Type().(*types.Named)
-			if !ok || named.TypeParams().Len() > 0 {
-				continue
-			}
-			if iface, ok := named.Underlying().(*types.Interface); ok && iface.IsMethodSet() && iface.NumMethods() > 0 {
-				candidates = append(candidates, typeName)
-			}
-		}
-	}
-	visit(variant)
-	builder.interfaces[variant.ID] = candidates
-	return candidates
 }
 
 // fileDeclarations lists a file's package-level declarations and the members of their literal

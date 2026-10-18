@@ -176,17 +176,17 @@ var _ = Describe("module indexing", func() {
 		second, err := engine.IndexModules(ctx, ModuleOptions{Path: secondPath, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(second).To(HaveLen(1))
-		// service.go's bytes are shared, but its package lost obsolete.go, so the package input hash
-		// changed and the file gets a fresh document over the same source revision.
-		Expect(second[0].ParsedFiles).To(Equal(1))
-		Expect(second[0].ReusedFiles).To(Equal(0))
+		// service.go's bytes are shared, and its package lost obsolete.go, so the package input hash
+		// changed; it renders the same document over the same source revision, which the snapshot keeps.
+		Expect(second[0].ParsedFiles).To(Equal(0))
+		Expect(second[0].ReusedFiles).To(Equal(1))
 		Expect(second[0].HeadVersion).To(Equal(int64(1)))
 		var root storage.ModuleRoot
 		Expect(database.Where("root_key = ?", "example.org/service").First(&root).Error).To(Succeed())
 		var serviceRevisions, serviceDocuments int64
 		Expect(database.Model(&storage.SourceRevision{}).Where("root_id = ? AND path_key = ?", root.ID, "service.go").Count(&serviceRevisions).Error).To(Succeed())
 		Expect(database.Model(&storage.Document{}).Where("root_id = ? AND path_key = ?", root.ID, "service.go").Count(&serviceDocuments).Error).To(Succeed())
-		Expect([]int64{serviceRevisions, serviceDocuments}).To(Equal([]int64{1, 2}))
+		Expect([]int64{serviceRevisions, serviceDocuments}).To(Equal([]int64{1, 1}))
 		var primary storage.ModulePrimary
 		Expect(database.Where("root_id = ?", root.ID).First(&primary).Error).To(Succeed())
 		var firstLocation storage.ModuleLocation

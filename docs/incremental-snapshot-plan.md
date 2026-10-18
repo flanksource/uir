@@ -1,6 +1,6 @@
 # Incremental Git snapshots with checkpoints
 
-Status: proposed implementation plan, 2026-10-11. Planning is complete; the changes and performance targets below have not been implemented or verified.
+Status: proposed implementation plan, 2026-10-11, revised 2026-10-18 with the Captain hash-chain review and the documents review. The changes and performance targets below have not been implemented or verified.
 
 ## Outcome
 
@@ -27,9 +27,35 @@ The accepted [profiling findings](../.tmp/snapshot-benchmark/findings.md) cover 
 
 Nested phase durations overlap and must not be added twice. Existing parsed/reused counters describe publication; they do not establish whether extraction or typechecking was avoided.
 
-UIR already stores `BaseSnapshotID`, source set/delete deltas and symbol deltas. `storage.EffectiveSources` and `storage.EffectiveSymbols` resolve the newest binding along recursive base chains. `storage.ActiveDocuments` currently resolves documents through complete per-snapshot package coverage and package input hashes. Checkpointing should extend these seams, rather than introduce a second index.
+UIR already stores `BaseSnapshotID`, source set/delete deltas and symbol deltas. `storage.EffectiveSources` and `storage.EffectiveSymbols` resolve the newest binding along recursive base chains. `storage.ActiveDocuments` resolves documents from document set/delete deltas along the same base chain (landed in Phase 2, below). Checkpointing should extend these seams, rather than introduce a second index.
 
 OIPA builds the complete filesystem VFS and catalog in `plugins/oipa/uirindex/directory.go`, archives the repository in `directory_checkout.go`, and publishes the catalog transactionally in `directory_publish.go`. Its `internal/symbols/publish.go` currently prunes with `Keep: 1`, causing survivors whose bases disappear to be rebased into complete source and symbol mappings.
+
+## Hash-chain review (Captain profile, 2026-10-18)
+
+The [Captain profile](../.tmp/captain-profile/findings.md) replays three historical requests in one process against SQLite: commit `567b8ab`, commit `246a1cb` (12 non-test Go files changed in 7 packages), then `246a1cb` again. Hash chains have to serve two uses: answering "has anything in public function A's call graph changed?", and turning a commit into a delta proportional to the change that symboldiff can hydrate cheaply. Today they serve neither, because they chain at package and import-closure granularity.
+
+| Request | Index | Parsed/reused | Captain symbol deltas | Documents phase | Allocated |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First commit | 190.2 s | 847/0 | 18,503 | 93.4 s | 19.2 GB |
+| 12-file change | 79.8 s | 490/357 | 18,507 | 51.0 s | 6.8 GB |
+| Exact repeat | 20.4 s | 0/0, unchanged | 0 | none | 5.5 GB |
+
+Measured read-only on the profile's SQLite database (Captain root only):
+
+- **The amplification is pure waste.** The 12-file change republished 490 Captain documents. 478 of them (62.7 MB) have the same `source_revision_id` and byte-identical `content` as the previous document for their path; only the 12 whose source changed differ (2.6 MB). The 32 changed export shapes altered no downstream document.
+- **Most of each document is derivable or duplicated.** The 1,334 Captain documents hold 168.9 MB: 519,280 occurrences and 29,190 declarations. Type-resolution facts take about 81 MB as JSON, almost all repeated 64-hex ids (`occ.enclosing` 36.9 MB, `occ.symbol` 22.6 MB); encoded with symbol handles and local indexes they are about 4.5 MB. Facts derivable from syntax and source bytes take about 73 MB. Full hashes duplicated in `symbol_deltas` take 6.7 MB.
+
+| Finding | Evidence | Consequence |
+| --- | --- | --- |
+| Export shape is transitive | `exportShapes.workspace` digests every import's shape (`indexer/export_shape.go:80-108`) and feeds `packageInputHash` (`indexer/hashes.go:102`) | One deep public change re-keys every transitive importer: 33 packages and 490 files, 218 of them in 26 packages nobody edited |
+| Transitivity is forced by closure facts in per-file documents | `documentBuilder.implements` tests every interface in the transitive import closure (`indexer/typed_document.go:234-300`) | A document is a function of the closure, so its key must be; `implements` also costs 8.7 % CPU on the change and 16.3 % on the repeat |
+| Export shape reuses `public_hash` | `functionShape` includes receiver and parameter names; the qualifier is `pkg.Name()` (`indexer/symbol_shape.go:184-235`) | A parameter rename propagates downstream; retargeting `foo/v1.Client` to `bar/v1.Client` does not change the shape |
+| Reuse is decided after the work | `reusableRevision` refuses roots with dependencies (`indexer/revision.go:86-91`); every document renders before publication compares `input_hash` (`indexer/modules_documents.go:142-156`) | The repeat typechecks 8.6 s and extracts 10.3 s to publish nothing |
+| Delta base is the location head | `loadModuleBase` (`indexer/modules_locations.go:39-71`); historical publication preserves heads (`indexer/publication.go:134-137`) | Captain's primary location has no head, so each historical snapshot is a complete set: `files_added=847`, 18,507 of 18,510 symbols; commits are never diffed against an indexed ancestor |
+| No call-graph hash | `content_hash` digests a declaration's own tokens (`indexer/syntax_document.go:55-77`); the graph walks one snapshot (`graph/build.go`, `query/graph_source.go:135-173`) | A callee's body change is invisible from A's hashes; answering needs two walks and a manual diff |
+| Call-graph edges are incomplete | `implements` sees only the implementer's import closure and skips generic and type-set interfaces; method values and calls through func-typed fields or variables produce no call edge (`indexer/typed_occurrences.go:166-176`); var initializers need `--access read` | A reachability answer built on these edges has false negatives |
+| `content_hash` is noisy | Local, parameter and receiver names, gofmt trailing commas and grouping `var` tokens are hashed (`specExtent`, `indexer/typed_document.go:334`) | Renames and re-wrapping report body changes |
 
 ## Scope and ownership
 
@@ -49,7 +75,7 @@ Unrelated UI/query work, symbol identity redesign, replacing postings, changing 
 
 1. Resolve the requested Git commit and indexing policy from immutable inputs.
 2. Resolve and fingerprint dependency selections. Check for a complete matching published result before checkout, archive, package loading or XML lowering.
-3. On a new commit, select a compatible indexed baseline, preferring an indexed ancestor. Compare its tree directly with the requested tree; historical order and branches need not follow the current head.
+3. On a new commit, select a compatible indexed baseline, preferring an indexed ancestor. Compare its tree directly with the requested tree; historical order and branches need not follow the current head. Concretely, walk `git rev-list` from the requested commit against stored `snapshots.git_commit` for the same root, configuration and dependency set, and fall back to the location head only when no ancestor is indexed. Historical snapshots then become storage bases for later historical snapshots while still preserving heads. Today `loadModuleBase` (`indexer/modules_locations.go:39-71`) only considers location heads, which is why every Captain historical snapshot was a complete set.
 4. Identify changed inputs, then expand the affected set through recorded semantic dependencies.
 5. Reuse valid extraction artifacts for unaffected inputs. Typecheck/lower only the affected set.
 6. Publish new source revisions, documents, postings, source/symbol/document deltas and lightweight commit metadata in one transaction. Advance current heads through the existing compare-and-swap; historical requests preserve heads and versions.
@@ -102,6 +128,14 @@ Persist artifacts using a versioned identity that includes repository/root, logi
 
 Exported shape hashes alone are insufficient if extraction consumes private declarations, inferred types, implementations or global catalog facts. Record or conservatively fingerprint those inputs too. An incomplete dependency description causes explicit invalidation of the relevant scope; it must not produce an apparently valid cache hit. Failed dependency resolution and transient infrastructure errors remain errors, never successful cached coverage.
 
+The Captain review sharpens these rules:
+
+- **Separate the export shape from `public_hash`.** `public_hash` keeps parameter names and package-name qualifiers because symboldiff reports them as signature changes (`docs/symbol-index-storage.md:280`). The export shape that keys importers should instead digest a name-free API encoding qualified by import path. `encodeType` (`indexer/symbol_shape.go:23`) already produces one and is currently used only for validity checks. A parameter or receiver rename then stops propagating, and a same-name retarget (`foo/v1` to `bar/v1`) starts propagating. Landed as `uir-export-shape-v3` (`symbolResolver.apiShape`); its fold over every import's shape was removed by `uir-export-shape-v4`, below.
+- **Make the export shape non-transitive.** Digest the package's own exported API plus the shapes of only those packages that its exported API types reference, which embedding and method promotion need. Do not fold in the whole import closure. Bump `exportShapeVersion` and `packageInputHashVersion`. Landed as `uir-export-shape-v4` / `uir-package-input-v5` (`indexer.apiReferences`, `promotedSelectors`): the shape also digests each exported type's promoted methods and fields, so a method promoted through an unexported embedded field re-keys importers. The Captain replay (`.tmp/captain-profile/wave2a-r2`) re-keys 18 packages and 384 documents for the 12-file change, down from 33 and 490.
+- **Move `implements` and `embeds` out of per-file facts.** They are closure facts. Compute them in their own pass as snapshot-level edge deltas, invalidated when a method set changes anywhere in the closure. This is what makes a non-transitive shape sound; leaving them in documents keeps the document a function of the closure. Landed for `implements` as document format 6, `go-types-v5`, and [snapshot implements facts](symbol-index-storage.md#implements-facts) (`implements_deltas`, `implements_facts`): one pass over the whole load per snapshot, recomputed in full and diffed against the base (47 ms for Captain, against 8.7–16 % of CPU before, through a method-name index), which also relates types to interfaces declared outside their import closure. `embeds` stayed in documents: it names the embedded types by identity, a fact of the declaration and its direct imports, not of the closure.
+- **Normalize `content_hash`.** Rename locals, parameters and receivers to positional names and drop formatting-only tokens (gofmt trailing commas, the `var` keyword that grouping adds or removes). Bump `contentHashVersion`. Landed as `uir-content-hash-v2`: a trailing comma before `]` is kept, because it is what makes `type A[P *C,]` a type parameter list.
+- **Validate against the measured waste.** A replay of the Captain 12-file change must write exactly the 12 changed documents, where today it writes 490 and 478 of them are byte-identical. Report how many packages the narrowed shape still re-extracts, compared with today's 33. Met by document membership (Phase 2): the `.tmp/captain-profile/wave3` replay writes 12 documents while still re-extracting 18 packages.
+
 Preserve the existing indexed/partial/syntax/excluded policies. Source-derived diagnostics can be reused only under a proven identical complete context. Do not improve timings by changing a previously typed result to syntax coverage.
 
 ## Implementation phases
@@ -128,11 +162,15 @@ Rules inputs should use the existing VFS/provider boundary to read Git objects w
 
 Failing tests first: exact repeat with dependencies must never invoke the package loader; exact rules repeat must never archive; changed config/dependency identity must invalidate; historical requests must preserve heads. Exit when those tests pass and work counters confirm the avoided work.
 
+The Captain repeat is the reference case: it currently typechecks for 8.6 s, extracts for 10.3 s and allocates 5.5 GB before reporting `unchanged=true`. The Captain harness (`hack/snapshotbench/captain_run.go`) must also establish a storage base, either with an initial head index or through the ancestor baseline in commit processing. Without one, every historical case publishes a complete set and the replay measures full publication rather than deltas.
+
 ### Phase 2: checkpoint and document membership foundations
 
 Generalize `storage/prune_apply.go` to compact an existing snapshot independently of deletion, preserving its semantic metadata and statistics. Add physical-generation selection to source/symbol/document binding keys and effective-chain queries, with one active generation per snapshot and durable candidate metadata. Existing snapshots start in generation zero. Extend effective-state readers and pruning tests to prove checkpoint/delta equivalence on branches and long chains.
 
-Package-wide `input_hash` currently selects every document in a package. Fine-grained reuse needs explicit snapshot document membership. Add document set/delete deltas beside the existing source/symbol deltas, keyed by snapshot/root/path and referencing immutable document IDs, with composite constraints tying a document to its root/path. Resolve effective document bindings along the same base chain and validate their source revision and coverage. Keep package coverage as the package-analysis record rather than assuming every file's document hash equals its package input hash.
+Package-wide `input_hash` currently selects every document in a package. Fine-grained reuse needs explicit snapshot document membership. Deliver this first: bind each path to a document by its rendered content digest, and when that equals the base document's digest, reuse the existing document ID and its postings. In the Captain 12-file change that skips 478 of 490 document inserts and their postings; `INSERT symbol_postings` and `INSERT documents` together took 33.9 s of that run. Add document set/delete deltas beside the existing source/symbol deltas, keyed by snapshot/root/path and referencing immutable document IDs, with composite constraints tying a document to its root/path. Resolve effective document bindings along the same base chain and validate their source revision and coverage. Keep package coverage as the package-analysis record rather than assuming every file's document hash equals its package input hash.
+
+Landed as `document_deltas` and `documents.content_digest` ([18_document_membership.hcl](../storage/migrations/18_document_membership.hcl), [document membership](symbol-index-storage.md#membership-which-documents-a-snapshot-activates)). Documents are keyed `(root_id, path_key, content_digest)`, where `storage.DocumentDigest` (`uir-document-digest-v1`) hashes the source revision, package path, indexer version, coverage, and canonical content; `documents.input_hash` stays as provenance, since the SQLite migration cannot drop a column and the cutover needs it to reproduce the old membership. Deltas reference documents by ordinal, and foreign keys tie each delta to its snapshot's root and each document to the delta's root and path. Publication digests every rendered document, binds an existing document under the same key without inserting it or its postings, and writes a delta only where a path's binding differs from the base's. Symbol deltas compare every package with a changed binding whole, because `func init` folds across files. `storage.UirDB` backfills existing databases in bounded, resumable transactions (digests in batches of 64, then one snapshot's membership per transaction, as full sets for roots and differences for descendants); a byte-identical republished document keeps a null digest, so every id, ordinal, and posting survives, and `OpenReadOnly` refuses an incomplete cutover. Captain replay (`.tmp/captain-profile/wave3`) for the 12-file change: 12 documents and 1,959 postings published, against 384 and 40,209 in wave2a-r2; 12 document deltas; documents phase 1.9 s, against 11.3 s; index 9.7 s, against 20.4 s. The 18 re-keyed packages are still type-checked and rendered (Phase 3). Generation-based checkpoint promotion is not part of this change.
 
 Follow models, portable Atlas migration, query/filter wiring, command/API wiring, then focused integration tests. Backfill existing snapshot document bindings using the old exact membership rules in bounded batches: full bindings for root snapshots, and only differences from each base for descendants. Make migration completion explicit; refuse to serve an incomplete cutover. Preserve document IDs, ordinals, sources, payloads, postings, snapshots and foreign keys. Switch all same-module callers to the new membership contract and remove the old runtime lookup path once the migration is complete.
 
@@ -142,7 +180,7 @@ Failing tests first: compact/reopen equivalence, same bytes under different cont
 
 ### Phase 3: incremental Go extraction
 
-Move input comparison ahead of `extractModule` and the `packages.Load("./...")` call in `typed_load.go`. Reuse unchanged package artifacts and dependency selections; load/typecheck affected package patterns together, preserving one consistent type universe per analysis batch.
+Move input comparison ahead of `extractModule` and the `packages.Load("./...")` call in `typed_load.go`. Until that lands, at least compare each package's `input_hash` with the base's `package_coverage` before `renderDocument` and `implements` run, and reuse the base's document bindings for equal packages (the open item at `docs/benchmarks.md:379`). Reuse unchanged package artifacts and dependency selections; load/typecheck affected package patterns together, preserving one consistent type universe per analysis batch.
 
 Keep cache contents as versioned extraction data and dependency fingerprints. Do not merge raw `types.Object` or `types.Type` instances from independent loads: [the packages documentation](https://pkg.go.dev/golang.org/x/tools/go/packages) explicitly identifies incompatible type identity across calls. If affected-package loading still dominates the one-second budget, profile that phase and extend metadata/export-data reuse through the same owner seam before claiming the target is met.
 
@@ -198,6 +236,77 @@ Expose all gates through a new Gavel acceptance fixture, planned as `fixtures/be
 
 The fixture is a planned deliverable, not an implemented verifier in this planning change. Scaffold its real commands with focused failing tests during Phase 0, inspect it with `gavel fixtures outline`, execute it before attaching it, then attach it as the implementation TODO's executable definition of done. Final acceptance runs only through `gavel todos check`; the individual commands below are fixture building blocks, not a parallel verifier.
 
+## Call-graph change queries
+
+"Has anything in public function A's call graph changed between X and Y?" needs no new hash. Answer it at query time:
+
+1. Take the changed set: symbols whose fingerprints differ between X and Y, from `symbol_deltas` through `storage.EffectiveSymbols`.
+2. Walk forward from A in Y over call, interface-dispatch, method-value reference and var-initializer edges, and report every path that reaches the changed set.
+3. Treat any edge into a module-cache dependency whose selected version changed as changed, because those dependencies have no per-symbol facts.
+
+Expose it as `uir module graph --since <rev>` through `cmd/uir/module_graph_command.go` and `query.Pipeline.Graph` (`query/graph.go:121`). First close the edge gaps listed in the hash-chain review: implementers outside the interface's import closure, generic and type-set dispatch, method values and func-typed fields. A stored, SCC-condensed `closure_fp` per symbol is deferred until the query misses a measured latency budget; a closure hash over incomplete edges would only produce false negatives faster.
+
+## Adversarial review: are documents necessary?
+
+The claim tested: definitions, references and relationships are indexed as rows, and the UI reads a symbol's source from verified source (`query/module_content.go:29-97`), never from document content. So why store documents?
+
+Postings alone are not enough. A `symbol_postings` row is `(document, symbol, role, count)` with no offsets, no enclosing declaration and no fine role (`storage/symbol_models.go:80-88`). Every query reader decodes documents to get them: `query/module_index_ops.go`, `query/module_browse.go:78-140`, `query/sql_native.go`, `symboldiff/documents.go:71-123` and `databasecatalog/diff.go:108-140`. What documents hold falls into four classes, measured on the 168.9 MB of Captain documents:
+
+| Class | Fields | Captain JSON size | Needs storage? |
+| --- | --- | ---: | --- |
+| Type-resolution facts | occurrence byte span, symbol, role, enclosing; declaration id, extent and name byte spans; `implements`, `embeds` | about 81 MB; about 4.5 MB with handles and local indexes | Yes: they need type information |
+| Syntax-derivable facts | line/column ranges, `shape`, `public_shape`, `type_form`, `key`, `parent_key`, `child_slot`, `ordinal`, `payload`, `field`, `identifier`, `semantic_hash`, `enclosing_key`, `target`, `text`, `statement_path`, `resolvable`, `note`, `local_root`; every syntax-coverage document | about 73 MB | No: the pure AST pass (`indexer/extract.go:66-246`) and source bytes reproduce them, except `shape` and `public_shape` where go/types decides the rendering (see the prototype results) |
+| Duplicated fingerprints | full `public_hash`, `private_hash`, `content_hash` | 6.7 MB | No: `symbol_deltas` already stores them |
+| Non-Go producer facts | relationships, props, `field` and payload for synthesized sources | not in Captain | Yes: their source exists only in `source_blobs` and has no syntax to re-derive from |
+
+Recommendation: replace Go documents with a compact per-file resolution record holding only the first class, keyed by the digest of the record itself rather than by package `input_hash`. A file whose resolution is unchanged keeps its record when its package is re-typechecked, and postings keep pointing at records. Readers derive the second class at read time from verified source through `readVerifiedSource` and a per-file parse cache keyed by content hash, the same path that call-site guards (`query/graph_guards.go:268-307`) and symboldiff line ownership already take. Non-Go producers keep relationship rows and a payload blob.
+
+Risks:
+
+- `BrowseModules` decodes every active document today; with records it must become lazy per package.
+- Historical browsing depends on source staying retrievable: a Git object, or `source_blobs` for non-Git and dirty snapshots. Retention must pin it.
+- The occurrence-row design rejected in `docs/symbol-index-storage.md:302` was costed as rows, not as per-file records.
+
+Decision gate, on SQLite: adopt records only if per-package browse and per-symbol query latency (record decode, verified source read and a cached syntax re-derivation) does not regress against today's JSON decode, and the re-derived fields equal the stored ones. Otherwise keep documents but drop the derivable and duplicated classes from them. The prototype in `hack/dochydration` measures this; its results are below.
+
+### Prototype results (SQLite, Captain snapshot at `246a1cb`)
+
+`go run ./hack/dochydration --db .tmp/captain-profile/captain-profiled/uir.db --root github.com/flanksource/captain --out .tmp/captain-profile/doc-hydration` works on a copy of the database and writes `report.md` and `results.json`. The snapshot's 847 active documents hold 108.7 MB.
+
+| Path | All files | `pkg/cli` (173 files) | `pkg/session` (21 files) |
+| --- | ---: | ---: | ---: |
+| Today: load and decode documents | 2.3–3.7 s, 975 MB allocated | 380 ms | 134 ms |
+| Records: size | 3.28 MB (3.0 %) | 0.77 MB | 0.09 MB |
+| Records: decode | 20 ms | 4 ms | 0.5 ms |
+| Records + re-derivation, warm parse cache | 128 ms | 30 ms | 3.4 ms |
+| Records + re-derivation, cold | 7.2 s | 1.5 s | 179 ms |
+
+Each record is checked to decode exactly to the stored type-resolution facts. The record format is varints: declarations carry a symbol handle, extent and name spans, and `implements`/`embeds` handle lists. Occurrences carry a span, the role, a handle, and the enclosing declaration as a local index or a handle. `note`, the type checker's reason a symbol is missing, cannot be recovered from syntax, so it rides in the role byte; it belongs to the stored class.
+
+The cold path is dominated by API overhead, not by reading or parsing. `Pipeline.ReadModuleSource` resolves module scopes and `EffectiveSources` again for every file, about 7 ms per file and 6.1 s of the 7.2 s. Parsing takes 969 ms in total and hydration 152 ms. A batch verified-source reader that resolves the scope once is a prerequisite.
+
+Re-derived fields match the stored ones exactly for:
+
+- every occurrence: range, `note` and `enclosing_key`
+- calls: `text`, `resolvable`, `local_root` and `statement_path`; `target` matches 37,501 of 37,502
+- declarations: `name`, `extent`, `key`, `identifier`, `parent_key`, `child_slot`, `ordinal`, `payload`, `semantic_hash`, `field`, `kind`, `visibility` and `props`
+
+The exceptions are type renderings:
+
+- **Declarations the syntax pass projects:** `shape` and `public_shape` match 99.7 % and `type_form` 99.96 %.
+- **Typed-only declarations:** `shape` and `public_shape` match 75 %.
+
+Every miss needs go/types:
+
+- inferred const and var types, including `iota` and implicitly repeated specs
+- anonymous struct and interface literals rendered inline
+- constant array lengths (`[sha256.Size]byte` versus `[32]byte`)
+- defined types over named types
+- generic interface receivers
+- one call through an anonymous interface field
+
+Gate outcome: the latency gate passes for warm per-package and whole-snapshot reads, and storage drops to 3 % of today's documents. Shapes are not fully derivable, so `shape` and `public_shape` move to the stored class. Store them only for declarations whose rendering the AST cannot decide, or for all declarations as a deduplicated dictionary in the record. Adopt records on that basis, after the batch source reader lands and cold per-package latency is re-measured against the 134–380 ms decode it replaces.
+
 ## Required test coverage
 
 | Area | Observable assertion |
@@ -214,6 +323,11 @@ The fixture is a planned deliverable, not an implemented verifier in this planni
 | Migration | Existing SQLite/PostgreSQL histories, payloads, IDs, ordinals, postings and integrity survive bounded backfill. |
 | Resource bounds | Chain limits, session cache limits and durable maintenance backlog are enforced and reported. |
 | Performance | Independent Go/rules warm p95 values and repeat/no-op gates are below 1,000 ms; all overruns and cold/global cohorts remain reported. |
+| Export-shape propagation | A parameter or receiver rename does not change importers' input hashes; a same-name import retarget does; an interface implemented outside its import closure is still found. |
+| Hash normalization | Local rename, call re-wrap and group move leave `content_hash` unchanged. |
+| Ancestor baseline | A historical commit bases on its nearest indexed ancestor, and the 12-file Captain change publishes 12 documents. |
+| Call-graph change query | For A → B → C where only C's body changes, `--since` reports A, including through interface dispatch and method values. |
+| Resolution records | Records plus re-derived syntax facts reproduce every stored document field. |
 
 Pure invalidation/hash/threshold logic belongs in colocated Ginkgo unit tests. Database/checkpoint/migration tests remain separate integration tests on both supported engines. Extend `packages/api/test/*.spec.ts` for changed publication/maintenance/query behavior. Add no unrelated demo tests.
 

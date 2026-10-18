@@ -18,7 +18,7 @@ const (
 	revisionAncestorBatch = 128
 )
 
-// basePackage is one package of a base snapshot: the input hash its documents are keyed by, and its
+// basePackage is one package of a base snapshot: the input hash its package coverage records, and its
 // active documents by path, without content.
 type basePackage struct {
 	inputHash string
@@ -74,17 +74,19 @@ func basePackages(ctx context.Context, database *gorm.DB, base storage.ModuleSna
 	if err != nil {
 		return nil, err
 	}
+	var coverage []storage.PackageCoverage
+	if err := database.WithContext(ctx).Select("package_path", "input_hash").Where("snapshot_id = ?", base.ID).Find(&coverage).Error; err != nil {
+		return nil, fmt.Errorf("load package input hashes of base snapshot %s: %w", base.ID, err)
+	}
+	for _, row := range coverage {
+		packages[row.PackagePath] = basePackage{inputHash: row.InputHash, documents: map[string]storage.Document{}}
+	}
 	for path, entry := range active {
-		document := entry.Document
-		known, found := packages[document.PackagePath]
+		known, found := packages[entry.Source.PackagePath]
 		if !found {
-			known = basePackage{inputHash: document.InputHash, documents: map[string]storage.Document{}}
+			return nil, fmt.Errorf("base snapshot %s has no package coverage for %q of %q", base.ID, entry.Source.PackagePath, path)
 		}
-		if known.inputHash != document.InputHash {
-			return nil, fmt.Errorf("base snapshot %s activates documents of package %q under input hashes %s and %s", base.ID, document.PackagePath, known.inputHash, document.InputHash)
-		}
-		known.documents[path] = document
-		packages[document.PackagePath] = known
+		known.documents[path] = entry.Document
 	}
 	return packages, nil
 }

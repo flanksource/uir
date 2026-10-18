@@ -98,22 +98,16 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if publication.extraction.indexStartedAt.IsZero() {
 		return storage.ModuleSnapshot{}, fmt.Errorf("publish module %q: extraction has no start time", publication.root.RootKey)
 	}
-	previous := map[string]storage.SourceRevision{}
-	if publication.base.snapshot.ID != uuid.Nil {
-		if err := Phase(ctx, "effective-sources", func(ctx context.Context) (err error) {
-			previous, err = storage.EffectiveSources(ctx, database, publication.base.snapshot.ID)
-			return err
-		}); err != nil {
-			return storage.ModuleSnapshot{}, err
-		}
+	membership, err := baseMembership(ctx, database, publication.base.snapshot)
+	if err != nil {
+		return storage.ModuleSnapshot{}, err
 	}
-	var current map[string]storage.SourceRevision
 	var handles map[string]int64
 	if err := Phase(ctx, "documents", func(ctx context.Context) (err error) {
-		if current, err = sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, previous); err != nil {
+		if membership.current, err = sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, membership.previous); err != nil {
 			return err
 		}
-		handles, err = publishDocuments(ctx, database, publication, current, result)
+		handles, err = publishDocuments(ctx, database, publication, &membership, result)
 		PhaseCount(ctx, "parsed", int64(result.ParsedFiles))
 		PhaseCount(ctx, "reused", int64(result.ReusedFiles))
 		return err
@@ -128,7 +122,7 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err := publishBlobsAndEdges(ctx, database, publication, snapshot); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if err := publishSnapshotRows(ctx, database, publication, snapshot, previous, current, handles); err != nil {
+	if err := publishSnapshotRows(ctx, database, publication, snapshot, membership, handles); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	if publication.preserveHead {
@@ -144,11 +138,58 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	return snapshot, nil
 }
 
-// publishSnapshotRows writes the rows a created snapshot derives from its sources and symbols: its
-// source deltas, package coverage, symbol deltas, and stats.
-func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot, previous, current map[string]storage.SourceRevision, handles map[string]int64) error {
+// snapshotMembership is what a publication binds against its base: the base's active documents and
+// effective sources, empty without a base, the snapshot's effective sources, and its path → document
+// ordinal bindings.
+type snapshotMembership struct {
+	base     map[string]storage.ActiveDocument
+	previous map[string]storage.SourceRevision
+	current  map[string]storage.SourceRevision
+	bindings map[string]int64
+}
+
+// baseMembership loads the base snapshot's active documents, without content, and its effective sources.
+func baseMembership(ctx context.Context, database *gorm.DB, base storage.ModuleSnapshot) (snapshotMembership, error) {
+	membership := snapshotMembership{base: map[string]storage.ActiveDocument{}, previous: map[string]storage.SourceRevision{}}
+	if base.ID == uuid.Nil {
+		return membership, nil
+	}
+	err := Phase(ctx, "base-documents", func(ctx context.Context) (err error) {
+		if membership.base, err = storage.ActiveDocuments(ctx, database, base.ID, storage.ActiveDocumentOptions{}); err != nil {
+			return err
+		}
+		for path, active := range membership.base {
+			membership.previous[path] = active.Source
+		}
+		return nil
+	})
+	return membership, err
+}
+
+// baseOrdinals is the base's path → document ordinal membership.
+func (membership snapshotMembership) baseOrdinals() map[string]int64 {
+	ordinals := make(map[string]int64, len(membership.base))
+	for path, active := range membership.base {
+		ordinals[path] = active.Document.Ordinal
+	}
+	return ordinals
+}
+
+// publishSnapshotRows writes the rows a created snapshot derives from its sources, documents, and
+// symbols: its source and document deltas, package coverage, symbol deltas, and stats.
+func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot, membership snapshotMembership, handles map[string]int64) error {
+	previous, current := membership.previous, membership.current
 	if err := Phase(ctx, "source-deltas", func(ctx context.Context) error {
 		return createSourceDeltas(ctx, database, snapshot, previous, current)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "document-deltas", func(ctx context.Context) error {
+		written, err := storage.CreateDocumentDeltas(ctx, database, storage.DocumentDeltaOptions{
+			SnapshotOrdinal: snapshot.Ordinal, RootID: snapshot.RootID, Base: membership.baseOrdinals(), Current: membership.bindings,
+		})
+		PhaseCount(ctx, "rows", int64(written))
+		return err
 	}); err != nil {
 		return err
 	}
@@ -161,7 +202,12 @@ func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication sna
 		return err
 	}
 	if err := Phase(ctx, "symbol-deltas", func(ctx context.Context) error {
-		return createSymbolDeltas(ctx, database, snapshot, publication, previous, handles)
+		return createSymbolDeltas(ctx, database, snapshot, publication, membership, handles)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "implements-deltas", func(ctx context.Context) error {
+		return createImplementsDeltas(ctx, database, snapshot, publication, handles)
 	}); err != nil {
 		return err
 	}
