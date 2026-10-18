@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/exp/trace"
@@ -48,23 +49,28 @@ func analyseProfiles(ctx context.Context, result observation) error {
 }
 
 func tracePhases(path string) (totals map[string]phaseTotal, returnErr error) {
+	totals, _, err := tracePhaseBreakdown(path)
+	return totals, err
+}
+
+func tracePhaseBreakdown(path string) (totals, paths map[string]phaseTotal, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
 	reader, err := trace.NewReader(file)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	stacks, totals := map[trace.GoID][]openRegion{}, map[string]phaseTotal{}
+	stacks, totals, paths := map[trace.GoID][]openRegion{}, map[string]phaseTotal{}, map[string]phaseTotal{}
 	for {
 		event, err := reader.ReadEvent()
 		if errors.Is(err, io.EOF) {
-			return totals, nil
+			return totals, paths, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		goroutine := event.Goroutine()
 		switch event.Kind() {
@@ -73,7 +79,11 @@ func tracePhases(path string) (totals map[string]phaseTotal, returnErr error) {
 		case trace.EventRegionEnd:
 			stack := stacks[goroutine]
 			if len(stack) == 0 || stack[len(stack)-1].Name != event.Region().Type {
-				return nil, fmt.Errorf("unmatched trace region %q on goroutine %d", event.Region().Type, goroutine)
+				return nil, nil, fmt.Errorf("unmatched trace region %q on goroutine %d", event.Region().Type, goroutine)
+			}
+			breadcrumb := make([]string, len(stack))
+			for i, region := range stack {
+				breadcrumb[i] = region.Name
 			}
 			top := stack[len(stack)-1]
 			elapsed := event.Time().Sub(top.Start)
@@ -87,6 +97,12 @@ func tracePhases(path string) (totals map[string]phaseTotal, returnErr error) {
 			total.InclusiveMS += float64(elapsed) / float64(time.Millisecond)
 			total.ExclusiveMS += float64(elapsed-top.Nested) / float64(time.Millisecond)
 			totals[top.Name] = total
+			path := strings.Join(breadcrumb, "/")
+			pathTotal := paths[path]
+			pathTotal.Count++
+			pathTotal.InclusiveMS += float64(elapsed) / float64(time.Millisecond)
+			pathTotal.ExclusiveMS += float64(elapsed-top.Nested) / float64(time.Millisecond)
+			paths[path] = pathTotal
 		}
 	}
 }
