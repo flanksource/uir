@@ -70,10 +70,34 @@ var _ = Describe("FromRelationships", func() {
 	}
 	source := func(rels []uir.UIRRelationship) graph.Source {
 		GinkgoHelper()
-		src, err := graph.FromRelationships(rels, describeByType)
+		src, err := graph.FromRelationships(graph.RelationshipOptions{Relationships: rels, Describe: describeByType})
 		Expect(err).NotTo(HaveOccurred())
 		return src
 	}
+
+	It("builds an edge-less declared node into a one-node graph", func() {
+		idle := methodID("D", "idle")
+		src, err := graph.FromRelationships(graph.RelationshipOptions{
+			Nodes:         []uir.Node{methodRef("D", "idle")},
+			Relationships: relationships(),
+			Describe:      describeByType,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(build(src, graph.DirectionBoth, 2, idle.IdentityKey())).To(Equal(&graph.Graph{
+			Roots: []string{idle.IdentityKey()},
+			Nodes: []graph.Node{{
+				ID: idle.IdentityKey(), Identifier: idle, Kind: string(uir.NodeTypeMethod), Label: "idle", Group: "D",
+			}},
+			Edges:  []graph.Edge{},
+			Groups: []graph.Group{{ID: "D", Label: "D"}},
+		}))
+	})
+
+	It("rejects a nil declared node", func() {
+		_, err := graph.FromRelationships(graph.RelationshipOptions{Nodes: []uir.Node{nil}, Describe: describeByType})
+		Expect(err).To(MatchError(ContainSubstring("nodes[0] is nil")))
+	})
 
 	It("serves callees and callers from the same relationships", func() {
 		src := source(relationships())
@@ -179,7 +203,7 @@ var _ = Describe("FromRelationships", func() {
 	DescribeTable("rejects a call, dispatch, read or write relationship with a missing end",
 		func(relType uir.RelationshipType, from, to uir.Node, want string) {
 			rels := append(relationships(), uir.NewRelationship(relType, from, to).Source("a.go", 9, 9).Build())
-			_, err := graph.FromRelationships(rels, describeByType)
+			_, err := graph.FromRelationships(graph.RelationshipOptions{Relationships: rels, Describe: describeByType})
 			Expect(err).To(MatchError(ContainSubstring(want)))
 		},
 		Entry("a call with no source", uir.RelationshipTypeCall, nil, methodRef("B", "save"), "relationships[3]: call to B:save at a.go:9 has no source"),
@@ -190,7 +214,7 @@ var _ = Describe("FromRelationships", func() {
 	)
 
 	It("rejects a missing describe", func() {
-		_, err := graph.FromRelationships(relationships(), nil)
+		_, err := graph.FromRelationships(graph.RelationshipOptions{Relationships: relationships()})
 		Expect(err).To(MatchError(ContainSubstring("describe is required")))
 	})
 

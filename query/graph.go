@@ -33,11 +33,16 @@ type GraphOptions struct {
 	// None takes DefaultGraphExclusions, and ExcludeNone alone excludes nothing.
 	Exclude []string
 	// Access are the edge types the graph follows: call (with the dispatches a call reaches), read
-	// and write. None takes DefaultGraphAccess.
+	// and write. None takes DefaultGraphAccess for indexed and Go file graphs,
+	// or all three types for SQL file graphs.
 	Access []uir.RelationshipType
 	// Since, when set, makes the graph a change query against an earlier snapshot of the root. It walks
 	// callees only, so a zero Direction takes graph.DirectionCallees and any other is refused.
 	Since *GraphSince
+	// File, when set, draws the graph of one source file instead of an indexed root: Selector names
+	// one of its functions, or is empty when it declares one. Pipeline.Graph resolves the callees the
+	// file does not declare in the selected snapshots; StandaloneGraph leaves them unresolved.
+	File  *GraphFile
 	Scope ModuleScopeOptions
 }
 
@@ -60,6 +65,8 @@ type GraphResult struct {
 	Candidates []ModuleSymbol    `json:"candidates"`
 	// Since is the answer of a change query, absent from any other graph.
 	Since *GraphChanges `json:"since,omitempty"`
+	// Diagnostics are the statements of a file graph's source that could not be lowered.
+	Diagnostics []FileDiagnostic `json:"diagnostics,omitempty"`
 }
 
 func invalidGraph(format string, arguments ...any) error {
@@ -86,7 +93,11 @@ func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) 
 		options.Exclude = slices.Clone(DefaultGraphExclusions)
 	}
 	if len(options.Access) == 0 {
-		options.Access = slices.Clone(DefaultGraphAccess)
+		if options.File != nil && options.File.Dialect != "" {
+			options.Access = slices.Clone(graphAccessTypes)
+		} else {
+			options.Access = slices.Clone(DefaultGraphAccess)
+		}
 	}
 	if err := options.validate(); err != nil {
 		return options, graphExclusions{}, err
@@ -96,8 +107,13 @@ func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) 
 }
 
 func (options GraphOptions) validate() error {
+	if options.File != nil {
+		if err := options.validateFile(); err != nil {
+			return err
+		}
+	}
 	switch {
-	case options.Selector == "" && options.Symbol == "":
+	case options.File == nil && options.Selector == "" && options.Symbol == "":
 		return invalidGraph("a call graph requires a selector or a symbol")
 	case options.Selector != "" && options.Symbol != "":
 		return invalidGraph("a call graph takes a selector or a symbol, not both")
@@ -138,6 +154,9 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 	options, exclusions, err := options.normalized()
 	if err != nil {
 		return GraphResult{}, err
+	}
+	if options.File != nil {
+		return pipeline.indexedFileGraph(ctx, options, exclusions)
 	}
 	session, trace := pipeline.session()
 	clock := newStageClock()
