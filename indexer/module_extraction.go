@@ -28,7 +28,10 @@ type moduleExtraction struct {
 	documents      map[string]extractedDocument
 	symbols        map[string]storage.Symbol
 	coverage       storage.Coverage
-	diagnostics    storage.JSON
+	// coverageDeterministic is whether extracting the same commit, configuration and dependency set
+	// again must reach coverage again (typedLoad.deterministicCoverage).
+	coverageDeterministic bool
+	diagnostics           storage.JSON
 	// siblingShapes is every workspace sibling package the load read, keyed by package path, with the
 	// shape a direct import presented and the digest of its sources; the map is nil when one import
 	// path presented two shapes, so the snapshot records none.
@@ -153,6 +156,7 @@ func extractTypedLoad(ctx context.Context, load *typedLoad, base map[string]base
 	extraction.symbols = resolver.rows
 	extraction.contextHash = contextHash(root.ConfigurationHash, extractor.inputHashes)
 	extraction.coverage = weakestCoverage(extractor.coverages)
+	extraction.coverageDeterministic = load.deterministicCoverage()
 	var err error
 	if extraction.diagnostics, err = snapshotDiagnostics(extraction.packages); err != nil {
 		return moduleExtraction{}, err

@@ -259,6 +259,7 @@ func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 		ContextHash: publication.extraction.contextHash, Coverage: publication.extraction.coverage,
 		PackageCount: len(publication.extraction.packages), Diagnostics: publication.extraction.diagnostics,
 		StartedAt: publication.startedAt, CompletedAt: time.Now().UTC(), Reason: publication.reason,
+		CoverageDeterministic: &publication.extraction.coverageDeterministic,
 	}
 	indexStartedAt := publication.extraction.indexStartedAt
 	snapshot.IndexStartedAt = &indexStartedAt
