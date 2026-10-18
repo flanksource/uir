@@ -128,20 +128,67 @@ func (index *indexContext) declaredBy(ctx context.Context, postings []scopedPost
 	return matches, nil
 }
 
-// implementations lists the declared types whose implements entries name the target interface.
+// implementations lists the declarations of the types that each scope's implements facts relate to
+// the target interface, in that scope.
 func (index *indexContext) implementations(ctx context.Context, target ModuleSymbol) ([]ModuleMatch, error) {
 	if target.Kind != "type" {
 		return nil, fmt.Errorf("implementations requires a type, %s is a %s", target.Name, target.Kind)
 	}
-	postings, err := index.postings(ctx, []string{target.ID}, "implements")
+	implementers, err := index.implementers(ctx, target.ID)
 	if err != nil {
 		return nil, err
 	}
-	matches, err := index.declaredBy(ctx, postings, "implementation", "implements", func(entry storage.DocumentSymbol) []string { return entry.Implements }, target.ID)
-	if matches == nil && err == nil {
-		matches = []ModuleMatch{}
+	var ids []string
+	for _, typeIDs := range implementers {
+		ids = append(ids, typeIDs...)
 	}
-	return matches, err
+	postings, err := index.postings(ctx, ids, "definition")
+	if err != nil {
+		return nil, err
+	}
+	if err := index.prefetch(ctx, postings); err != nil {
+		return nil, err
+	}
+	matches := []ModuleMatch{}
+	for _, posting := range postings {
+		if !slices.Contains(implementers[posting.scope], posting.symbol) {
+			continue
+		}
+		document, err := index.document(ctx, posting)
+		if err != nil {
+			return nil, err
+		}
+		entry, err := index.entry(posting, document, posting.symbol)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, index.declarationMatch(posting, document, "implementation", "implements", entry))
+	}
+	return matches, nil
+}
+
+// implementers maps each scope position to the ids of the types its implements facts relate to the
+// interface.
+func (index *indexContext) implementers(ctx context.Context, iface string) (map[int][]string, error) {
+	handles, err := index.handlesOf(ctx, []string{iface})
+	if err != nil {
+		return nil, err
+	}
+	implementers := map[int][]string{}
+	for position := range index.scopes {
+		pairs, err := index.implementsOf(ctx, position, storage.ImplementsByInterface, handles)
+		if err != nil {
+			return nil, err
+		}
+		typeHandles := make([]int64, len(pairs))
+		for i, pair := range pairs {
+			typeHandles[i] = pair.Type
+		}
+		if implementers[position], err = index.symbolIDs(ctx, typeHandles); err != nil {
+			return nil, err
+		}
+	}
+	return implementers, nil
 }
 
 func (index *indexContext) embedders(ctx context.Context, target ModuleSymbol) ([]ModuleMatch, error) {
@@ -194,7 +241,8 @@ func (index *indexContext) callers(ctx context.Context, target ModuleSymbol, dis
 func isCall(occurrence storage.DocumentOccurrence) bool { return occurrence.Role == "call" }
 
 // dispatchMethods maps a concrete method T.M to I.M for every interface I that T's declarations in
-// scope implement. Interfaces outside the import closure of T are not recorded, so not proven.
+// scope implement, as the snapshots' implements facts record them (indexer.candidateInterfaces says
+// which interfaces those consider).
 func (index *indexContext) dispatchMethods(ctx context.Context, target ModuleSymbol) ([]string, error) {
 	if target.Kind != "method" || target.OwnerID == "" {
 		return nil, fmt.Errorf("dispatch applies to methods, %s is a %s", target.Name, target.Kind)
@@ -229,30 +277,34 @@ func (index *indexContext) dispatchMethods(ctx context.Context, target ModuleSym
 	return methods, nil
 }
 
-// ownerInterfaces are the interfaces the declarations in scope of the owner implement, sorted and
-// distinct, and whether the owner is declared in scope at all.
+// ownerInterfaces are the interfaces that the implements facts of the scopes declaring the owner relate
+// it to, sorted and distinct, and whether the owner is declared in scope at all.
 func (index *indexContext) ownerInterfaces(ctx context.Context, owner string) ([]string, bool, error) {
 	postings, err := index.postings(ctx, []string{owner}, "definition")
 	if err != nil {
 		return nil, false, err
 	}
-	if err := index.prefetch(ctx, postings); err != nil {
+	handles, err := index.handlesOf(ctx, []string{owner})
+	if err != nil {
 		return nil, false, err
 	}
-	var interfaces []string
+	var interfaces []int64
+	declaring := map[int]bool{}
 	for _, posting := range postings {
-		document, err := index.document(ctx, posting)
+		if declaring[posting.scope] {
+			continue
+		}
+		declaring[posting.scope] = true
+		pairs, err := index.implementsOf(ctx, posting.scope, storage.ImplementsByType, handles)
 		if err != nil {
 			return nil, false, err
 		}
-		entry, err := index.entry(posting, document, owner)
-		if err != nil {
-			return nil, false, err
+		for _, pair := range pairs {
+			interfaces = append(interfaces, pair.Interface)
 		}
-		interfaces = append(interfaces, entry.Implements...)
 	}
-	slices.Sort(interfaces)
-	return slices.Compact(interfaces), len(postings) > 0, nil
+	ids, err := index.symbolIDs(ctx, interfaces)
+	return ids, len(postings) > 0, err
 }
 
 // callees lists the call occurrences whose enclosing declaration is the target, resolved or not.
