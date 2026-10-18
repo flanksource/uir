@@ -221,12 +221,30 @@ export type ModuleGraphResult = ModuleGraph & {
   exclude: string[];
   packages: ModuleGraphPackage[];
   stages: { name: string; value: string }[]; candidates: ModuleQuerySymbol[];
+  /** The answer of a change query, present only when `since` was sent. */
+  since?: ModuleGraphChanges;
+};
+export type ModuleGraphChangeReason = "added" | "removed" | "signature" | "structure" | "body" | "dependency-version";
+/** A changed node the graph drew; `path` is the node ids of a shortest walk from the root, root first. */
+export type ModuleGraphChangedNode = { id: string; reason: ModuleGraphChangeReason; module?: string; path: string[] };
+export type ModuleGraphDependencyChange = { module: string; from?: string; to?: string; excluded?: boolean };
+export type ModuleGraphChanges = {
+  revision: string; from_snapshot_id: string; to_snapshot_id: string;
+  /** Whether anything the walk reached changed. */
+  changed: boolean;
+  nodes: ModuleGraphChangedNode[];
+  symbols: Partial<Record<ModuleGraphChangeReason, number>>;
+  dependencies: ModuleGraphDependencyChange[];
 };
 export type ModuleGraphOptions = {
   selector?: string; symbol?: string; direction?: ModuleGraphDirection; depth?: number; limit?: number;
   /** Package patterns to leave out; empty or absent takes the server defaults, ["none"] excludes nothing. */
   exclude?: string[];
   root?: string; location?: string; snapshot?: string;
+  /** A revision to compare against: the graph becomes a change query over the root's callees. */
+  since?: string;
+  /** A snapshot UUID to use for `since` instead of its newest clean snapshot. */
+  "since-snapshot"?: string;
 };
 export type ModuleIndexResult = {
   root_key: string;
@@ -251,10 +269,12 @@ export type GitHistory = { root_key: string; location: string; branches: GitRef[
 export type SymbolChange = { class: "added" | "removed" | "signature" | "structure" | "body" | "moved"; kind: string;
   owner?: string; name: string; visibility: string; shape_before?: string; shape_after?: string;
   shape_diff?: { op: string; text: string; paired?: boolean; tokenizer?: "go" | "text"; tokens: { op: string; text: string }[] }[];
-  path_before?: string; path_after?: string; lines?: { added: number; removed: number }; coverage?: string[]; note?: string };
+  path_before?: string; path_after?: string; lines?: { added: number; removed: number }; coverage?: string[]; note?: string;
+  /** The copy of a moved row reported under the file the symbol left. */
+  moved_away?: boolean };
 export type SymbolDiff = { root_key: string; from: { commit: string; snapshot_id: string; worktree_state: string };
-  to: { commit: string; snapshot_id: string; worktree_state: string }; visibility: string; stat: boolean;
-  lines_error?: string; packages: { path: string; lines?: { added: number; removed: number };
+  to: { commit: string; snapshot_id: string; worktree_state: string }; visibility: string; change_types?: string[]; stat: boolean;
+  lines_error?: string; packages: { path: string; lines?: { added: number; removed: number }; hidden_files?: number;
     files: { path: string; status: string; coverage?: string[]; excluded?: string;
       lines?: { added: number; removed: number }; lines_error?: string; hidden_rows?: number; rows: SymbolChange[] }[] }[] };
 export type Page<T> = { data: T[]; page: { limit: number; offset: number; total: number } };
@@ -434,7 +454,7 @@ function isQueryResult(value: unknown): value is ModuleQueryResult {
   return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "stages"].every((key) => Array.isArray(result[key]));
 }
 
-const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot"] as const;
+const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot", "since", "since-snapshot"] as const;
 
 export async function getModuleGraph(options: ModuleGraphOptions, signal?: AbortSignal): Promise<TimedResponse<ModuleGraphResult>> {
   const params: Record<string, string> = {};
