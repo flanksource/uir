@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -155,7 +157,11 @@ var _ = Describe("snapshot trigger", func() {
 		writeTwoPackageModule(workspace)
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		GinkgoT().Setenv("PATH", "")
+		git, err := exec.LookPath("git")
+		Expect(err).ToNot(HaveOccurred())
+		bin := GinkgoT().TempDir()
+		Expect(os.Symlink(git, filepath.Join(bin, "git"))).To(Succeed())
+		GinkgoT().Setenv("PATH", bin)
 		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).To(MatchError(ContainSubstring("read go env")))
 		Expect(countRows(database, &storage.ModuleRoot{}, "1 = 1")).To(BeZero())

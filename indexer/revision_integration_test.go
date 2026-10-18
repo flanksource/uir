@@ -108,7 +108,7 @@ var _ = Describe("historical revisions", func() {
 				return nil, errors.New(message)
 			}
 
-			extraction, err := extractModule(loadCtx, loader, root, false)
+			extraction, err := extractModule(loadCtx, extractOptions{loadPackages: loader, root: root})
 
 			if !fallsBack {
 				Expect(err).To(HaveOccurred())

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/commons-db/git"
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/mod/modfile"
 )
@@ -58,15 +59,25 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 	root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
 	root.Revision = root.GitCommit
 	root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
+	visible, err := git.ListVisiblePaths(ctx, root.LocalPath)
+	if err != nil {
+		return err
+	}
 	moduleCache := map[string]string{}
-	err := filepath.WalkDir(root.LocalPath, func(current string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root.LocalPath, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
+			if current != root.LocalPath && !visible.Contains(current) {
+				return filepath.SkipDir
+			}
 			return rootDirectoryAction(current, entry.Name(), root.LocalPath, roots)
 		}
 		if filepath.Ext(entry.Name()) != ".go" || (!includeTests && strings.HasSuffix(entry.Name(), "_test.go")) {
+			return nil
+		}
+		if !visible.Contains(current) {
 			return nil
 		}
 		file, err := readDiscoveredFile(current, root.LocalPath, entry, moduleCache)
@@ -266,9 +277,8 @@ func gitValue(ctx context.Context, directory string, args ...string) string {
 }
 
 // worktreeState reports whether the module's files are exactly its revision's files: Git reports no
-// change under the directory and every indexed file is tracked, since Git's status omits the ignored
-// files discovery still indexes. Without a revision the module is not in a Git checkout (or the
-// checkout has no commit), so the state is unknown.
+// change under the directory and every indexed file is tracked. Without a revision the module is not
+// in a Git checkout (or the checkout has no commit), so the state is unknown.
 func worktreeState(ctx context.Context, directory, revision string, files []discoveredFile) (storage.WorktreeState, error) {
 	if revision == "" {
 		return storage.WorktreeUnknown, nil

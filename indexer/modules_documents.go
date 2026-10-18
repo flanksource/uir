@@ -130,6 +130,13 @@ func pendingDocuments(ctx context.Context, database *gorm.DB, publication snapsh
 			return nil, fmt.Errorf("no document was extracted for %q", file.PathKey)
 		}
 		revision := current[file.PathKey]
+		if extracted.reused {
+			if err := requireReusedDocument(ctx, database, publication.force, revision, extracted); err != nil {
+				return nil, err
+			}
+			result.ReusedFiles++
+			continue
+		}
 		document := storage.Document{
 			ID: uuid.New(), RootID: revision.RootID, PathKey: file.PathKey, SourceRevisionID: revision.ID,
 			PackagePath: file.PackagePath, InputHash: extracted.inputHash, IndexerVersion: extraction.indexerVersion,
@@ -156,6 +163,25 @@ func pendingDocuments(ctx context.Context, database *gorm.DB, publication snapsh
 		}
 	}
 	return pending, nil
+}
+
+// requireReusedDocument checks that the document extraction reused from the base, rather than
+// rendering it, is stored for the path's current revision. Force re-verifies every document, so it
+// cannot take one it did not render.
+func requireReusedDocument(ctx context.Context, database *gorm.DB, force bool, revision storage.SourceRevision, extracted extractedDocument) error {
+	if force {
+		return fmt.Errorf("document for %q was reused from the base, but a forced publication re-verifies every document", revision.PathKey)
+	}
+	var stored int64
+	if err := database.WithContext(ctx).Model(&storage.Document{}).
+		Where("root_id = ? AND path_key = ? AND input_hash = ? AND source_revision_id = ?", revision.RootID, revision.PathKey, extracted.inputHash, revision.ID).
+		Count(&stored).Error; err != nil {
+		return fmt.Errorf("check reused document for %q: %w", revision.PathKey, err)
+	}
+	if stored != 1 {
+		return fmt.Errorf("document for %q under input hash %s was reused from the base, but none describes revision %s", revision.PathKey, extracted.inputHash, revision.ID)
+	}
+	return nil
 }
 
 // assignDocumentOrdinals numbers the documents this publication inserts from one past the largest

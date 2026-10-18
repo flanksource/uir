@@ -36,6 +36,7 @@ type fileIndex struct {
 	Calls       []callSpec
 	fileSet     *token.FileSet
 	content     []byte
+	bindings    localBindings
 }
 
 type nodeSpec struct {
