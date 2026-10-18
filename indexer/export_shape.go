@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -110,18 +111,18 @@ func (shapes *exportShapes) workspace(pkg *packages.Package) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	digest := newCanonicalHash(exportShapeVersion)
-	digest.count(len(pairs))
+	digest := canonicalhash.New(exportShapeVersion)
+	digest.Count(len(pairs))
 	for _, pair := range pairs {
-		digest.text(pair[0])
-		digest.text(pair[1])
+		digest.Text(pair[0])
+		digest.Text(pair[1])
 	}
-	digest.count(len(referenced))
+	digest.Count(len(referenced))
 	for _, imported := range referenced {
-		digest.text(imported.Path)
-		digest.text(imported.ExportShapeHash)
+		digest.Text(imported.Path)
+		digest.Text(imported.ExportShapeHash)
 	}
-	return digest.sum(), nil
+	return digest.Sum(), nil
 }
 
 // referencedShapes are the export shapes, sorted by import path, of the packages whose types the
@@ -158,9 +159,9 @@ func (shapes *exportShapes) index(pkg *packages.Package) {
 func (shapes *exportShapes) unproven(pkg *packages.Package, importHashes []string) (string, error) {
 	files := append([]string(nil), pkg.GoFiles...)
 	sort.Slice(files, func(i, j int) bool { return filepath.Base(files[i]) < filepath.Base(files[j]) })
-	digest := newCanonicalHash(unprovenExportShapeVersion)
-	digest.text(pkg.PkgPath)
-	digest.count(len(files))
+	digest := canonicalhash.New(unprovenExportShapeVersion)
+	digest.Text(pkg.PkgPath)
+	digest.Count(len(files))
 	for _, name := range files {
 		contentHash, parsed := shapes.load.parsed[name]
 		if !parsed {
@@ -170,14 +171,14 @@ func (shapes *exportShapes) unproven(pkg *packages.Package, importHashes []strin
 			}
 			contentHash = hashBytes(content)
 		}
-		digest.text(filepath.Base(name))
-		digest.text(contentHash)
+		digest.Text(filepath.Base(name))
+		digest.Text(contentHash)
 	}
-	digest.count(len(importHashes))
+	digest.Count(len(importHashes))
 	for _, hash := range importHashes {
-		digest.text(hash)
+		digest.Text(hash)
 	}
-	return digest.sum(), nil
+	return digest.Sum(), nil
 }
 
 // exportedSymbols is the sorted (symbol id, API shape) of every exported symbol a package declares,
@@ -235,10 +236,10 @@ func (shapes *exportShapes) exportedSymbols(pkg *types.Package) ([][2]string, er
 }
 
 func digestTexts(version string, texts ...string) string {
-	digest := newCanonicalHash(version)
-	digest.count(len(texts))
+	digest := canonicalhash.New(version)
+	digest.Count(len(texts))
 	for _, text := range texts {
-		digest.text(text)
+		digest.Text(text)
 	}
-	return digest.sum()
+	return digest.Sum()
 }

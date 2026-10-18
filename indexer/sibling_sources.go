@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -118,12 +119,12 @@ func packageSourceDigest(moduleDir, packageDir string, read map[string]string) (
 		files[filepath.ToSlash(key)] = hash
 	}
 	keys := sortedKeys(files)
-	digest := newCanonicalHash(siblingSourceVersion)
-	digest.text(hashBytes(goMod))
-	digest.count(len(keys))
+	digest := canonicalhash.New(siblingSourceVersion)
+	digest.Text(hashBytes(goMod))
+	digest.Count(len(keys))
 	for _, key := range keys {
-		digest.text(key)
-		digest.text(files[key])
+		digest.Text(key)
+		digest.Text(files[key])
 	}
-	return digest.sum(), nil
+	return digest.Sum(), nil
 }
