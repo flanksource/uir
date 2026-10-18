@@ -97,6 +97,9 @@ func createSymbolDeltas(ctx context.Context, database *gorm.DB, snapshot storage
 	after := newDeclarations()
 	for path, key := range currentKeys {
 		if baseKeys[path] != key {
+			if extraction.documents[path].reused {
+				return fmt.Errorf("document for %q was reused from a base whose input hash differs from snapshot %s's base", path, snapshot.ID)
+			}
 			if err := after.add(packages[path], extraction.documents[path].definitions, declarations{}); err != nil {
 				return err
 			}

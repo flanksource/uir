@@ -9,11 +9,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/flanksource/commons-db/git"
 	"golang.org/x/mod/modfile"
 )
 
 func discoverModules(ctx context.Context, path string, includeTests bool) ([]discoveredRoot, error) {
-	roots, err := locateModuleRoots(path)
+	roots, err := locateModuleRoots(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +39,7 @@ func discoverModule(ctx context.Context, path, checkout string, includeTests boo
 // discoverModuleAt is discoverModule reporting whether a module is rooted at checkout instead of
 // failing when none is.
 func discoverModuleAt(ctx context.Context, path, checkout string, includeTests bool) (discoveredRoot, bool, error) {
-	roots, err := locateModuleRoots(path)
+	roots, err := locateModuleRoots(ctx, path)
 	if err != nil {
 		return discoveredRoot{}, false, err
 	}
@@ -53,7 +54,7 @@ func discoverModuleAt(ctx context.Context, path, checkout string, includeTests b
 
 // locateModuleRoots finds the go.mod roots below path, or the enclosing module when there are none,
 // with their parents and mount paths, without reading their sources.
-func locateModuleRoots(path string) ([]discoveredRoot, error) {
+func locateModuleRoots(ctx context.Context, path string) ([]discoveredRoot, error) {
 	if path == "" {
 		path = "."
 	}
@@ -72,6 +73,11 @@ func locateModuleRoots(path string) ([]discoveredRoot, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("module path %q is not a directory", workspace)
 	}
+	visible, err := git.ListVisiblePaths(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	gitViews := map[string]git.VisiblePaths{workspace: visible}
 	var roots []discoveredRoot
 	err = filepath.WalkDir(workspace, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -83,7 +89,36 @@ func locateModuleRoots(path string) ([]discoveredRoot, error) {
 		if current != workspace && (shouldSkipRootDiscovery(entry.Name()) || entry.Name() == "vendor") {
 			return filepath.SkipDir
 		}
+		gitRoot := workspace
+		for candidate := range gitViews {
+			if len(candidate) > len(gitRoot) && pathWithin(current, candidate) {
+				gitRoot = candidate
+			}
+		}
+		currentVisible := gitViews[gitRoot]
+		if current != workspace && !currentVisible.Contains(current) {
+			if !isGitRoot(current) {
+				return filepath.SkipDir
+			}
+			ignored, err := currentVisible.IsIgnored(ctx, current)
+			if err != nil {
+				return err
+			}
+			if ignored {
+				return filepath.SkipDir
+			}
+		}
+		if current != workspace && isGitRoot(current) {
+			currentVisible, err = git.ListVisiblePaths(ctx, current)
+			if err != nil {
+				return err
+			}
+			gitViews[current] = currentVisible
+		}
 		modPath := filepath.Join(current, "go.mod")
+		if !currentVisible.Contains(modPath) {
+			return nil
+		}
 		content, readErr := os.ReadFile(modPath)
 		if os.IsNotExist(readErr) {
 			return nil
@@ -112,7 +147,7 @@ func locateModuleRoots(path string) ([]discoveredRoot, error) {
 		for parent := filepath.Dir(workspace); parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
 			_, err := os.Stat(filepath.Join(parent, "go.mod"))
 			if err == nil {
-				return locateModuleRoots(parent)
+				return locateModuleRoots(ctx, parent)
 			}
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("stat enclosing go.mod in %q: %w", parent, err)
