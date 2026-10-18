@@ -110,6 +110,30 @@ var _ = Describe("CollectRelationships", func() {
 		Expect(rels[0].Path).To(BeEmpty(), "inline.sql is where the expression lives, which the statement does not carry")
 	})
 
+	It("reports the location and text a record builder gives the statement itself", func() {
+		policies := uir.NewRef(uir.Identifier{Type: "AsPolicy"})
+		const path, readLine, writeLine = "orders.sql", 4, 9
+		read := uir.NewRecordRead(uir.RecordTypeTable, policies).
+			WithSource(path, readLine, 0).WithSourceCode("SELECT * FROM AsPolicy").Build()
+		write := uir.NewRecordWrite(uir.RecordTypeTable, policies).
+			WithSource(path, writeLine, 0).WithSourceCode("DELETE FROM AsPolicy").Build()
+
+		rels := uir.CollectRelationships(process(read, write))
+		Expect(rels).To(HaveLen(2))
+		type site struct {
+			Path, Content string
+			Line          int
+		}
+		sites := []site{}
+		for _, rel := range rels {
+			sites = append(sites, site{Path: rel.Path, Line: *rel.StartLine, Content: *rel.Content})
+		}
+		Expect(sites).To(Equal([]site{
+			{Path: path, Line: readLine, Content: "SELECT * FROM AsPolicy"},
+			{Path: path, Line: writeLine, Content: "DELETE FROM AsPolicy"},
+		}))
+	})
+
 	It("reports no relationship for a statement that names no target", func() {
 		method := process(
 			uir.MethodCallStmt{},

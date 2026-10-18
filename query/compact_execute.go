@@ -111,7 +111,7 @@ func (index *compactIndex) evaluate(ctx context.Context, expression *Expr, resul
 	case ExprModifier:
 		return index.evaluateModifiers(ctx, expression, result)
 	case ExprSymbol:
-		symbols, err := index.resolve(ctx, expression.Symbol)
+		symbols, err := index.resolve(ctx, expression.Symbol, nil)
 		if err != nil {
 			return compactValue{}, err
 		}

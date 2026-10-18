@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir"
-	"github.com/flanksource/uir/indexer"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 )
 
@@ -196,7 +196,7 @@ func patchSide(locator SourceLocator, request BlobRequest, content []byte) (*fil
 		side.setContent(storage.DocumentContent{PackagePath: packagePath, Excluded: NotGoSource})
 		return side, nil
 	}
-	document, err := indexer.SyntaxDocument(file, packagePath, content)
+	document, err := syntax.Document(file, packagePath, content)
 	if err != nil {
 		return nil, fmt.Errorf("%s side of the patch: %w", label, err)
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
 // compactIndex evaluates compact expressions over an index context. Symbol rows and query names live
@@ -22,7 +23,7 @@ func newCompactIndex(index *indexContext) *compactIndex {
 	return &compactIndex{indexContext: index, dispatch: map[string][]ModuleSymbol{}}
 }
 
-func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]ModuleSymbol, error) {
+func (index *compactIndex) resolve(ctx context.Context, pattern string, accepts func(storage.Symbol) bool) ([]ModuleSymbol, error) {
 	literal, exact := globLiteral(pattern)
 	query := index.database.WithContext(ctx).Model(&storage.Symbol{})
 	if exact {
@@ -69,7 +70,7 @@ func (index *compactIndex) resolve(ctx context.Context, pattern string) ([]Modul
 		if err != nil {
 			return nil, err
 		}
-		if symbolPatternMatches(pattern, name, glob) {
+		if symbolPatternMatches(pattern, name, glob) && (accepts == nil || accepts(row)) {
 			matched = append(matched, row)
 		}
 	}
@@ -237,7 +238,10 @@ func (index *compactIndex) activeSymbols(ctx context.Context, rows []storage.Sym
 	}
 	var unused []int64
 	for _, row := range rows {
-		if !defined[row.Handle] && !used[row.ID] {
+		if defined[row.Handle] || used[row.ID] {
+			continue
+		}
+		if row.Kind == symbolhandle.KindType.String() || row.Kind == symbolhandle.KindInterface.String() {
 			unused = append(unused, row.Handle)
 		}
 	}
