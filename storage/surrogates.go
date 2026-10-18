@@ -15,7 +15,7 @@ const surrogateLookupBatch = 256
 // The natural keys that make a repeated insert of the same root or document a no-op. Naming them keeps
 // a conflict on any other unique key, such as an ordinal, an error.
 var (
-	documentKeyConflict = clause.OnConflict{Columns: []clause.Column{{Name: "root_id"}, {Name: "path_key"}, {Name: "input_hash"}}, DoNothing: true}
+	documentKeyConflict = clause.OnConflict{Columns: []clause.Column{{Name: "root_id"}, {Name: "path_key"}, {Name: "content_digest"}}, DoNothing: true}
 	rootKeyConflict     = clause.OnConflict{Columns: []clause.Column{{Name: "root_key"}}, DoNothing: true}
 )
 
@@ -63,6 +63,12 @@ func lookupSurrogates[K comparable, V any](ctx context.Context, database *gorm.D
 // SymbolHandles maps canonical symbol ids to their handles; an unknown id is an error.
 func SymbolHandles(ctx context.Context, database *gorm.DB, ids []string) (map[string]int64, error) {
 	return lookupSurrogates[string, int64](ctx, database, Symbol{}.TableName(), "id", "handle", "symbol id", ids)
+}
+
+// StoredSymbolHandles maps the canonical symbol ids that have a row to their handles, leaving out the
+// rest, so a publisher can tell which symbols it still has to write.
+func StoredSymbolHandles(ctx context.Context, database *gorm.DB, ids []string) (map[string]int64, error) {
+	return loadSurrogates[string, int64](ctx, database, Symbol{}.TableName(), "id", "handle", "symbol id", ids)
 }
 
 // SymbolIDs maps handles back to canonical symbol ids; an unknown handle is an error.
@@ -115,12 +121,15 @@ func nextOrdinal(ctx context.Context, database *gorm.DB, table string) (int64, e
 	return largest[0] + 1, nil
 }
 
-// CreateDocument inserts a document unless its (root, path, input hash) key exists, reporting whether
+// CreateDocument inserts a document unless its (root, path, content digest) key exists, reporting whether
 // this call inserted it. Any other unique conflict, such as a concurrent publisher taking the same
 // ordinal, is an error, marked ErrAllocationConflict when it lost a race.
 func CreateDocument(ctx context.Context, database *gorm.DB, document *Document) (bool, error) {
 	if document.Ordinal < 1 {
 		return false, fmt.Errorf("document for %q has no ordinal", document.PathKey)
+	}
+	if document.ContentDigest == nil || len(*document.ContentDigest) != 64 {
+		return false, fmt.Errorf("document for %q has no content digest", document.PathKey)
 	}
 	created := database.WithContext(ctx).Clauses(documentKeyConflict).Create(document)
 	if created.Error != nil {
