@@ -24,7 +24,9 @@ type typedFile struct {
 	file *ast.File
 }
 
-// typedLoad is one go/packages load of a module root under its build variant.
+// typedLoad is one go/packages load of a module root under its build variant. errors are the load
+// errors of every package it loaded, dependencies included, which decide whether its coverage is
+// deterministic.
 type typedLoad struct {
 	root        discoveredRoot
 	origins     map[*types.Package]packageOrigin
@@ -33,6 +35,7 @@ type typedLoad struct {
 	directories map[string]bool
 	parsed      map[string]string
 	loadFailure string
+	errors      []packages.Error
 }
 
 type packageLoadError struct{ err error }
@@ -53,13 +56,7 @@ var sourceResolutionFailures = []string{
 // cause, which may be indexed as syntax. Anything else, an unreachable or failing proxy, a missing go
 // command, or an interrupted load, is not a fact about the commit and fails the index.
 func sourceResolutionFailure(err error) bool {
-	message := err.Error()
-	for _, failure := range sourceResolutionFailures {
-		if strings.Contains(message, failure) {
-			return true
-		}
-	}
-	return false
+	return containsAny(err.Error(), sourceResolutionFailures)
 }
 
 // loadTyped loads every package of the root (and its test variants when includeTests is set) with
@@ -82,6 +79,7 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
 		origin := originOf(pkg)
 		load.origins[pkg.Types] = origin
+		load.errors = append(load.errors, pkg.Errors...)
 		if partial == nil && origin.Class == workspacePackage {
 			partial = sources.requireFull(pkg)
 		}
@@ -119,7 +117,7 @@ func typedLoadConfig(ctx context.Context, root discoveredRoot, includeTests bool
 		BuildFlags: []string{"-mod=readonly"}, ParseFile: sources.parse,
 	}
 	if len(root.Variant.BuildTags) > 0 {
-		config.BuildFlags = []string{"-tags=" + strings.Join(root.Variant.BuildTags, ",")}
+		config.BuildFlags = append(config.BuildFlags, "-tags="+strings.Join(root.Variant.BuildTags, ","))
 	}
 	if root.ModFile != "" {
 		config.BuildFlags = append(config.BuildFlags, "-modfile="+root.ModFile)
