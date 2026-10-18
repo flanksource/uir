@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"github.com/flanksource/uir/storage"
 )
 
@@ -37,8 +38,8 @@ func (options PublishOptions) reason() storage.SnapshotReason {
 }
 
 func (options PublishOptions) configurationHash() string {
-	digest := newCanonicalHash(externalConfigurationVersion)
-	digest.text(ExternalIndexerVersion)
-	digest.text(options.Producer)
-	return digest.sum()
+	digest := canonicalhash.New(externalConfigurationVersion)
+	digest.Text(ExternalIndexerVersion)
+	digest.Text(options.Producer)
+	return digest.Sum()
 }

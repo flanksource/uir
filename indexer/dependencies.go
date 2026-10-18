@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/mod/modfile"
 )
@@ -213,23 +214,23 @@ func selectedModules(ctx context.Context, root discoveredRoot) (map[string]selec
 }
 
 func dependencyHash(dependencies []dependencyObservation) string {
-	digest := newCanonicalHash("module-dependencies-v1")
-	digest.count(len(dependencies))
+	digest := canonicalhash.New("module-dependencies-v1")
+	digest.Count(len(dependencies))
 	for _, observation := range dependencies {
 		edge := observation.Edge
-		digest.text(edge.ModulePath)
-		digest.text(edge.DeclaredVersion)
-		digest.text(fmt.Sprint(edge.Indirect))
-		digest.text(edge.ReplacePath)
-		digest.text(edge.ReplaceVersion)
-		digest.text(edge.SelectedVersion)
-		digest.text(observation.LocalDir)
-		digest.text(observation.TargetModulePath)
-		digest.text(observation.TargetVersion)
+		digest.Text(edge.ModulePath)
+		digest.Text(edge.DeclaredVersion)
+		digest.Text(fmt.Sprint(edge.Indirect))
+		digest.Text(edge.ReplacePath)
+		digest.Text(edge.ReplaceVersion)
+		digest.Text(edge.SelectedVersion)
+		digest.Text(observation.LocalDir)
+		digest.Text(observation.TargetModulePath)
+		digest.Text(observation.TargetVersion)
 		if edge.TargetSnapshotID != nil {
-			digest.text(edge.TargetSnapshotID.String())
+			digest.Text(edge.TargetSnapshotID.String())
 		}
-		digest.text(edge.UnresolvedReason)
+		digest.Text(edge.UnresolvedReason)
 	}
-	return digest.sum()
+	return digest.Sum()
 }
