@@ -19,7 +19,7 @@ type headCheck struct {
 	memo         *runMemo
 	includeTests bool
 	// resolveVersions links roots' versioned dependencies to the snapshots the run resolves them to.
-	resolveVersions func(ctx context.Context, roots []discoveredRoot, includeTests bool) error
+	resolveVersions versionResolver
 	confirmed       map[string]confirmedLocation
 	// siblings caches siblingLocations by root location.
 	siblings map[string]map[string]string

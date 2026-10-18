@@ -129,10 +129,16 @@ func (indexer *Indexer) checkContext(ctx context.Context, root discoveredRoot, i
 func (indexer *Indexer) storedHeadCheck(includeTests bool) *headCheck {
 	memo := newRunMemo()
 	check := newHeadCheck(indexer, memo, includeTests)
-	check.resolveVersions = func(ctx context.Context, roots []discoveredRoot, includeTests bool) error {
+	check.resolveVersions = indexer.storedVersions(memo)
+	return check
+}
+
+// storedVersions is the versionResolver that links versioned dependencies only to snapshots already
+// stored, through linkStoredVersions over memo.
+func (indexer *Indexer) storedVersions(memo *runMemo) versionResolver {
+	return func(ctx context.Context, roots []discoveredRoot, includeTests bool) error {
 		return indexer.linkStoredVersions(ctx, memo, roots, includeTests)
 	}
-	return check
 }
 
 // linkStoredVersions links roots' versioned dependencies as indexVersionedDependencies would when it

@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/flanksource/uir/storage"
@@ -43,6 +44,19 @@ func deterministicLoadError(loadError packages.Error) bool {
 	default:
 		return false
 	}
+}
+
+// infrastructureListError is the failure of the first list error of pkg that names an infrastructure
+// failure, or nil. Such an error is a failure of the machine for that package, so the load fails rather
+// than publishing degraded coverage that is never a fact of the commit; an unrecognised list error
+// still only makes the coverage not deterministic.
+func infrastructureListError(pkg *packages.Package) error {
+	for _, loadError := range pkg.Errors {
+		if loadError.Kind == packages.ListError && containsAny(loadError.Msg, infrastructureFailures) {
+			return fmt.Errorf("load package %q: infrastructure failure: %s", pkg.PkgPath, loadError.Msg)
+		}
+	}
+	return nil
 }
 
 // deterministicDependency reports whether a dependency edge's unresolved reason, which the dependency
