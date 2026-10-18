@@ -9,6 +9,7 @@ import (
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RevisionOptions selects one commit of a registered checkout. Reason is historical for a commit
@@ -24,8 +25,9 @@ type RevisionOptions struct {
 }
 
 // IndexRevision publishes a clean historical snapshot for an already registered module without
-// moving its checkout head or changing the checkout's working tree. A complete stored snapshot of the
-// commit under the same configuration and dependency targets is reused without extracting; otherwise
+// moving its checkout head or changing the checkout's working tree. A stored snapshot of the commit
+// under the same configuration and dependency targets whose coverage is complete, or degraded but
+// deterministic, is reused without extracting; otherwise
 // the commit is extracted against its base, and a stored snapshot identical to the extraction,
 // degraded or not, is reused instead of publishing a duplicate.
 func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptions) (result ModuleResult, err error) {
@@ -53,7 +55,7 @@ func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared prep
 	}
 	root = selectedRoots[0]
 	if existing, found, err := indexer.reusableRevision(ctx, location, root); err != nil || found {
-		return revisionResult(options, existing), err
+		return reusedRevision(options, existing, err)
 	}
 	var base storage.ModuleSnapshot
 	var packages map[string]basePackage
@@ -72,7 +74,7 @@ func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared prep
 	}
 	identical, found, err := indexer.storedRevision(ctx, location, root, &extraction)
 	if err != nil || found {
-		return revisionResult(options, identical), err
+		return reusedRevision(options, identical, err)
 	}
 	return indexer.publishRevision(ctx, revisionPublication{location: location, extraction: extraction, reason: options.Reason, baseID: base.ID})
 }
@@ -98,11 +100,12 @@ func (indexer *Indexer) ReusableRevision(ctx context.Context, options RevisionOp
 	if err != nil || !found {
 		return result, false, err
 	}
-	return revisionResult(options, existing), true, nil
+	result, err = revisionResult(options, existing)
+	return result, err == nil, err
 }
 
-// reusableRevision is the complete stored snapshot of a historical commit whose context is proven
-// without extracting. A historical root loads with GOWORK=off and without local replacements, so its
+// reusableRevision is the stored snapshot of a historical commit, of complete or deterministic
+// coverage, whose context is proven without extracting. A historical root loads with GOWORK=off and without local replacements, so its
 // context is a function of the commit, the configuration and the module versions its dependencies
 // select; the dependency set hash names every selected version and, for one linked to an indexed
 // version, that version's target snapshot. A snapshot that recorded a workspace sibling package with a
@@ -127,13 +130,27 @@ func (indexer *Indexer) reusableRevision(ctx context.Context, location storage.M
 	return existing, true, nil
 }
 
-func revisionResult(options RevisionOptions, snapshot storage.ModuleSnapshot) ModuleResult {
-	return ModuleResult{RootKey: options.RootKey, Location: options.Checkout, SnapshotID: snapshot.ID.String(), Unchanged: true}
+func reusedRevision(options RevisionOptions, snapshot storage.ModuleSnapshot, err error) (ModuleResult, error) {
+	if err != nil {
+		return ModuleResult{}, err
+	}
+	return revisionResult(options, snapshot)
+}
+
+// revisionResult is the result of reusing a stored snapshot: every one of its files is reused.
+func revisionResult(options RevisionOptions, snapshot storage.ModuleSnapshot) (ModuleResult, error) {
+	if snapshot.FileCount == nil {
+		return ModuleResult{}, fmt.Errorf("reuse snapshot %s of %q: its file count was never recorded", snapshot.ID, options.RootKey)
+	}
+	files := int(*snapshot.FileCount)
+	return ModuleResult{RootKey: options.RootKey, Location: options.Checkout, SnapshotID: snapshot.ID.String(), Files: files, ReusedFiles: files, Unchanged: true}, nil
 }
 
 // storedRevision is the newest clean snapshot of root's commit under its configuration and dependency
-// set (and version, when it has one). Without an extraction only a complete snapshot qualifies;
-// with one, the snapshot must have the extraction's context hash and coverage.
+// set (and version, when it has one). Without an extraction only a complete snapshot, or a degraded one
+// whose coverage is deterministic, qualifies, and a miss counts why; with one, the snapshot must have
+// the extraction's context hash and coverage, and for a degraded coverage its determinism, so an
+// unclassified degraded row never stands in for a classified extraction.
 func (indexer *Indexer) storedRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (existing storage.ModuleSnapshot, found bool, err error) {
 	err = Phase(ctx, "reuse-check", func(ctx context.Context) (err error) {
 		existing, found, err = indexer.loadStoredRevision(ctx, location, root, extraction)
@@ -142,21 +159,63 @@ func (indexer *Indexer) storedRevision(ctx context.Context, location storage.Mod
 			reused = 1
 		}
 		PhaseCount(ctx, "reused", reused)
-		return err
+		if err != nil || found || extraction != nil {
+			return err
+		}
+		miss, err := indexer.revisionMiss(ctx, location, root)
+		if err != nil {
+			return err
+		}
+		PhaseCount(ctx, "miss-"+miss, 1)
+		return nil
 	})
 	return existing, found, err
 }
 
-func (indexer *Indexer) loadStoredRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (storage.ModuleSnapshot, bool, error) {
-	query := indexer.database.WithContext(ctx).Where("root_id = ? AND revision = ? AND configuration_hash = ? AND worktree_state = ? AND dependency_set_hash = ?",
-		location.RootID, root.GitCommit, root.ConfigurationHash, storage.WorktreeClean, dependencyHash(root.Dependencies))
+// storedRevisionQuery selects the clean snapshots of root's commit, and of its version when it has one.
+func (indexer *Indexer) storedRevisionQuery(ctx context.Context, location storage.ModuleLocation, root discoveredRoot) *gorm.DB {
+	query := indexer.database.WithContext(ctx).Where("root_id = ? AND revision = ? AND worktree_state = ?", location.RootID, root.GitCommit, storage.WorktreeClean)
 	if root.ModuleVersion != "" {
 		query = query.Where("module_version = ?", root.ModuleVersion)
 	}
-	if extraction == nil {
-		query = query.Where("coverage IN ?", storage.CompleteCoverages)
-	} else {
+	return query
+}
+
+// revisionMiss is why no stored snapshot of root's commit is reusable without extracting, from the
+// closest one: none when the commit has no clean snapshot, configuration or dependency-set when the
+// closest differs in that, else coverage, a degraded coverage not known to be deterministic.
+func (indexer *Indexer) revisionMiss(ctx context.Context, location storage.ModuleLocation, root discoveredRoot) (string, error) {
+	dependencies := dependencyHash(root.Dependencies)
+	var closest storage.ModuleSnapshot
+	err := indexer.storedRevisionQuery(ctx, location, root).Select("configuration_hash", "dependency_set_hash").
+		Order(clause.OrderBy{Expression: clause.Expr{
+			SQL:  "CASE WHEN configuration_hash = ? THEN 0 ELSE 1 END, CASE WHEN dependency_set_hash = ? THEN 0 ELSE 1 END, completed_at DESC",
+			Vars: []any{root.ConfigurationHash, dependencies},
+		}}).Take(&closest).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return "none", nil
+	case err != nil:
+		return "", fmt.Errorf("find why snapshots of %s are not reusable: %w", root.GitCommit, err)
+	case closest.ConfigurationHash != root.ConfigurationHash:
+		return "configuration", nil
+	case closest.DependencySetHash == nil || *closest.DependencySetHash != dependencies:
+		return "dependency-set", nil
+	default:
+		return "coverage", nil
+	}
+}
+
+func (indexer *Indexer) loadStoredRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot, extraction *moduleExtraction) (storage.ModuleSnapshot, bool, error) {
+	query := indexer.storedRevisionQuery(ctx, location, root).
+		Where("configuration_hash = ? AND dependency_set_hash = ?", root.ConfigurationHash, dependencyHash(root.Dependencies))
+	switch {
+	case extraction == nil:
+		query = query.Where("(coverage IN ? OR coverage_deterministic = ?)", storage.CompleteCoverages, true)
+	case extraction.coverage.Complete():
 		query = query.Where("context_hash = ? AND coverage = ?", extraction.contextHash, extraction.coverage)
+	default:
+		query = query.Where("context_hash = ? AND coverage = ? AND coverage_deterministic = ?", extraction.contextHash, extraction.coverage, extraction.coverageDeterministic)
 	}
 	var existing storage.ModuleSnapshot
 	err := query.Order("completed_at DESC").Take(&existing).Error
