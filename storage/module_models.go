@@ -125,6 +125,13 @@ type ModuleSnapshot struct {
 
 func (ModuleSnapshot) TableName() string { return "snapshots" }
 
+// CoverageSettled reports whether extracting the snapshot's commit again under its configuration and
+// dependency set must reach its coverage again: the coverage is complete, or degraded and deterministic.
+// It is the one rule deciding whether a stored snapshot's coverage stands without extracting.
+func (snapshot ModuleSnapshot) CoverageSettled() bool {
+	return snapshot.Coverage.Complete() || snapshot.CoverageDeterministic != nil && *snapshot.CoverageDeterministic
+}
+
 type ModuleLocationHead struct {
 	RootID     uuid.UUID `gorm:"column:root_id"`
 	LocationID uuid.UUID `gorm:"column:location_id;primaryKey"`

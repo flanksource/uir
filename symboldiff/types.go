@@ -181,7 +181,9 @@ type Result struct {
 type PackageDiff struct {
 	Path  string     `json:"path"`
 	Lines *LineCount `json:"lines,omitempty"`
-	Files []FileDiff `json:"files"`
+	// HiddenFiles is how many changed files a change-type filter left without a row; Lines still counts them.
+	HiddenFiles int        `json:"hidden_files,omitempty"`
+	Files       []FileDiff `json:"files"`
 }
 
 // FileStatus says whether a file exists on one side only or on both.
