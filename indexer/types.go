@@ -3,10 +3,7 @@ package indexer
 
 import (
 	"errors"
-	"go/token"
 
-	"github.com/flanksource/uir"
-	"github.com/flanksource/uir/storage"
 	"golang.org/x/tools/go/packages"
 	"gorm.io/gorm"
 )
@@ -27,36 +24,4 @@ func New(database *gorm.DB) (*Indexer, error) {
 		return nil, errors.New("UIR index database is required")
 	}
 	return &Indexer{database: database, loadPackages: packages.Load}, nil
-}
-
-type fileIndex struct {
-	PackagePath string
-	PackageName string
-	Nodes       []nodeSpec
-	Calls       []callSpec
-	fileSet     *token.FileSet
-	content     []byte
-	bindings    localBindings
-}
-
-type nodeSpec struct {
-	declarationFacts
-	Identifier     uir.Identifier
-	ParentIdentity string
-	ChildSlot      string
-	Ordinal        int
-	Payload        storage.JSON
-	SemanticHash   string
-	Field          *storage.Field
-	node           uir.Node
-}
-
-type callSpec struct {
-	FromIdentity  string
-	ToIdentifier  uir.Identifier
-	LocalRoot     bool
-	Resolvable    bool
-	StatementPath string
-	Span          storage.ByteSpan
-	Text          string
 }
