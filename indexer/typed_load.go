@@ -75,17 +75,20 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 		root: root, origins: map[*types.Package]packageOrigin{}, files: map[string]typedFile{},
 		ignored: map[string]bool{}, directories: map[string]bool{}, parsed: sources.parsed,
 	}
-	var partial error
+	var failure error
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
 		origin := originOf(pkg)
 		load.origins[pkg.Types] = origin
 		load.errors = append(load.errors, pkg.Errors...)
-		if partial == nil && origin.Class == workspacePackage {
-			partial = sources.requireFull(pkg)
+		if failure == nil {
+			failure = infrastructureListError(pkg)
+		}
+		if failure == nil && origin.Class == workspacePackage {
+			failure = sources.requireFull(pkg)
 		}
 	})
-	if partial != nil {
-		return typedLoad{}, partial
+	if failure != nil {
+		return typedLoad{}, failure
 	}
 	packages.Visit(roots, nil, load.addFailedImports)
 	for _, pkg := range roots {
