@@ -135,7 +135,7 @@ var _ = Describe("symbol deltas", func() {
 			Expect(operations(resigned)).To(Equal(map[string]storage.SourceOperation{unit.ID: storage.SourceSet}),
 				"a signature edit re-extracts the importing book package, whose symbols keep their fingerprints")
 			Expect(*resigned[unit.ID].PublicFP).ToNot(Equal(*deltas[unit.ID].PublicFP))
-			Expect(signature.documents["book/book.go"].ID).ToNot(Equal(initial.documents["book/book.go"].ID))
+			Expect(signature.documents["book/book.go"].ID).To(Equal(initial.documents["book/book.go"].ID), "book.go renders the same document under its new input hash")
 
 			half := "func Half(a Amount) Amount { return Amount{Cents: a.Cents / 2, Currency: a.Currency} }\n"
 			writeFile(moneyPath, moneySource(moneyAmount, reordered, moneyScale, pointerUnit, moneyZero, half))
@@ -182,9 +182,9 @@ var _ = Describe("symbol deltas", func() {
 		Entry("PostgreSQL", indexerPostgresOptions),
 	)
 
-	// Every func init of a package shares one canonical id (gavel TODO 34ea4d17), and a package's input
-	// hash covers all of its files, so a declaration can only disappear from a file whose document the
-	// snapshot replaced: a file with unchanged bytes still gets a new document when its package changes.
+	// Every func init of a package shares one canonical id (gavel TODO 34ea4d17), and its fingerprints fold
+	// across every file of the package. A file with unchanged bytes keeps its document when another file
+	// of its package changes, so symbol deltas compare a changed package whole, both sides of every file.
 	DescribeTable("fold the declarations of one id and keep a symbol still declared in a file whose bytes did not change",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openIndexerDB(ctx, options())
@@ -202,7 +202,7 @@ var _ = Describe("symbol deltas", func() {
 
 			writeFile(filepath.Join(workspace, "boot", "a.go"), bootAEdited)
 			edited, rebodied := publishAndLoad(ctx, database, engine, workspace)
-			Expect(edited.documents["boot/u.go"].ID).ToNot(Equal(initial.documents["boot/u.go"].ID), "u.go's bytes did not change, its document did")
+			Expect(edited.documents["boot/u.go"].ID).To(Equal(initial.documents["boot/u.go"].ID), "u.go's bytes did not change, nor did its document")
 			Expect(operations(rebodied)).To(Equal(map[string]storage.SourceOperation{initFunc.ID: storage.SourceSet}))
 			Expect([]int64{*rebodied[initFunc.ID].PublicFP, *rebodied[initFunc.ID].PrivateFP}).
 				To(Equal([]int64{*deltas[initFunc.ID].PublicFP, *deltas[initFunc.ID].PrivateFP}), "every init has the same shape")

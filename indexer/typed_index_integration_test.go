@@ -74,8 +74,8 @@ var _ = Describe("typed extraction", func() {
 			book := findSymbol(database, bookPackage, "type", "Book")
 			namer := findSymbol(database, bookPackage, "type", "Namer")
 			name := findMember(database, book, "method", "Name")
-			Expect(snapshot.entry("book/book.go", book.ID).Implements).To(Equal([]string{namer.ID}))
-			Expect(snapshot.postings(database, namer.ID)).To(ConsistOf("book/book.go definition 1", "book/book.go reference 1", "book/book.go implements 1"))
+			Expect(effectiveImplements(ctx, database, result.SnapshotID)).To(Equal([]string{book.PackagePath + ".Book " + namer.PackagePath + ".Namer"}))
+			Expect(snapshot.postings(database, namer.ID)).To(ConsistOf("book/book.go definition 1", "book/book.go reference 1"))
 			Expect(snapshot.postings(database, name.ID)).To(ConsistOf("book/book.go definition 1", "book/book.go reference 1", "book/use.go reference 2"))
 
 			var builtinLen storage.Symbol
@@ -146,8 +146,9 @@ var _ = Describe("typed extraction", func() {
 			Expect(returned.entry("money/money.go", unit.ID).Shape).To(Equal("func Unit() *Amount"))
 			Expect(returned.entry("money/money.go", unit.ID).PublicHash).ToNot(Equal(first.entry("money/money.go", unit.ID).PublicHash))
 			Expect(returned.packageRow(database, moneyPackage).ExportShapeHash).ToNot(Equal(first.packageRow(database, moneyPackage).ExportShapeHash))
+			Expect(returned.packageRow(database, bookPackage).InputHash).ToNot(Equal(first.packageRow(database, bookPackage).InputHash), "book imports the changed export shape")
 			for _, path := range []string{"book/book.go", "book/use.go"} {
-				Expect(returned.documents[path].ID).ToNot(Equal(first.documents[path].ID), "%s imports the changed export shape", path)
+				Expect(returned.documents[path].ID).To(Equal(first.documents[path].ID), "%s renders the same document under its new input hash", path)
 			}
 
 			codedAmount := "type Code string\n\n" + "type Amount struct {\n\tCents    int64\n\tCurrency Code `json:\"currency\"`\n}\n"
@@ -158,7 +159,8 @@ var _ = Describe("typed extraction", func() {
 			Expect(retyped.entry("money/money.go", currency.ID).PublicHash).ToNot(Equal(returned.entry("money/money.go", currency.ID).PublicHash))
 			Expect(retyped.entry("money/money.go", amount.ID).Shape).To(Equal("type Amount struct {\n\tCents    int64\n\tCurrency Code `json:\"currency\"`\n}"))
 			Expect(retyped.packageRow(database, moneyPackage).ExportShapeHash).ToNot(Equal(returned.packageRow(database, moneyPackage).ExportShapeHash))
-			Expect(retyped.documents["book/book.go"].ID).ToNot(Equal(returned.documents["book/book.go"].ID))
+			Expect(retyped.packageRow(database, bookPackage).InputHash).ToNot(Equal(returned.packageRow(database, bookPackage).InputHash))
+			Expect(retyped.documents["book/book.go"].ID).To(Equal(returned.documents["book/book.go"].ID))
 
 			reordered := "// Add sums two amounts.\nfunc Add(a Amount, b Amount) Amount {\n\treturn Amount{Cents: b.Cents + a.Cents, Currency: a.Currency}\n}\n"
 			writeFile(moneyPath, moneySource(codedAmount, reordered, moneyScale, pointerUnit, moneyZero))
@@ -207,8 +209,9 @@ var _ = Describe("typed extraction", func() {
 			exported := index("\tnote string\n", "\trate int\n", "\tRounded bool\n")
 			Expect(exported.entry("money/money.go", amount.ID).PublicHash).ToNot(Equal(after.PublicHash))
 			Expect(exported.packageRow(database, moneyPackage).ExportShapeHash).ToNot(Equal(private.packageRow(database, moneyPackage).ExportShapeHash))
+			Expect(exported.packageRow(database, bookPackage).InputHash).ToNot(Equal(private.packageRow(database, bookPackage).InputHash), "book imports the changed public layer")
 			for _, path := range []string{"book/book.go", "book/use.go"} {
-				Expect(exported.documents[path].ID).ToNot(Equal(private.documents[path].ID), "%s imports the changed public layer", path)
+				Expect(exported.documents[path].ID).To(Equal(private.documents[path].ID), "%s renders the same document under its new input hash", path)
 			}
 		},
 		Entry("SQLite", indexerSQLiteOptions),
@@ -307,11 +310,12 @@ var _ = Describe("typed extraction", func() {
 
 			writeFile(filepath.Join(lib, "lib.go"), "package lib\n\ntype Config struct{ Name int }\n")
 			second := indexOnce(ctx, engine, app)
-			Expect(outcomeOf(second)).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 1, ReusedFiles: 1}))
+			Expect(outcomeOf(second)).To(Equal(triggerOutcome{HeadVersion: 2, ReusedFiles: 2}), "app.go renders the same document under its new input hash")
 			Expect(countRows(database, &storage.SourceDelta{}, "snapshot_id = ?", second.SnapshotID)).To(BeZero())
 			Expect(loadSnapshot(database, second.SnapshotID).ContextHash).ToNot(Equal(loadSnapshot(database, first.SnapshotID).ContextHash))
 			after := loadTypedSnapshot(ctx, database, second.SnapshotID)
-			Expect(after.documents["app.go"].ID).ToNot(Equal(before.documents["app.go"].ID))
+			Expect(after.packageRow(database, "example.org/app").InputHash).ToNot(Equal(before.packageRow(database, "example.org/app").InputHash))
+			Expect(after.documents["app.go"].ID).To(Equal(before.documents["app.go"].ID))
 			Expect(after.documents["other/other.go"].ID).To(Equal(before.documents["other/other.go"].ID))
 		},
 		Entry("SQLite", indexerSQLiteOptions),

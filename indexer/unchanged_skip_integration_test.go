@@ -66,7 +66,7 @@ var _ = Describe("unchanged run", func() {
 
 			writeFile(filepath.Join(workspace, "checkout.go"), "package shop\n\nfunc Checkout(c *Cart) int { return len(c.Items) + 0 }\n")
 			edited := indexOnce(ctx, engine, workspace)
-			Expect(outcomeOf(edited)).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 2, ReusedFiles: 1}))
+			Expect(outcomeOf(edited)).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 1, ReusedFiles: 2}))
 			Expect(*loads).To(Equal(2))
 
 			forced, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Force: true, Reason: storage.ReasonReindex})
@@ -104,7 +104,8 @@ var _ = Describe("unchanged run", func() {
 			writeFile(filepath.Join(workspace, "pricing", "pricing.go"), "package pricing\n\nfunc Base() int { return 11 }\n\nfunc Discount() int { return 1 }\n")
 			shaped := indexWorkspace(ctx, engine, workspace)
 			Expect(outcomeOf(shaped["example.org/pricing"])).To(Equal(triggerOutcome{HeadVersion: 3, ParsedFiles: 1}))
-			Expect(outcomeOf(shaped["example.org/shop"])).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 1}), "a sibling export change re-keys shop's document")
+			Expect(outcomeOf(shaped["example.org/shop"])).To(Equal(triggerOutcome{HeadVersion: 2, ReusedFiles: 1}),
+				"a sibling export change re-keys shop, whose file renders the document it had")
 			Expect(*loads).To(Equal(5))
 			before, after := loadSnapshot(database, first["example.org/shop"].SnapshotID), loadSnapshot(database, shaped["example.org/shop"].SnapshotID)
 			Expect([]string{after.ContentSetHash, after.ConfigurationHash}).To(Equal([]string{before.ContentSetHash, before.ConfigurationHash}))
