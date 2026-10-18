@@ -137,16 +137,17 @@ var _ = Describe("DiffPatch", func() {
 		}))
 	})
 
-	DescribeTable("reports only the row classes its change types match, counting the rest as hidden",
-		func(ctx SpecContext, changeTypes ChangeTypes, shown []string, hidden int) {
+	DescribeTable("reports only the row classes its change types match, omitting files left without a row",
+		func(ctx SpecContext, changeTypes ChangeTypes, shown []string, hidden, hiddenFiles int) {
 			repo := newPatchRepository()
 			result, err := DiffPatch(ctx, PatchOptions{
 				Patch: strings.NewReader(patchOf(repo, "HEAD~1")), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll, ChangeTypes: changeTypes,
 			})
 			Expect(err).To(Succeed())
 			var rows []string
-			hiddenRows := 0
+			hiddenRows, omitted := 0, 0
 			for _, pkg := range result.Packages {
+				omitted += pkg.HiddenFiles
 				for _, file := range pkg.Files {
 					hiddenRows += file.HiddenRows
 					for _, row := range file.Rows {
@@ -154,16 +155,62 @@ var _ = Describe("DiffPatch", func() {
 					}
 				}
 			}
-			Expect([]any{result.ChangeTypes, rows, hiddenRows}).To(Equal([]any{changeTypes, shown, hidden}))
+			Expect([]any{result.ChangeTypes, rows, hiddenRows, omitted}).To(Equal([]any{changeTypes, shown, hidden, hiddenFiles}))
 		},
+		// The README's package has no file left, so it is omitted with its hidden file.
 		Entry("moved only, on both files", ChangeTypes{"moved"},
-			[]string{"calc/new_name.go moved Helper", "calc/old_name.go moved Helper"}, 6),
+			[]string{"calc/new_name.go moved Helper", "calc/old_name.go moved Helper"}, 0, 1),
 		Entry("everything but added and removed", ChangeTypes{"!added", "!removed"},
 			[]string{"calc/calc.go body Add", "calc/calc.go structure Point", "calc/calc.go signature Point.y", "calc/calc.go signature Scale",
-				"calc/new_name.go moved Helper", "calc/old_name.go moved Helper"}, 2),
+				"calc/new_name.go moved Helper", "calc/old_name.go moved Helper"}, 2, 0),
 		Entry("a wildcard", ChangeTypes{"s*"},
-			[]string{"calc/calc.go structure Point", "calc/calc.go signature Point.y", "calc/calc.go signature Scale"}, 5),
+			[]string{"calc/calc.go structure Point", "calc/calc.go signature Point.y", "calc/calc.go signature Scale"}, 3, 2),
 	)
+
+	It("pairs a symbol moved to another package when it is the only candidate and its shape differs only by the move", func(ctx SpecContext) {
+		repo := newRepository()
+		repo.write(map[string]*string{
+			"go.mod": text("module " + patchModule + "\n\ngo 1.26\n"),
+			"app/app.go": text(lines("package app", "", `import "`+patchModule+`/models"`, "",
+				"func Pure(a, b int) int { return a + b }", "", "func Retyped(item models.Item) int { return item.N }", "", "func Twin() int { return 1 }")),
+			"models/models.go": text(lines("package models", "", "type Item struct{ N int }")),
+		})
+		repo.commit("before")
+		repo.write(map[string]*string{
+			"app/app.go": text(lines("package app", "", "func Keep() int { return 0 }")),
+			"models/models.go": text(lines("package models", "", "type Item struct{ N int }", "",
+				"func Pure(a, b int) int { return a + b }", "", "func Retyped(item Item) int { return item.N }", "", "func Twin() int { return 1 }")),
+			"other/other.go": text(lines("package other", "", "func Twin() int { return 1 }")),
+		})
+		repo.commit("after")
+		patch := patchOf(repo, "HEAD~1")
+
+		all, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(patch), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll})
+		Expect(err).To(Succeed())
+		moved, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(patch), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll, ChangeTypes: ChangeTypes{"moved"}})
+		Expect(err).To(Succeed())
+
+		Expect(patchRows(all)).To(Equal([]patchRow{
+			{Path: "app/app.go", Class: "added", Name: "Keep", Visibility: "exported", ShapeAfter: "method public () ( (int))"},
+			{Path: "app/app.go", Class: "moved", Name: "Pure", Visibility: "exported", PathBefore: "app/app.go", MovedAway: true},
+			{
+				Path: "app/app.go", Class: "signature", Name: "Retyped", Visibility: "exported", PathBefore: "app/app.go", MovedAway: true,
+				ShapeBefore: "method public (item (models.Item)) ( (int))", ShapeAfter: "method public (item (Item)) ( (int))",
+			},
+			{Path: "app/app.go", Class: "removed", Name: "Twin", Visibility: "exported", ShapeBefore: "method public () ( (int))", PathBefore: "app/app.go"},
+			{Path: "models/models.go", Class: "moved", Name: "Pure", Visibility: "exported", PathBefore: "app/app.go"},
+			{
+				Path: "models/models.go", Class: "signature", Name: "Retyped", Visibility: "exported", PathBefore: "app/app.go",
+				ShapeBefore: "method public (item (models.Item)) ( (int))", ShapeAfter: "method public (item (Item)) ( (int))",
+			},
+			{Path: "models/models.go", Class: "added", Name: "Twin", Visibility: "exported", ShapeAfter: "method public () ( (int))"},
+			{Path: "other/other.go", Class: "added", Name: "Twin", Visibility: "exported", ShapeAfter: "method public () ( (int))"},
+		}))
+		Expect(patchRows(moved)).To(Equal([]patchRow{
+			{Path: "app/app.go", Class: "moved", Name: "Pure", Visibility: "exported", PathBefore: "app/app.go", MovedAway: true},
+			{Path: "models/models.go", Class: "moved", Name: "Pure", Visibility: "exported", PathBefore: "app/app.go"},
+		}))
+	})
 
 	It("refuses a change type that names no class", func(ctx SpecContext) {
 		repo := newPatchRepository()

@@ -57,6 +57,11 @@ func (pkg PackageDiff) tree(stat bool) api.TextTree {
 	if stat && pkg.Lines != nil {
 		label = label.Append("  ").Add(lineCountText(pkg.Lines))
 	}
+	if pkg.HiddenFiles == 1 {
+		label = label.Append("  (1 hidden file)", uir.StyleMuted)
+	} else if pkg.HiddenFiles > 1 {
+		label = label.Append(fmt.Sprintf("  (%d hidden files)", pkg.HiddenFiles), uir.StyleMuted)
+	}
 	children := make([]api.TextTree, 0, len(pkg.Files))
 	for _, file := range pkg.Files {
 		children = append(children, file.tree(stat))
