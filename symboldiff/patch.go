@@ -54,10 +54,11 @@ type SourceLocator interface {
 type PatchOptions struct {
 	Patch io.Reader
 	// From is the commit the patch's old side was taken from, when known; empty names it patch:old.
-	From       string
-	Locator    SourceLocator
-	Visibility Visibility
-	Stat       bool
+	From        string
+	Locator     SourceLocator
+	Visibility  Visibility
+	ChangeTypes ChangeTypes
+	Stat        bool
 }
 
 // DiffPatch compares the two sides of a git patch symbol by symbol, without an index: each side's bytes
@@ -65,6 +66,10 @@ type PatchOptions struct {
 // alone, so every row is marked syntax; the root is the locator's root key.
 func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 	visibility, err := ParseVisibility(string(options.Visibility))
+	if err != nil {
+		return Result{}, err
+	}
+	changeTypes, err := ParseChangeTypes(options.ChangeTypes)
 	if err != nil {
 		return Result{}, err
 	}
@@ -91,7 +96,7 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{RootKey: rootKey, From: Side{Commit: PatchOld}, To: Side{Commit: PatchNew}, Visibility: visibility, Stat: options.Stat}
+	result := Result{RootKey: rootKey, From: Side{Commit: PatchOld}, To: Side{Commit: PatchNew}, Visibility: visibility, ChangeTypes: changeTypes, Stat: options.Stat}
 	if options.From != "" {
 		result.From.Commit = options.From
 	}
@@ -105,7 +110,7 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 		lines := attributeLines(ctx, files, pairings, inline, inline)
 		attribution = &lines
 	}
-	rows, err := buildRows(pairings, attribution, markers, visibility, TokenizerGo)
+	rows, err := buildRows(pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, TokenizerGo)
 	if err != nil {
 		return Result{}, err
 	}

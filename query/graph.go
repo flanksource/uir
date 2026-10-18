@@ -11,6 +11,7 @@ import (
 	"github.com/flanksource/uir/graph"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
+	"github.com/google/uuid"
 )
 
 // GraphOptions select the root of a call graph and bound it: a function or method, or a data symbol
@@ -34,7 +35,10 @@ type GraphOptions struct {
 	// Access are the edge types the graph follows: call (with the dispatches a call reaches), read
 	// and write. None takes DefaultGraphAccess.
 	Access []uir.RelationshipType
-	Scope  ModuleScopeOptions
+	// Since, when set, makes the graph a change query against an earlier snapshot of the root. It walks
+	// callees only, so a zero Direction takes graph.DirectionCallees and any other is refused.
+	Since *GraphSince
+	Scope ModuleScopeOptions
 }
 
 // DefaultGraphAccess is what a graph follows when no access is given: calls alone, so a graph of
@@ -54,6 +58,8 @@ type GraphResult struct {
 	Packages   []GraphPackage    `json:"packages"`
 	Stages     []ResolutionStage `json:"stages"`
 	Candidates []ModuleSymbol    `json:"candidates"`
+	// Since is the answer of a change query, absent from any other graph.
+	Since *GraphChanges `json:"since,omitempty"`
 }
 
 func invalidGraph(format string, arguments ...any) error {
@@ -64,6 +70,9 @@ func invalidGraph(format string, arguments ...any) error {
 
 // normalized fills in the defaults, validates the options, and parses the effective exclusions.
 func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) {
+	if options.Since != nil && options.Direction == "" {
+		options.Direction = graph.DirectionCallees
+	}
 	if options.Direction == "" {
 		options.Direction = graph.DirectionBoth
 	}
@@ -102,6 +111,10 @@ func (options GraphOptions) validate() error {
 		return invalidGraph("the node limit of a call graph is Limit, not the scope's row limit")
 	case options.Scope.Location != "" && options.Scope.SnapshotID != "":
 		return invalidGraph("location and snapshot selectors are mutually exclusive")
+	case options.Since != nil && options.Direction != graph.DirectionCallees:
+		return invalidGraph("a change query walks callees from the root, not %s", options.Direction)
+	case options.Since != nil && options.Since.SnapshotID == uuid.Nil:
+		return invalidGraph("a change query requires the snapshot to compare against")
 	}
 	for _, access := range options.Access {
 		if !slices.Contains(graphAccessTypes, access) {
@@ -146,7 +159,13 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 		result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: "no indexed snapshot to resolve in"})
 		return result, nil
 	}
-	result, built, err := session.resolveGraph(ctx, selection, coverage, graphBuild{options: options, exclusions: exclusions}, result, clock)
+	request := graphBuild{options: options, exclusions: exclusions}
+	if options.Since != nil {
+		if request.since, err = session.sinceSides(ctx, *options.Since, selection.scopes); err != nil {
+			return GraphResult{}, err
+		}
+	}
+	result, built, err := session.resolveGraph(ctx, selection, coverage, request, result, clock)
 	if err != nil || !built {
 		return result, err
 	}
@@ -191,6 +210,7 @@ type graphBuild struct {
 	root       ModuleSymbol
 	options    GraphOptions
 	exclusions graphExclusions
+	since      *sinceSides
 }
 
 func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, request graphBuild, result GraphResult) (GraphResult, error) {
@@ -216,6 +236,12 @@ func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, r
 			"%d sources unreadable, their call sites carry no guards; %s: %v", len(unreadable), unreadable[0], reader.unreadable[unreadable[0]])})
 	}
 	result.Stages = append(result.Stages, ResolutionStage{Name: "graph", Value: fmt.Sprintf("%d nodes, %d edges", len(built.Nodes), len(built.Edges))})
+	if request.since != nil {
+		if result.Since, err = pipeline.graphChanges(ctx, request.since, built, source.packageFacts); err != nil {
+			return GraphResult{}, err
+		}
+		result.Stages = append(result.Stages, sinceStage(result.Since, built))
+	}
 	return result, nil
 }
 
