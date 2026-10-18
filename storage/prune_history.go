@@ -37,8 +37,8 @@ func (HistoryPrune) TableName() string { return "history_prunes" }
 
 // PruneHistory deletes, in one transaction, a root's snapshots older than its newest keep and every row
 // only they used. It keeps every location head, and every snapshot a surviving snapshot's dependency
-// targets, whatever its age. A kept snapshot whose base it deletes is rebased: it gets a source and
-// symbol delta for every path and symbol it serves, and no base, so it serves exactly what it served
+// targets, whatever its age. A kept snapshot whose base it deletes is rebased: it gets a source,
+// document, and symbol delta for every path and symbol it serves, and no base, so it serves exactly what it served
 // before. Then the root's documents no kept snapshot activates go with their postings, the root's source
 // revisions no remaining delta or document names, the source blobs no remaining revision of any root
 // has, and the symbols no remaining posting or symbol delta names and no remaining symbol is owned by.
@@ -82,7 +82,11 @@ type prunePlan struct {
 type rebasedSnapshot struct {
 	snapshot ModuleSnapshot
 	sources  map[string]SourceRevision
-	symbols  []EffectiveSymbol
+	// documents is the snapshot's path → document ordinal membership.
+	documents map[string]int64
+	symbols   []EffectiveSymbol
+	// implements are the snapshot's effective implements facts, nil when it predates them.
+	implements []ImplementsPair
 }
 
 func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, options HistoryPruneOptions) (prunePlan, error) {
@@ -173,8 +177,9 @@ func (plan *prunePlan) readKept(ctx context.Context, tx *gorm.DB) error {
 		if err != nil {
 			return err
 		}
-		for _, document := range active {
-			plan.live[document.Document.ID] = true
+		documents := make(map[string]int64, len(active))
+		for path, document := range active {
+			plan.live[document.Document.ID], documents[path] = true, document.Document.Ordinal
 		}
 		if snapshot.BaseSnapshotID == nil || !deleted[*snapshot.BaseSnapshotID] {
 			continue
@@ -187,7 +192,12 @@ func (plan *prunePlan) readKept(ctx context.Context, tx *gorm.DB) error {
 		if err != nil {
 			return err
 		}
-		plan.rebase = append(plan.rebase, rebasedSnapshot{snapshot: snapshot, sources: sources, symbols: symbols})
+		// A snapshot that predates implements facts has no implements deltas, so there are none to rebase.
+		implements, err := EffectiveImplements(ctx, tx, snapshot.ID, ImplementsFilter{})
+		if err != nil && !errors.Is(err, ErrNoImplementsFacts) {
+			return err
+		}
+		plan.rebase = append(plan.rebase, rebasedSnapshot{snapshot: snapshot, sources: sources, documents: documents, symbols: symbols, implements: implements})
 	}
 	return nil
 }

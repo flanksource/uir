@@ -61,6 +61,9 @@ func OpenReadOnly(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if err := database.WithContext(ctx).Raw("SELECT COUNT(*) FROM symbols WHERE 1 = 0").Scan(&count).Error; err != nil {
 		return nil, errors.Join(fmt.Errorf("UIR index schema is unavailable: %w", err), closeDatabase(database))
 	}
+	if err := requireDocumentMembership(ctx, database); err != nil {
+		return nil, errors.Join(err, closeDatabase(database))
+	}
 	return database, nil
 }
 

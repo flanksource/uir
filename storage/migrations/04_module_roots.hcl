@@ -239,6 +239,7 @@ table "snapshots" {
   unique "snapshots_root_id_id_key" { columns = [column.root_id, column.id] }
   unique "snapshots_location_id_id_key" { columns = [column.location_id, column.id] }
   unique "snapshots_ordinal_key" { columns = [column.ordinal] }
+  unique "snapshots_root_id_ordinal_key" { columns = [column.root_id, column.ordinal] }
   index "snapshots_location_started_idx" { columns = [column.location_id, column.started_at] }
   index "snapshots_base_idx" { columns = [column.base_snapshot_id] }
   index "snapshots_root_revision_idx" { columns = [column.root_id, column.revision] }

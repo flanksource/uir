@@ -130,6 +130,14 @@ table "documents" {
     type = bigint
     null = false
   }
+  // content_digest is storage.DocumentDigest: the document's key within its root and path. It is null
+  // only on a document a database published before document membership whose digest an earlier
+  // document of its path already holds; snapshots still bind it by ordinal, and no publication selects
+  // it by digest. input_hash stays as provenance: the package input hash the document was rendered under.
+  column "content_digest" {
+    type = text
+    null = true
+  }
 
   primary_key { columns = [column.id] }
   foreign_key "documents_root_id_fkey" {
@@ -145,7 +153,8 @@ table "documents" {
     on_delete   = NO_ACTION
   }
   unique "documents_root_id_id_key" { columns = [column.root_id, column.id] }
-  unique "documents_root_id_path_key_input_hash_key" { columns = [column.root_id, column.path_key, column.input_hash] }
+  unique "documents_root_id_path_key_content_digest_key" { columns = [column.root_id, column.path_key, column.content_digest] }
+  unique "documents_root_id_path_key_ordinal_key" { columns = [column.root_id, column.path_key, column.ordinal] }
   unique "documents_ordinal_key" { columns = [column.ordinal] }
   index "documents_source_idx" { columns = [column.source_revision_id] }
   check "documents_ordinal_check" { expr = "ordinal >= 1" }

@@ -10,8 +10,12 @@ import (
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-// DocumentFormatVersion is the version of DocumentContent written to documents.content.
-const DocumentFormatVersion = 5
+// DocumentFormatVersion is the version of DocumentContent written to documents.content. Format 6 moved
+// implements out of documents into snapshot-level implements facts (EffectiveImplements).
+const DocumentFormatVersion = 6
+
+// snapshotImplementsFormat is the first document format whose symbols carry no implements entries.
+const snapshotImplementsFormat = 6
 
 // Range is [start_line, start_utf16_column, end_line, end_utf16_column], one-based.
 type Range [4]int
@@ -36,7 +40,8 @@ type DocumentContent struct {
 // struct) has an identifier but no child slot or payload, and the explorer does not list it. Shape is the
 // private shape text (the full declared structure) and PublicShape the part a consumer outside the
 // symbol's visibility boundary observes; PublicHash, PrivateHash, and ContentHash are the three layered
-// hashes (docs/symbol-index-storage.md#hashes-and-identities).
+// hashes (docs/symbol-index-storage.md#hashes-and-identities). Implements is only present in documents
+// older than format 6; no reader consults it, since implements facts are snapshot-level now.
 type DocumentSymbol struct {
 	Props        map[string]any `json:"props,omitempty"`
 	ID           *string        `json:"id"`

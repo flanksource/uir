@@ -27,8 +27,13 @@ type Symbol struct {
 
 func (Symbol) TableName() string { return "symbols" }
 
-// Document holds the facts extracted from one file version under one package input hash. Ordinal is
-// its dense, database-local number (from 1) that postings reference.
+// Document holds the facts extracted from one file version. It is immutable and content-addressed:
+// ContentDigest (DocumentDigest) keys it within its root and path, so snapshots whose package inputs
+// differ but whose rendering of the file is identical share it, its ordinal, and its postings. InputHash
+// is provenance, the package input hash it was first rendered under; snapshots bind documents through
+// document deltas, never by input hash. ContentDigest is nil only on a pre-membership duplicate (see
+// 18_document_membership.hcl). Ordinal is its dense, database-local number (from 1) that postings and
+// document deltas reference.
 type Document struct {
 	ID               uuid.UUID `gorm:"column:id;primaryKey"`
 	RootID           uuid.UUID `gorm:"column:root_id"`
@@ -42,9 +47,33 @@ type Document struct {
 	OccurrenceCount  int       `gorm:"column:occurrence_count"`
 	Content          JSON      `gorm:"column:content"`
 	Ordinal          int64     `gorm:"column:ordinal"`
+	ContentDigest    *string   `gorm:"column:content_digest"`
 }
 
 func (Document) TableName() string { return "documents" }
+
+// DocumentDelta is one change of a snapshot's path → document membership against its base: a set
+// binding the path to a document by ordinal, or a delete tombstone for a path only the base served.
+type DocumentDelta struct {
+	SnapshotOrdinal int64           `gorm:"column:snapshot_ordinal;primaryKey;autoIncrement:false"`
+	RootID          uuid.UUID       `gorm:"column:root_id"`
+	PathKey         string          `gorm:"column:path_key;primaryKey"`
+	DocumentOrdinal *int64          `gorm:"column:document_ordinal"`
+	Operation       SourceOperation `gorm:"column:operation"`
+}
+
+func (DocumentDelta) TableName() string { return "document_deltas" }
+
+// DocumentMembership is the one row recording the document membership cutover; see
+// 18_document_membership.hcl.
+type DocumentMembership struct {
+	ID              int32 `gorm:"column:id;primaryKey;autoIncrement:false"`
+	DigestedThrough int64 `gorm:"column:digested_through"`
+	MembersThrough  int64 `gorm:"column:members_through"`
+	Complete        bool  `gorm:"column:complete"`
+}
+
+func (DocumentMembership) TableName() string { return "document_membership" }
 
 // PostingRole is the stored code of a posting's role.
 type PostingRole int32
@@ -120,7 +149,32 @@ type SymbolDelta struct {
 
 func (SymbolDelta) TableName() string { return "symbol_deltas" }
 
-// PackageCoverage records, per snapshot, the input hash that selects each package's documents.
+// ImplementsDelta is one change of a snapshot's implements facts against its base: a set when a type
+// the snapshot declares satisfies the interface and the base's facts lack the pair, or a delete
+// tombstone for a pair only the base's facts hold.
+type ImplementsDelta struct {
+	SnapshotOrdinal int64           `gorm:"column:snapshot_ordinal;primaryKey;autoIncrement:false"`
+	RootOrdinal     int32           `gorm:"column:root_ordinal"`
+	TypeHandle      int64           `gorm:"column:type_handle;primaryKey;autoIncrement:false"`
+	InterfaceHandle int64           `gorm:"column:interface_handle;primaryKey;autoIncrement:false"`
+	Operation       SourceOperation `gorm:"column:operation"`
+}
+
+func (ImplementsDelta) TableName() string { return "implements_deltas" }
+
+// ImplementsFacts marks a snapshot whose implements facts were computed, with the number of pairs its
+// effective facts hold.
+type ImplementsFacts struct {
+	SnapshotOrdinal int64 `gorm:"column:snapshot_ordinal;primaryKey;autoIncrement:false"`
+	RootOrdinal     int32 `gorm:"column:root_ordinal"`
+	PairCount       int64 `gorm:"column:pair_count"`
+}
+
+func (ImplementsFacts) TableName() string { return "implements_facts" }
+
+// PackageCoverage records, per snapshot, each package's analysis: the input hash its documents were
+// rendered under, its coverage, file count, and diagnostics. Document membership is recorded separately,
+// in document deltas.
 type PackageCoverage struct {
 	SnapshotID      uuid.UUID `gorm:"column:snapshot_id;primaryKey"`
 	RootID          uuid.UUID `gorm:"column:root_id"`
