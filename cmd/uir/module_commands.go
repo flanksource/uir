@@ -380,25 +380,39 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 }
 
 func populateQueryUsage(ctx context.Context, pipeline *query.Pipeline, rows []moduleQueryRow) error {
-	linesByFile := map[string][]string{}
-	for index := range rows {
-		row := &rows[index]
+	var snapshots []string
+	paths, requested := map[string][]string{}, map[string]bool{}
+	for _, row := range rows {
 		if row.Line == nil {
 			if row.Kind == "module" || row.Kind == "package" {
 				continue
 			}
 			return fmt.Errorf("query match %s in %s has no source line", row.Symbol, row.Path)
 		}
-		key := row.SnapshotID + "\x00" + row.Path
-		lines, found := linesByFile[key]
-		if !found {
-			source, err := pipeline.ReadModuleSource(ctx, row.SnapshotID, row.Path)
-			if err != nil {
-				return fmt.Errorf("read usage of %s at %s: %w", row.Symbol, row.Source, err)
-			}
-			lines = strings.Split(source.Content, "\n")
-			linesByFile[key] = lines
+		if _, found := paths[row.SnapshotID]; !found {
+			snapshots = append(snapshots, row.SnapshotID)
 		}
+		if key := row.SnapshotID + "\x00" + row.Path; !requested[key] {
+			requested[key] = true
+			paths[row.SnapshotID] = append(paths[row.SnapshotID], row.Path)
+		}
+	}
+	linesByFile := map[string][]string{}
+	for _, snapshot := range snapshots {
+		sources, err := pipeline.ReadModuleSources(ctx, query.ModuleSourcesOptions{SnapshotID: snapshot, Paths: paths[snapshot]})
+		if err != nil {
+			return fmt.Errorf("read the usage lines of query matches: %w", err)
+		}
+		for _, source := range sources {
+			linesByFile[snapshot+"\x00"+source.Path] = strings.Split(source.Content, "\n")
+		}
+	}
+	for index := range rows {
+		row := &rows[index]
+		if row.Line == nil {
+			continue
+		}
+		lines := linesByFile[row.SnapshotID+"\x00"+row.Path]
 		if *row.Line < 1 || *row.Line > len(lines) {
 			return fmt.Errorf("query match %s at %s has line %d outside source with %d lines", row.Symbol, row.Source, *row.Line, len(lines))
 		}
