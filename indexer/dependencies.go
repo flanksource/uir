@@ -23,6 +23,12 @@ type selectedModule struct {
 	Replace *selectedModule `json:"Replace"`
 }
 
+// The unresolved reasons module selection itself decides; the dependency set hash covers their text.
+const (
+	reasonSelectedNotIndexed  = "snapshot for selected module is not indexed"
+	reasonAbsentFromBuildList = "module is absent from the selected Go build list"
+)
+
 type dependencyObservation struct {
 	Edge             storage.SnapshotDependency
 	LocalDir         string
@@ -69,11 +75,11 @@ func readDependencies(ctx context.Context, root discoveredRoot) ([]dependencyObs
 			if effective.Main || module.Replace != nil && effective.Version == "" {
 				observation.LocalDir = effective.Dir
 			}
-			observation.Edge.UnresolvedReason = "snapshot for selected module is not indexed"
+			observation.Edge.UnresolvedReason = reasonSelectedNotIndexed
 		} else if selectionError != "" {
 			observation.Edge.UnresolvedReason = selectionError
 		} else {
-			observation.Edge.UnresolvedReason = "module is absent from the selected Go build list"
+			observation.Edge.UnresolvedReason = reasonAbsentFromBuildList
 		}
 		if local, localErr := localDependency(root, manifest, workspace, uses, edge.ModulePath, edge.DeclaredVersion); localErr != nil {
 			return nil, localErr
