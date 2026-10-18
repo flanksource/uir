@@ -216,6 +216,14 @@ table "snapshots" {
     type = text
     null = true
   }
+  // Whether extracting the snapshot's commit under its configuration and dependency set again must
+  // reach the same coverage: every load error was a fact of the sources and the module versions they
+  // pin, not of the network, module cache or file system. Null only on rows published before it was
+  // recorded; those are not deterministic, so a degraded one is never reused without extracting.
+  column "coverage_deterministic" {
+    type = boolean
+    null = true
+  }
 
   primary_key { columns = [column.id] }
   foreign_key "snapshots_root_id_fkey" {
