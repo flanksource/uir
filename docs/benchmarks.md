@@ -96,7 +96,7 @@ After the history, a second checkout of the same commit (`git clone` of the fixt
 
 References return 10 rows with one head and 20 with two, with 1 and 2 declarations. Rows are not multiplied by declaration locations. Before the second head existed, the diff across 200 commits reported one row: `NewBufferedLogger body +200 -0`, under `logger/buffered.go +200 -0` and `(file scope) +0 -0`.
 
-After the second head was added, the same diff also lists `hack/check_uuid_hash.go` and `hack/repeat_test_flake.go` as removed. `<last>` now resolves to the clone's snapshot, the newest clean snapshot at that revision. commons lists `hack/` in `.gitignore`, so the rsync'd fixture has those files on disk and the clone does not. Both checkouts report `worktree_state = clean`, because `git status --porcelain` omits ignored files, but discovery indexes them. This is a real defect: `clean` does not currently guarantee that a snapshot's bytes are the commit's bytes (see [Follow-ups](#follow-ups)).
+After the second head was added, the same diff also lists `hack/check_uuid_hash.go` and `hack/repeat_test_flake.go` as removed. `<last>` now resolves to the clone's snapshot, the newest clean snapshot at that revision. commons lists `hack/` in `.gitignore`, so the rsync'd fixture has those files on disk and the clone does not. At the time of this benchmark, both checkouts reported `worktree_state = clean`, because `git status --porcelain` omitted ignored files while discovery indexed them. Discovery now excludes Git-ignored files; these are historical benchmark results.
 
 The spread between runs of one query is host noise; the floor for every operation is about 0.6 s, of which process start, opening the database and one membership derivation per head are the bulk.
 
@@ -384,7 +384,7 @@ These are proposed, not implemented; each lies outside this step's scope.
 
 - **Content-free membership** (`storage/active_documents.go`). Select `documents` without `content` in `ActiveDocuments`, and load `content` for the selected ids only, in `query/module_index.go` (`indexContext.document`) and `symboldiff`. Partly landed with compact handles (2026-09-27): `ActiveDocuments` takes `ActiveDocumentOptions{Content}` and `symboldiff` reads membership without content, loading the documents it needs with `DocumentContents`; the query layer still passes `Content: true`.
 - **Consumed sibling shapes** (storage schema). Landed; see [Consumed sibling shapes](#consumed-sibling-shapes).
-- **Ignored files and `clean`** (`indexer/discovery.go`). Either skip Git-ignored `.go` files in discovery, or count them as making the worktree `dirty`, so that `clean` implies commit bytes.
+- **Ignored files and `clean`** (`indexer/discovery.go`). Discovery skips Git-ignored `.go` files, so they cannot appear in a clean snapshot.
 - **Per-document symbol table** and the **per-file input hash**, from [Document size](#document-size).
 - **Compact symbol handles and symbol deltas.** [symbol-compact-ids.md](symbol-compact-ids.md) measures bit-packed 64-bit handles and per-snapshot symbol deltas on SQLite and PostgreSQL. With handles, postings shrink 3–7×, the database 16–22 %, and query fixtures run 15–29 % faster. Landed 2026-09-27; the plans above predate it and show the earlier `(symbol_id, role, root_id)` posting key.
 
