@@ -86,6 +86,7 @@ func rootRows(database *gorm.DB, rootKey string) map[string]int64 {
 	count("documents", "root_id = ?", root.ID)
 	count("source_revisions", "root_id = ?", root.ID)
 	count("source_deltas", "root_id = ?", root.ID)
+	count("document_deltas", "root_id = ?", root.ID)
 	count("symbol_postings", "root_ordinal = ?", root.Ordinal)
 	count("symbol_deltas", "root_ordinal = ?", root.Ordinal)
 	count("symbols", "module_key = ?", rootKey)
@@ -160,6 +161,7 @@ var _ = Describe("pruning a root's history", func() {
 			Expect(after["source_revisions"]).To(Equal(int64(len(headBefore.sources))), "only the head's source revisions are left")
 			Expect(after["source_deltas"]).To(Equal(int64(len(headBefore.sources))), "the head, rebased, sets every path itself")
 			Expect(after["symbol_deltas"]).To(Equal(int64(len(headBefore.symbols))), "the head, rebased, sets every symbol itself")
+			Expect(after["document_deltas"]).To(Equal(int64(len(headBefore.documents))), "the head, rebased, binds every path itself")
 			Expect([]int64{result.Documents, result.SourceRevisions, result.Symbols}).To(Equal([]int64{
 				insuranceBefore["documents"] - after["documents"], insuranceBefore["source_revisions"] - after["source_revisions"],
 				insuranceBefore["symbols"] - after["symbols"],

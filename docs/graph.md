@@ -5,7 +5,7 @@
 ## Command
 
 ```sh
-uir graph <selector> [--direction callees|callers|both] [--depth <n>] [--limit <n>] [--exclude <patterns>] [--root <module>] [--location <checkout>] [--snapshot <uuid>] [--all]
+uir graph <selector> [--direction callees|callers|both] [--depth <n>] [--limit <n>] [--exclude <patterns>] [--root <module>] [--location <checkout>] [--snapshot <uuid>] [--all] [--since <rev> [--since-snapshot <uuid>]]
 uir graph --symbol <id> [...]
 ```
 
@@ -19,8 +19,10 @@ uir graph --symbol <id> [...]
 | `--exclude` | Comma-separated [package patterns](#excluding-packages) whose nodes the graph leaves out. The default is `std,builtin,gorm.io/...`; `none` excludes nothing. |
 | `--root`, `--location`, `--snapshot` | The snapshots to read, as for [`uir query`](query.md). With none, the checkout enclosing the working directory, else the primary head of every indexed root. `--location` and `--snapshot` are mutually exclusive. |
 | `--all` | Every indexed root instead of the current checkout. Cannot be combined with `--root`, `--location`, or `--snapshot`. |
+| `--since` | A revision to compare against, which makes the graph a [change query](#changes-since-a-revision). |
+| `--since-snapshot` | A snapshot UUID to use for `--since` instead of its newest clean snapshot, as `uir diff --snapshot-from` does. |
 
-The command is a Clicky operation: `--format json` and `--format yaml` print the envelope below, and the default format prints a tree. `uir serve` exposes it as `GET /api/v1/modules/graph` with the same options as query parameters (`selector`, `symbol`, `direction`, `depth`, `limit`, `exclude`, `root`, `location`, `snapshot`); `exclude` is one comma list, `exclude=std,gorm.io/...`.
+The command is a Clicky operation: `--format json` and `--format yaml` print the envelope below, and the default format prints a tree. `uir serve` exposes it as `GET /api/v1/modules/graph` with the same options as query parameters (`selector`, `symbol`, `direction`, `depth`, `limit`, `exclude`, `root`, `location`, `snapshot`, `since`, `since-snapshot`); `exclude` is one comma list, `exclude=std,gorm.io/...`.
 
 ```sh
 uir graph example.org/service/orders.Submit --direction both --depth 2
@@ -58,6 +60,7 @@ The root is one function or method. A selector that matches exactly one is drawn
 | `packages` | Every package the walk reached, drawn or excluded: `path`, `external`, `nodes`, and `excluded`. |
 | `stages` | How the request was resolved: the scope, the index coverage, the root, and the size of the graph. |
 | `candidates` | The functions and methods an ambiguous selector matched. |
+| `since` | The answer of a [change query](#changes-since-a-revision); absent without `--since`. |
 
 A node's `location` is where the symbol is declared: `root_key`, `checkout_path`, `snapshot_id`, `source_id`, `path`, `line`, `column`, and `identity_key`. `source_id` and `identity_key` together are the id of the same declaration in `GET /api/v1/modules/browse` (`<source_id>:<identity_key>`). A symbol declared outside the selected snapshots, such as `fmt.Errorf`, has no location. A symbol declared more than once, such as a function with one declaration per build tag, is located at the first by path, and `properties.declarations` counts them.
 
@@ -126,6 +129,43 @@ The graph is breadth-first from the root, to `depth` calls and `limit` nodes.
 Only the selected snapshots contribute edges. Callers in a module that is not indexed are absent, and dispatch reaches only the implementations in the selected snapshots. The `stages` entry named `coverage` reports packages that are partially indexed; a call graph over them is incomplete in the same way a [query](query.md#results-and-limits) is.
 
 `uir graph <symbol> --direction callers --depth N` and `uir query '<symbol> <<N'` walk the same caller edges. The query returns rows with a depth and fails beyond 10000 symbols; the graph returns nodes, edges, and guards, and truncates at `--limit`.
+
+## Changes since a revision
+
+`--since <rev>` asks whether anything in the root's call graph changed between `<rev>` and the selected snapshot. The revision resolves in the root's registered checkouts as one side of [`uir diff`](diff.md) does, and selects that commit's newest clean snapshot (or `--since-snapshot`). The scope must hold exactly one snapshot of the same root, indexed under the same configuration hash. The walk is the ordinary graph walk over callees: `--direction` defaults to `callees` and any other direction is an `invalid_query` error.
+
+```sh
+uir graph example.org/chain.A --since v1.4.0 --depth 6
+```
+
+```text
+ƒ A example.org/chain chain.go:11
+├── callees
+│   ├── ƒ B chain.go:12
+│   │   ╰── ƒ C changed: body chain.go:16
+│   ╰── ...
+╰── changed since v1.4.0
+    ╰── body C: A → B → C
+```
+
+The changed set is computed from `storage.EffectiveSymbols` of both snapshots, by symbol handle: a symbol that is new is `added`, one whose public fingerprint differs `signature`, private fingerprint `structure`, content fingerprint `body`, and one that is gone `removed` (counted, but never a node of the newer graph). A node of a module-cache dependency whose selection in `snapshot_dependencies` changed (selected version, replacement, or resolved target snapshot) is `dependency-version`, because dependencies have no per-symbol facts. When the walk reached such a dependency only through packages the exclusions leave out, the dependency is listed with `excluded: true`; rerun with `--exclude none` to see where it is entered.
+
+| `since` field | Meaning |
+| --- | --- |
+| `revision`, `from_snapshot_id`, `to_snapshot_id` | What was compared. |
+| `changed` | True when a drawn node changed, or a changed dependency was reached through an excluded package. |
+| `nodes` | Each changed drawn node: `id`, `reason`, `module` (for `dependency-version`), and `path`, the node ids of a shortest walk from the root, root first. |
+| `symbols` | The root's changed symbols counted by reason, reached or not. |
+| `dependencies` | Every dependency whose selection changed: `module`, `from`, `to`, `excluded`. |
+
+A `since` stage summarises the counts and says when the walk stopped at its depth or node limit.
+
+The answer is only as complete as the call edges the index records, so `changed: false` is not a proof. Known false negatives:
+
+- an implementation outside the import closure of the interface it satisfies gets no dispatch edge;
+- dispatch through generic or type-set interfaces is not recorded;
+- calls through method values, and through func-typed fields or variables, produce no call edge (they are `unresolved` nodes at best);
+- changes beyond `--depth` or `--limit`, behind an unresolved call, in another root of the scope, or in the Go toolchain's standard library are not reported.
 
 ## Custom sources
 
