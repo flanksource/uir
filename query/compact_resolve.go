@@ -201,11 +201,11 @@ func (index *compactIndex) prefetchOwners(ctx context.Context, rows []storage.Sy
 	return nil
 }
 
-// activeSymbols keeps the rows that a scope's active documents define, reference, or implement. The
-// rows a scope defines come from its snapshot's defined-symbol set (symbol deltas), which equals its
-// definition postings. A symbol no scope defines is still active through a reference or implements
-// posting, such as a dependency's function the scope only calls or an interface it only implements,
-// so those two roles are still read from postings, for the remaining rows only.
+// activeSymbols keeps the rows that a scope's active documents define or reference, or that a scope's
+// types implement. The rows a scope defines come from its snapshot's defined-symbol set (symbol
+// deltas), which equals its definition postings. A symbol no scope defines is still active through a
+// reference posting, such as a dependency's function the scope only calls, or through the scopes'
+// implements facts, such as an interface it only implements; those are read for the remaining rows only.
 func (index *compactIndex) activeSymbols(ctx context.Context, rows []storage.Symbol) ([]ModuleSymbol, error) {
 	if len(rows) == 0 {
 		return nil, nil
@@ -227,7 +227,7 @@ func (index *compactIndex) activeSymbols(ctx context.Context, rows []storage.Sym
 			undefined = append(undefined, row.ID)
 		}
 	}
-	postings, err := index.postings(ctx, undefined, "reference", "implements")
+	postings, err := index.postings(ctx, undefined, "reference")
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,19 @@ func (index *compactIndex) activeSymbols(ctx context.Context, rows []storage.Sym
 	for _, posting := range postings {
 		used[posting.symbol] = true
 	}
-	rows = slices.DeleteFunc(rows, func(row storage.Symbol) bool { return !defined[row.Handle] && !used[row.ID] })
+	var unused []int64
+	for _, row := range rows {
+		if !defined[row.Handle] && !used[row.ID] {
+			unused = append(unused, row.Handle)
+		}
+	}
+	implemented, err := index.implementedAnywhere(ctx, unused)
+	if err != nil {
+		return nil, err
+	}
+	rows = slices.DeleteFunc(rows, func(row storage.Symbol) bool {
+		return !defined[row.Handle] && !used[row.ID] && !implemented[row.Handle]
+	})
 	return index.convertSymbols(ctx, rows)
 }
 
