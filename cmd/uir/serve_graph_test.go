@@ -198,7 +198,8 @@ var _ = Describe("module call graph", func() {
 		Entry("a selector that names a type", url.Values{"selector": {"orders.Order"}}, http.StatusBadRequest, "invalid_query", "matched no function or method"),
 		Entry("a selector that matches nothing", url.Values{"selector": {"orders.Missing"}}, http.StatusNotFound, "symbol_not_found", "orders.Missing"),
 		Entry("a symbol id that is not indexed", url.Values{"symbol": {"0123456789abcdef"}}, http.StatusNotFound, "symbol_not_found", "0123456789abcdef"),
-	)
+		Entry("a since snapshot without since", url.Values{"selector": {"orders.Submit"}, "root": {ordersRoot}, "since-snapshot": {"11111111-1111-1111-1111-111111111111"}},
+			http.StatusBadRequest, "invalid_query", "since-snapshot overrides the snapshot of since"))
 
 	It("publishes the route once per parameter in the OpenAPI document", func() {
 		response := httptest.NewRecorder()
@@ -222,7 +223,7 @@ var _ = Describe("module call graph", func() {
 			Expect(parameter.In).To(Equal("query"), parameter.Name)
 			names = append(names, parameter.Name)
 		}
-		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "access", "root", "location", "snapshot", "all"))
+		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "access", "root", "location", "snapshot", "since", "since-snapshot", "all"))
 	})
 
 	It("takes the selector as the first argument in place of the flag", func(ctx SpecContext) {

@@ -120,6 +120,34 @@ var _ = Describe("module call graph rendering", func() {
 		}))
 	})
 
+	It("marks the changed nodes of a change query and lists the path to each and the changed dependencies", func() {
+		node := func(id string, depth, line int) graph.Node {
+			return graph.Node{ID: id, Kind: "func", Label: id, Group: "example.org/app", Depth: depth, Location: &graph.Location{Path: "app.go", Line: line}}
+		}
+		call := func(from, to string, line int) graph.Edge {
+			return graph.Edge{ID: from + "|" + to + "|call", From: from, To: to, Type: uir.RelationshipTypeCall, Sites: []graph.Site{{Path: "app.go", Line: line, Column: 2, Text: to + "()"}}}
+		}
+		result := moduleGraphResult{GraphResult: query.GraphResult{
+			Graph: graph.Graph{Roots: []string{"A"}, Nodes: []graph.Node{node("A", 0, 1), node("B", 1, 5), node("C", 2, 9)}, Edges: []graph.Edge{call("A", "B", 2), call("B", "C", 6)}},
+			Since: &query.GraphChanges{Revision: "v1", Changed: true,
+				Nodes:        []query.GraphChangedNode{{ID: "C", Reason: query.GraphChangeBody, Path: []string{"A", "B", "C"}}},
+				Dependencies: []query.GraphDependencyChange{{Module: "gorm.io/gorm", From: "v1.0.0", To: "v1.1.0", Excluded: true}},
+			},
+		}}
+		Expect(graphLines(result)).To(Equal([]string{
+			"ƒ A example.org/app app.go:1",
+			"├── callees",
+			"│   ╰── ƒ B app.go:2",
+			"│       ╰── ƒ C changed: body app.go:6",
+			"╰── changed since v1",
+			"    ├── body C: A → B → C",
+			"    ╰── dependency gorm.io/gorm v1.0.0 → v1.1.0, excluded from the walk",
+		}))
+
+		result.Since = &query.GraphChanges{Revision: "v1", Nodes: []query.GraphChangedNode{}, Dependencies: []query.GraphDependencyChange{}}
+		Expect(graphLines(result)[len(graphLines(result))-1]).To(Equal("╰── unchanged since v1"))
+	})
+
 	It("names the package of a callee outside the caller's, and summarises what the graph left out", func() {
 		root := graph.Node{ID: "root", Kind: "func", Label: "Run", Group: "example.org/app", Out: 4,
 			Location: &graph.Location{Path: "app.go", Line: 3}}

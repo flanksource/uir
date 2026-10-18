@@ -81,7 +81,8 @@ func newFileDiff(file changedFile, markers coverageMarkers) FileDiff {
 }
 
 // totalFile sums every row reported under the file, hidden ones included, plus its file scope. Any
-// row whose segments could not be read fails the file's counts with the reason.
+// row whose segments could not be read fails the file's counts with the reason. A moved-away row
+// counts under the file the symbol moved to, so it adds nothing here.
 func totalFile(diff *FileDiff, rows []reportedRow, attribution lineAttribution) {
 	if reason := attribution.failures[diff.Path]; reason != "" {
 		diff.LinesError = reason
@@ -90,6 +91,9 @@ func totalFile(diff *FileDiff, rows []reportedRow, attribution lineAttribution) 
 	scope := attribution.fileScope[diff.Path]
 	total := scope
 	for _, row := range rows {
+		if row.row.MovedAway {
+			continue
+		}
 		if reason := attribution.pairFailures[row.pair]; reason != "" {
 			diff.LinesError = reason
 			return

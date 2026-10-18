@@ -32,6 +32,10 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
+	changeTypes, err := ParseChangeTypes(options.ChangeTypes)
+	if err != nil {
+		return Result{}, err
+	}
 	scope, err := loadScope(ctx, database, options)
 	if err != nil {
 		return Result{}, err
@@ -54,7 +58,7 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{RootKey: scope.root.RootKey, From: before.info(), To: after.info(), Visibility: visibility, Stat: options.Stat, Packages: []PackageDiff{}}
+	result := Result{RootKey: scope.root.RootKey, From: before.info(), To: after.info(), Visibility: visibility, ChangeTypes: changeTypes, Stat: options.Stat, Packages: []PackageDiff{}}
 	var attribution *lineAttribution
 	var manifests []FileDiff
 	if options.Stat {
@@ -62,7 +66,7 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 			return Result{}, err
 		}
 	}
-	rows, err := buildRows(pairings, attribution, markers, visibility, scope.tokenizer())
+	rows, err := buildRows(pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, scope.tokenizer())
 	if err != nil {
 		return Result{}, err
 	}
@@ -202,7 +206,7 @@ func (markers coverageMarkers) ofPairing(pair *pairing) []string {
 }
 
 // reportedRow is a row with the pairing it describes, the file it is reported under, and whether the
-// visibility filter keeps it.
+// visibility and change-type filters keep it.
 type reportedRow struct {
 	row     Row
 	pair    *pairing
@@ -215,7 +219,7 @@ var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2
 
 // buildRows turns changed pairings into rows. With line counts, an unchanged pairing whose lines
 // differ (comments or layout inside the extent) is a body row saying so.
-func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, visibility Visibility, tokenizer Tokenizer) ([]reportedRow, error) {
+func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, filter rowFilter, tokenizer Tokenizer) ([]reportedRow, error) {
 	var rows []reportedRow
 	for _, pair := range pairings {
 		class, note := pair.class, ""
@@ -236,11 +240,16 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 			return nil, err
 		}
 		row.Lines, row.Note = count, note
-		reported, visible := pair.reported(), pair.visibleAs(visibility, class)
+		reported, visible := pair.reported(), pair.visibleAs(filter.visibility, class) && filter.changeTypes.shows(class)
 		if visible && !pair.shapesRead() {
 			return nil, fmt.Errorf("the %s row of %s in %q shows a shape whose document was not read", pair.class, row.DisplayName(), reported.file.path)
 		}
 		rows = append(rows, reportedRow{row: row, pair: pair, path: reported.file.path, pkg: reported.file.active.Source.PackagePath, visible: visible})
+		if pair.before != nil && pair.before.file.path != reported.file.path {
+			away := row
+			away.Lines, away.MovedAway = nil, true
+			rows = append(rows, reportedRow{row: away, pair: pair, path: pair.before.file.path, pkg: pair.before.file.active.Source.PackagePath, visible: visible})
+		}
 	}
 	groupRetypedPairs(rows, tokenizer)
 	sort.SliceStable(rows, func(i, j int) bool {

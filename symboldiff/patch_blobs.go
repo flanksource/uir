@@ -47,13 +47,24 @@ func NewGitLocator(ctx context.Context, directory string) (*GitLocator, error) {
 }
 
 func runGit(ctx context.Context, directory, stdin string, args ...string) ([]byte, error) {
-	command := gitCommand(ctx, directory, args...)
-	command.Stdin = strings.NewReader(stdin)
+	return gitRun{directory: directory, stdin: stdin}.output(ctx, args...)
+}
+
+// gitRun is one git process: the directory it runs in, its stdin, and environment added to the default.
+type gitRun struct {
+	directory, stdin string
+	env              []string
+}
+
+func (run gitRun) output(ctx context.Context, args ...string) ([]byte, error) {
+	command := gitCommand(ctx, run.directory, args...)
+	command.Stdin = strings.NewReader(run.stdin)
+	command.Env = append(command.Env, run.env...)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git %s in %q: %w: %s", strings.Join(args, " "), directory, err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("git %s in %q: %w: %s", strings.Join(args, " "), run.directory, err, strings.TrimSpace(stderr.String()))
 	}
 	return output, nil
 }

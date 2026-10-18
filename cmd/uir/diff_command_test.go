@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -165,6 +166,36 @@ var _ = Describe("uir diff", func() {
 		chdir(GinkgoT().TempDir())
 		_, err := runCLI(ctx, runtime, "diff", "HEAD~1..HEAD")
 		Expect(err).To(MatchError(ContainSubstring("--root is required")))
+	})
+
+	It("diffs a revision against the worktree of an unregistered repository, untracked files included, and refuses a range there", func(ctx SpecContext) {
+		workspace, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+		Expect(err).To(Succeed())
+		gitIn(workspace, "init", "--quiet", "--initial-branch=main")
+		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module "+diffRoot+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(workspace, "run.go"), []byte(diffBefore), 0o644)).To(Succeed())
+		gitIn(workspace, "add", "--all")
+		gitIn(workspace, "commit", "--quiet", "--message", "commit")
+		gitIn(workspace, "commit", "--quiet", "--allow-empty", "--message", "empty")
+		Expect(os.WriteFile(filepath.Join(workspace, "run.go"), []byte("package diffcli\n\nfunc helper() int { return 1 }\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(workspace, "moved.go"), []byte("package diffcli\n\nfunc Run(name string) string { return name }\n"), 0o644)).To(Succeed())
+		runtime := &commandRuntime{database: openCommandDatabase(ctx)}
+		chdir(workspace)
+
+		result := decodeDiff(ctx, runtime, "HEAD", "--untracked", "--visibility", "all", "--change-type", "moved")
+		var rows []string
+		for _, file := range result.Packages[0].Files {
+			for _, row := range file.Rows {
+				rows = append(rows, fmt.Sprintf("%s %s %s %s->%s away=%t", file.Path, row.Class, row.Name, row.PathBefore, row.PathAfter, row.MovedAway))
+			}
+		}
+		_, rangeErr := runCLI(ctx, runtime, "diff", "HEAD~1..HEAD")
+
+		Expect([]any{result.RootKey, result.To.Commit, result.ChangeTypes, rows}).To(Equal([]any{diffRoot, symboldiff.PatchWorktree, symboldiff.ChangeTypes{"moved"}, []string{
+			"moved.go moved Run run.go->moved.go away=false",
+			"run.go moved Run run.go->moved.go away=true",
+		}}))
+		Expect(rangeErr).To(MatchError(ContainSubstring(`--root is required for the range "HEAD~1..HEAD", which compares indexed snapshots`)))
 	})
 
 	It("prints the symbol diff of a worktree patch piped on stdin, without an index", func(ctx SpecContext) {

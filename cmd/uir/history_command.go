@@ -16,11 +16,12 @@ type historyOptions struct {
 }
 
 type historyShowOptions struct {
-	Commit       string `args:"true" required:"true"`
-	Root         string `flag:"root" help:"Registered Go module path; defaults to the module of the current checkout"`
-	Visibility   string `flag:"visibility" help:"Rows to report: exported, internal, or all" default:"all"`
-	Stat         bool   `flag:"stat" help:"Add line counts from hash-verified Git blobs" default:"true"`
-	IncludeTests bool   `flag:"include-tests" help:"Include Go test symbols when indexing historical commits"`
+	Commit       string   `args:"true" required:"true"`
+	Root         string   `flag:"root" help:"Registered Go module path; defaults to the module of the current checkout"`
+	Visibility   string   `flag:"visibility" help:"Rows to report: exported, internal, or all" default:"all"`
+	ChangeType   []string `flag:"change-type" help:"Row classes to report: added, removed, signature, structure, body, moved; * and ! patterns (repeatable or comma separated; default all)"`
+	Stat         bool     `flag:"stat" help:"Add line counts from hash-verified Git blobs" default:"true"`
+	IncludeTests bool     `flag:"include-tests" help:"Include Go test symbols when indexing historical commits"`
 }
 
 func registerHistoryCommand(root *cobra.Command) {
@@ -56,7 +57,7 @@ func registerHistoryCommand(root *cobra.Command) {
 			return symboldiff.Result{}, err
 		}
 		return symboldiff.DiffCommit(ctx, database, symboldiff.CommitOptions{
-			RootKey: rootKey, Commit: options.Commit, Visibility: visibility, Stat: options.Stat, IncludeTests: options.IncludeTests,
+			RootKey: rootKey, Commit: options.Commit, Visibility: visibility, ChangeTypes: options.ChangeType, Stat: options.Stat, IncludeTests: options.IncludeTests,
 			TaskContext: taskContext,
 		})
 	})

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -80,6 +81,7 @@ func recordGitCommands() *[]string {
 
 type patchRow struct {
 	Path, Class, Name, Visibility, ShapeBefore, ShapeAfter, PathBefore string
+	MovedAway                                                          bool
 }
 
 func patchRows(result Result) []patchRow {
@@ -88,7 +90,7 @@ func patchRows(result Result) []patchRow {
 		for _, file := range pkg.Files {
 			for _, row := range file.Rows {
 				Expect(row.Coverage).To(Equal([]string{MarkerSyntax}), row.DisplayName())
-				rows = append(rows, patchRow{file.Path, string(row.Class), row.DisplayName(), row.Visibility, row.ShapeBefore, row.ShapeAfter, row.PathBefore})
+				rows = append(rows, patchRow{file.Path, string(row.Class), row.DisplayName(), row.Visibility, row.ShapeBefore, row.ShapeAfter, row.PathBefore, row.MovedAway})
 			}
 		}
 	}
@@ -131,7 +133,42 @@ var _ = Describe("DiffPatch", func() {
 			},
 			{Path: "calc/calc.go", Class: "removed", Name: "Sub", Visibility: "exported", ShapeBefore: "method public (a (int), b (int)) ( (int))", PathBefore: "calc/calc.go"},
 			{Path: "calc/new_name.go", Class: "moved", Name: "Helper", Visibility: "exported", PathBefore: "calc/old_name.go"},
+			{Path: "calc/old_name.go", Class: "moved", Name: "Helper", Visibility: "exported", PathBefore: "calc/old_name.go", MovedAway: true},
 		}))
+	})
+
+	DescribeTable("reports only the row classes its change types match, counting the rest as hidden",
+		func(ctx SpecContext, changeTypes ChangeTypes, shown []string, hidden int) {
+			repo := newPatchRepository()
+			result, err := DiffPatch(ctx, PatchOptions{
+				Patch: strings.NewReader(patchOf(repo, "HEAD~1")), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll, ChangeTypes: changeTypes,
+			})
+			Expect(err).To(Succeed())
+			var rows []string
+			hiddenRows := 0
+			for _, pkg := range result.Packages {
+				for _, file := range pkg.Files {
+					hiddenRows += file.HiddenRows
+					for _, row := range file.Rows {
+						rows = append(rows, file.Path+" "+string(row.Class)+" "+row.DisplayName())
+					}
+				}
+			}
+			Expect([]any{result.ChangeTypes, rows, hiddenRows}).To(Equal([]any{changeTypes, shown, hidden}))
+		},
+		Entry("moved only, on both files", ChangeTypes{"moved"},
+			[]string{"calc/new_name.go moved Helper", "calc/old_name.go moved Helper"}, 6),
+		Entry("everything but added and removed", ChangeTypes{"!added", "!removed"},
+			[]string{"calc/calc.go body Add", "calc/calc.go structure Point", "calc/calc.go signature Point.y", "calc/calc.go signature Scale",
+				"calc/new_name.go moved Helper", "calc/old_name.go moved Helper"}, 2),
+		Entry("a wildcard", ChangeTypes{"s*"},
+			[]string{"calc/calc.go structure Point", "calc/calc.go signature Point.y", "calc/calc.go signature Scale"}, 5),
+	)
+
+	It("refuses a change type that names no class", func(ctx SpecContext) {
+		repo := newPatchRepository()
+		_, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(patchOf(repo, "HEAD~1")), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll, ChangeTypes: ChangeTypes{"!removd"}})
+		Expect(err).To(MatchError(`change type "!removd" matches none of added, removed, signature, structure, body, moved`))
 	})
 
 	It("reads a worktree diff's new side from the worktree and counts lines as git does", func(ctx SpecContext) {
@@ -143,6 +180,30 @@ var _ = Describe("DiffPatch", func() {
 		file := result.Packages[0].Files[0]
 		Expect([]any{file.Path, file.Rows[0].Class, file.Rows[0].Name, *file.Lines}).To(Equal([]any{"calc/calc.go", ClassAdded, "Div", LineCount{Added: 2}}))
 	})
+
+	DescribeTable("pairs a symbol moved into an untracked file only when the worktree patch includes untracked files, leaving the index unchanged",
+		func(ctx SpecContext, untracked bool, expected []patchRow) {
+			repo := newPatchRepository()
+			repo.write(map[string]*string{"calc/new_name.go": nil, "calc/untracked.go": text(patchHelperMoved)})
+			index := filepath.Join(repo.path, ".git", "index")
+			before, err := os.ReadFile(index)
+			Expect(err).To(Succeed())
+			patch, err := WorktreePatch(ctx, WorktreePatchOptions{Checkout: repo.path, Commit: repo.git("rev-parse", "HEAD"), Untracked: untracked})
+			Expect(err).To(Succeed())
+			result, err := DiffPatch(ctx, PatchOptions{Patch: patch, Locator: gitLocator(ctx, repo), Visibility: VisibilityAll})
+			Expect(err).To(Succeed())
+			after, err := os.ReadFile(index)
+			Expect(err).To(Succeed())
+			Expect([]any{patchRows(result), after}).To(Equal([]any{expected, before}))
+		},
+		Entry("tracked files only, as git diff", false, []patchRow{
+			{Path: "calc/new_name.go", Class: "removed", Name: "Helper", Visibility: "exported", ShapeBefore: "method public () ( (int))", PathBefore: "calc/new_name.go"},
+		}),
+		Entry("with untracked files", true, []patchRow{
+			{Path: "calc/new_name.go", Class: "moved", Name: "Helper", Visibility: "exported", PathBefore: "calc/new_name.go", MovedAway: true},
+			{Path: "calc/untracked.go", Class: "moved", Name: "Helper", Visibility: "exported", PathBefore: "calc/new_name.go"},
+		}),
+	)
 
 	It("refuses a worktree diff whose file changed after the patch was produced", func(ctx SpecContext) {
 		repo := newPatchRepository()

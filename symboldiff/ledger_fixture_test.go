@@ -130,6 +130,7 @@ const ledgerStatAll = `├── 📦 example.org/ledger  +2 -2
 │       ╰── (file scope)  +2 -2
 ├── 📦 example.org/ledger/book  +3 -2
 │   ├── ✏️ book/book.go (modified)  +1 -2
+│   │   ├── 🔀 Count  moved  to book/count.go
 │   │   ├── 💻 Total  body  +1 -1
 │   │   ╰── (file scope)  +0 -1
 │   ╰── ➕ book/count.go (added)  +2 -0
@@ -165,6 +166,7 @@ const ledgerStatAll = `├── 📦 example.org/ledger  +2 -2
 // ledgerExported is the default output: exported rows only, without line counts.
 const ledgerExported = `├── 📦 example.org/ledger/book
 │   ├── ✏️ book/book.go (modified)
+│   │   ├── 🔀 Count  moved  to book/count.go
 │   │   ╰── 💻 Total  body
 │   ╰── ➕ book/count.go (added)
 │       ╰── 🔀 Count  moved  from book/book.go
