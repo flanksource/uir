@@ -277,13 +277,77 @@ func (reader *guardReader) read(ctx context.Context, match ModuleMatch, at func(
 // file is the parsed source at key, or nil when it is unreadable or an external producer's. The only
 // error is the context's.
 func (reader *guardReader) file(ctx context.Context, key guardFileKey) (*guardFile, error) {
-	if file, parsed := reader.files[key]; parsed {
-		return file, nil
+	if err := reader.load(ctx, []guardFileKey{key}); err != nil {
+		return nil, err
 	}
-	file, err := reader.parse(ctx, key)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
+	return reader.files[key], nil
+}
+
+// prefetch reads and parses the files of rows not read yet together, so the sites about to be read
+// cost one batch read per snapshot rather than one per file. The only error is the context's.
+func (reader *guardReader) prefetch(ctx context.Context, rows []ModuleMatch) error {
+	keys := make([]guardFileKey, 0, len(rows))
+	for _, row := range rows {
+		keys = append(keys, guardFileKey{snapshot: row.SnapshotID, path: row.Path})
 	}
+	return reader.load(ctx, keys)
+}
+
+// load reads and parses every file of keys not read yet, each snapshot's through one verified batch
+// read. The only error is the context's.
+func (reader *guardReader) load(ctx context.Context, keys []guardFileKey) error {
+	batches := map[string]*guardBatch{}
+	var order []string
+	for _, key := range keys {
+		if _, read := reader.files[key]; read {
+			continue
+		}
+		scope, document, err := reader.sources.document(key.snapshot, key.path)
+		if err == nil && scope.location.Kind == storage.LocationExternal {
+			err = errNoGoSyntax
+		}
+		if err != nil {
+			reader.keep(key, nil, err)
+			continue
+		}
+		batch, found := batches[key.snapshot]
+		if !found {
+			batch = &guardBatch{scope: scope}
+			batches[key.snapshot], order = batch, append(order, key.snapshot)
+		}
+		reader.files[key] = nil
+		batch.keys = append(batch.keys, key)
+		batch.sources = append(batch.sources, verifiedSource{path: key.path, hash: document.Source.ContentHash, snapshot: key.snapshot})
+	}
+	for _, snapshot := range order {
+		batch := batches[snapshot]
+		reads := readVerifiedSources(ctx, reader.database, batch.scope, batch.sources)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for index, read := range reads {
+			key := batch.keys[index]
+			if read.err != nil {
+				reader.keep(key, nil, read.err)
+				continue
+			}
+			file, err := parseGuardFile(key.path, read.content)
+			reader.keep(key, file, err)
+		}
+	}
+	return nil
+}
+
+// guardBatch is the files of one snapshot a load reads together.
+type guardBatch struct {
+	scope   moduleScope
+	keys    []guardFileKey
+	sources []verifiedSource
+}
+
+// keep records the parsed file at key, or nil with the reason it is unreadable, reported once per
+// path unless the file is an external producer's.
+func (reader *guardReader) keep(key guardFileKey, file *guardFile, err error) {
 	if err != nil {
 		if _, reported := reader.unreadable[key.path]; !reported && !errors.Is(err, errNoGoSyntax) {
 			reader.unreadable[key.path] = err
@@ -291,22 +355,6 @@ func (reader *guardReader) file(ctx context.Context, key guardFileKey) (*guardFi
 		file = nil
 	}
 	reader.files[key] = file
-	return file, nil
-}
-
-func (reader *guardReader) parse(ctx context.Context, key guardFileKey) (*guardFile, error) {
-	scope, document, err := reader.sources.document(key.snapshot, key.path)
-	if err != nil {
-		return nil, err
-	}
-	if scope.location.Kind == storage.LocationExternal {
-		return nil, errNoGoSyntax
-	}
-	content, _, err := readVerifiedSource(ctx, reader.database, scope, verifiedSource{path: key.path, hash: document.Source.ContentHash, snapshot: key.snapshot})
-	if err != nil {
-		return nil, err
-	}
-	return parseGuardFile(key.path, content)
 }
 
 // unreadablePaths are the files whose guards could not be derived, sorted.
