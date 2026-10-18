@@ -109,7 +109,7 @@ func (publication Publication) extraction(kinds symbolhandle.Kinds, rows map[str
 			ContentSetHash: contentSetHash(files, nil), ConfigurationHash: configuration, Files: files,
 		},
 		indexerVersion: ExternalIndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{},
-		symbols: rows, coverage: storage.CoverageIndexed,
+		symbols: rows, coverage: storage.CoverageIndexed, coverageDeterministic: true,
 	}
 	inputHashes := make(map[string]string, len(byPackage))
 	for _, packagePath := range sortedKeys(byPackage) {
