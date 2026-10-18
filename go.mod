@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/flanksource/clicky v1.21.80
 	github.com/flanksource/commons v1.60.1
-	github.com/flanksource/commons-db v0.1.58
+	github.com/flanksource/commons-db v0.1.59
 	github.com/flanksource/commons-db/cmd/query v0.1.58
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0

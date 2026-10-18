@@ -245,7 +245,7 @@ func (indexer *Indexer) publishVersionedGraph(ctx context.Context, memo *runMemo
 		return nil, err
 	}
 	for index, node := range graph.nodes {
-		extraction, err := extractModule(ctx, indexer.loadPackages, node.prepared.root, node.options.IncludeTests)
+		extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: node.prepared.root, includeTests: node.options.IncludeTests})
 		if err != nil {
 			return nil, fmt.Errorf("extract version %s: %w", node.key, err)
 		}
@@ -325,7 +325,7 @@ func (indexer *Indexer) reuseVersionedGraph(ctx context.Context, memo *runMemo, 
 		if stored.GitCommit != root.GitCommit || stored.ContentSetHash != root.ContentSetHash || stored.ConfigurationHash != root.ConfigurationHash || stored.DependencySetHash == nil || *stored.DependencySetHash != dependencyHash(root.Dependencies) {
 			return nil, false, nil
 		}
-		extraction, err := extractModule(ctx, indexer.loadPackages, root, node.options.IncludeTests)
+		extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: node.options.IncludeTests})
 		if err != nil {
 			return nil, false, fmt.Errorf("extract version %s: %w", node.key, err)
 		}

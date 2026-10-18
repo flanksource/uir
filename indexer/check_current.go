@@ -64,7 +64,7 @@ func (indexer *Indexer) HeadIncludesTests(ctx context.Context, path string) (boo
 	if err != nil {
 		return false, fmt.Errorf("canonicalize checkout %q: %w", path, err)
 	}
-	roots, err := locateModuleRoots(canonical)
+	roots, err := locateModuleRoots(ctx, canonical)
 	if err != nil {
 		return false, err
 	}
@@ -114,7 +114,7 @@ func (indexer *Indexer) checkContext(ctx context.Context, root discoveredRoot, i
 	if log, found := ctx.Value(phaseLogKey{}).(phaseLog); found {
 		log.Infof("check-current: %s at %s: %s", root.RootKey, root.LocalPath, reason)
 	}
-	extracted, err := extractModule(ctx, indexer.loadPackages, root, includeTests)
+	extracted, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: includeTests})
 	if err != nil {
 		return err
 	}

@@ -25,7 +25,10 @@ func extractGoFile(pathKey, packagePath string, content []byte) (fileIndex, erro
 	if strings.HasSuffix(file.Name.Name, "_test") {
 		packagePath += "_test"
 	}
-	indexed := fileIndex{PackagePath: packagePath, PackageName: file.Name.Name, fileSet: fileSet, content: content}
+	indexed := fileIndex{
+		PackagePath: packagePath, PackageName: file.Name.Name, fileSet: fileSet, content: content,
+		bindings: syntaxBindings(file, fileSet.File(file.Pos())),
+	}
 	imports, err := goImports(file)
 	if err != nil {
 		return fileIndex{}, fmt.Errorf("read imports from %q: %w", pathKey, err)

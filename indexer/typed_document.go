@@ -81,9 +81,13 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 
 func (builder *documentBuilder) symbols(source typedSource, projections map[storage.ByteSpan]nodeSpec, partial bool) ([]storage.DocumentSymbol, error) {
 	symbols := []storage.DocumentSymbol{}
+	bindings, err := typedBindings(source.file, source.tokens, source.pkg.TypesInfo)
+	if err != nil {
+		return nil, err
+	}
 	for _, declared := range fileDeclarations(source.file, source.pkg.TypesInfo) {
 		name, extent := source.span(declared.name.Pos(), declared.name.End()), source.span(declared.start, declared.end)
-		contentHash, err := tokenStreamHash(source.content[extent[0]:extent[1]])
+		contentHash, err := declarationContentHash(source.content, extent, bindings)
 		if err != nil {
 			return nil, fmt.Errorf("hash %s: %w", declared.name.Name, err)
 		}
@@ -329,6 +333,58 @@ func fileDeclarations(file *ast.File, info *types.Info) []declaration {
 		}
 	}
 	return declarations
+}
+
+// typedBindings is syntaxBindings read from the type checker: every identifier whose object is a
+// receiver, parameter, result, local variable, or a local constant or type, mapped to the object's
+// position. Identifier keys of composite literals stay unresolved, as syntaxBindings leaves them.
+func typedBindings(file *ast.File, tokens *token.File, info *types.Info) (localBindings, error) {
+	bindings, keys := localBindings{}, map[*ast.Ident]bool{}
+	var err error
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.CompositeLit:
+			for _, element := range node.Elts {
+				if keyed, ok := element.(*ast.KeyValueExpr); ok {
+					if key, bare := keyed.Key.(*ast.Ident); bare {
+						keys[key] = true
+					}
+				}
+			}
+		case *ast.TypeSwitchStmt:
+			if guard, ok := node.Assign.(*ast.AssignStmt); ok {
+				if ident, ok := guard.Lhs[0].(*ast.Ident); ok && ident.Name != "_" {
+					bindings[tokens.Offset(ident.Pos())] = tokens.Offset(ident.Pos())
+				}
+			}
+		case *ast.Ident:
+			object := info.Uses[node]
+			if object == nil {
+				object = info.Defs[node]
+			}
+			if keys[node] || node.Name == "_" || !localObject(object) {
+				return true
+			}
+			if position := object.Pos(); int(position) < tokens.Base() || int(position) > tokens.Base()+tokens.Size() {
+				err = fmt.Errorf("local %s at %s is bound outside %s", node.Name, tokens.Position(node.Pos()), tokens.Name())
+				return false
+			}
+			bindings[tokens.Offset(node.Pos())] = tokens.Offset(object.Pos())
+		}
+		return err == nil
+	})
+	return bindings, err
+}
+
+func localObject(object types.Object) bool {
+	switch object := object.(type) {
+	case *types.Var:
+		kind := object.Kind()
+		return kind == types.LocalVar || kind == types.ParamVar || kind == types.RecvVar || kind == types.ResultVar
+	case *types.Const, *types.TypeName:
+		return object.Pkg() != nil && object.Parent() != object.Pkg().Scope()
+	}
+	return false
 }
 
 func specExtent(declared *ast.GenDecl, spec ast.Spec) (token.Pos, token.Pos) {

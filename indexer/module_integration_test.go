@@ -55,13 +55,14 @@ var _ = Describe("module indexing", func() {
 		Expect(dirtySnapshot.Revision).To(HavePrefix("git-" + snapshot.Revision + "-dirty-"))
 	})
 
-	It("records a snapshot that indexes a Git-ignored Go file as dirty until the file is tracked", func(ctx SpecContext) {
+	It("skips Git-ignored Go files until they are tracked", func(ctx SpecContext) {
 		database := openIndexerSQLite(ctx)
 		workspace := GinkgoT().TempDir()
 		Expect(os.MkdirAll(filepath.Join(workspace, "hack"), 0o755)).To(Succeed())
 		writeFile(filepath.Join(workspace, "go.mod"), "module example.org/ignored\n\ngo 1.26\n")
-		writeFile(filepath.Join(workspace, ".gitignore"), "hack/\n")
+		writeFile(filepath.Join(workspace, ".gitignore"), "hack/\n*.gen.go\n")
 		writeFile(filepath.Join(workspace, "main.go"), "package ignored\n\nfunc Run() {}\n")
+		writeFile(filepath.Join(workspace, "generated.gen.go"), "package ignored\n\nfunc Generated() {}\n")
 		writeFile(filepath.Join(workspace, "hack", "tool.go"), "package hack\n\nfunc Tool() {}\n")
 		commit := []string{"-C", workspace, "-c", "user.name=Example", "-c", "user.email=example@example.org", "commit", "-qm"}
 		for _, args := range [][]string{
@@ -74,20 +75,20 @@ var _ = Describe("module indexing", func() {
 		Expect(exec.Command("git", "-C", workspace, "status", "--porcelain").Output()).To(BeEmpty(), "Git reports no change for an ignored file")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		indexedState := func() storage.WorktreeState {
+		indexedState := func(expectedFiles int) storage.WorktreeState {
 			GinkgoHelper()
 			results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
-			Expect(results[0].Files).To(Equal(2), "discovery indexes the ignored file")
+			Expect(results[0].Files).To(Equal(expectedFiles))
 			var snapshot storage.ModuleSnapshot
 			Expect(database.Where("id = ?", results[0].SnapshotID).First(&snapshot).Error).To(Succeed())
 			return snapshot.WorktreeState
 		}
-		Expect(indexedState()).To(Equal(storage.WorktreeDirty))
+		Expect(indexedState(1)).To(Equal(storage.WorktreeClean))
 
 		Expect(exec.Command("git", "-C", workspace, "add", "-f", "hack/tool.go").Run()).To(Succeed())
 		Expect(exec.Command("git", append(commit, "track the tool")...).Run()).To(Succeed())
-		Expect(indexedState()).To(Equal(storage.WorktreeClean))
+		Expect(indexedState(2)).To(Equal(storage.WorktreeClean))
 	})
 
 	It("infers an enclosing go.mod when adding a package directory", func(ctx SpecContext) {

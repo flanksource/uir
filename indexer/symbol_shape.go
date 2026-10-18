@@ -207,6 +207,146 @@ func (resolver *symbolResolver) shapes(object types.Object) (symbolShapes, error
 	return symbolShapes{}, fmt.Errorf("render shape of %s: unsupported object type %T", object.Name(), object)
 }
 
+// apiShape is the API an importer compiles against, encoded by encodeType: types qualified by import
+// path, with no receiver, parameter, result, or type parameter names. It mirrors the public layer
+// otherwise, so the export shape digests it where public_hash keeps the names symboldiff reports.
+func (resolver *symbolResolver) apiShape(object types.Object) (string, error) {
+	if !validDeclaration(object) {
+		return "", errUnprovenType
+	}
+	var encoder typeEncoder
+	switch object := object.(type) {
+	case *types.Func:
+		encoder.function(object.Signature())
+	case *types.Var:
+		encoder.out.WriteString("var ")
+		if object.IsField() {
+			encoder.field(object, resolver.memberIndex(object.Pkg())[object].tag)
+		} else {
+			encoder.write(object.Type())
+		}
+	case *types.Const:
+		encoder.out.WriteString("const ")
+		encoder.write(object.Type())
+		encoder.out.WriteString(" = " + object.Val().ExactString())
+	case *types.TypeName:
+		if err := encoder.typeName(object); err != nil {
+			return "", err
+		}
+	default:
+		return "", fmt.Errorf("encode API of %s: unsupported object type %T", object.Name(), object)
+	}
+	return encoder.out.String(), nil
+}
+
+func (encoder *typeEncoder) function(signature *types.Signature) {
+	if receiver := signature.Recv(); receiver != nil {
+		encoder.out.WriteString("(")
+		encoder.write(receiver.Type())
+		encoder.out.WriteString(")")
+	}
+	encoder.typeParameters(signature.TypeParams())
+	encoder.signature(signature)
+}
+
+// typeParameters writes each constraint, with the interfaces an inline constraint embeds, which
+// iface leaves to the method set.
+func (encoder *typeEncoder) typeParameters(parameters *types.TypeParamList) {
+	encoder.list("[", parameters.Len(), func(i int) {
+		constraint := parameters.At(i).Constraint()
+		encoder.write(constraint)
+		if iface, inline := types.Unalias(constraint).(*types.Interface); inline {
+			for j := range iface.NumEmbeddeds() {
+				if embedded := iface.EmbeddedType(j); types.IsInterface(embedded) {
+					encoder.out.WriteString("&")
+					encoder.write(embedded)
+				}
+			}
+		}
+	}, "]")
+}
+
+func (encoder *typeEncoder) field(field *types.Var, tag string) {
+	if field.Embedded() {
+		encoder.out.WriteString("!")
+	}
+	encoder.write(field.Type())
+	if tag != "" {
+		encoder.out.WriteString(" " + strconv.Quote(tag))
+	}
+}
+
+func (encoder *typeEncoder) typeName(object *types.TypeName) error {
+	encoder.out.WriteString("type")
+	if alias, ok := object.Type().(*types.Alias); ok {
+		encoder.typeParameters(alias.TypeParams())
+		encoder.out.WriteString(" = ")
+		encoder.write(alias.Rhs())
+		return nil
+	}
+	named, ok := object.Type().(*types.Named)
+	if !ok {
+		return fmt.Errorf("encode API of type %s: %T is not a named type", object.Name(), object.Type())
+	}
+	encoder.typeParameters(named.TypeParams())
+	encoder.out.WriteString(" ")
+	switch underlying := named.Underlying().(type) {
+	case *types.Struct:
+		encoder.publicStruct(underlying)
+	case *types.Interface:
+		encoder.publicInterface(underlying)
+	default:
+		encoder.write(underlying)
+	}
+	return nil
+}
+
+// publicStruct writes the exported fields, by name, and an opaque line when unexported ones exist.
+func (encoder *typeEncoder) publicStruct(structure *types.Struct) {
+	encoder.out.WriteString("struct{")
+	hidden := false
+	for i := range structure.NumFields() {
+		if field := structure.Field(i); field.Exported() {
+			encoder.out.WriteString(field.Name() + " ")
+			encoder.field(field, structure.Tag(i))
+			encoder.out.WriteString(";")
+		} else {
+			hidden = true
+		}
+	}
+	encoder.opaque(hidden)
+}
+
+// publicInterface writes the exported methods, by name, the embedded non-interface types, and an
+// opaque line when unexported methods exist.
+func (encoder *typeEncoder) publicInterface(iface *types.Interface) {
+	encoder.out.WriteString("interface{")
+	hidden := false
+	for i := range iface.NumMethods() {
+		if method := iface.Method(i); method.Exported() {
+			encoder.out.WriteString(method.Name())
+			encoder.signature(method.Signature())
+			encoder.out.WriteString(";")
+		} else {
+			hidden = true
+		}
+	}
+	for i := range iface.NumEmbeddeds() {
+		if embedded := iface.EmbeddedType(i); !types.IsInterface(embedded) {
+			encoder.write(embedded)
+			encoder.out.WriteString(";")
+		}
+	}
+	encoder.opaque(hidden)
+}
+
+func (encoder *typeEncoder) opaque(hidden bool) {
+	if hidden {
+		encoder.out.WriteString(opaqueLine + ";")
+	}
+	encoder.out.WriteString("}")
+}
+
 func validDeclaration(object types.Object) bool {
 	if _, valid := encodeType(object.Type()); !valid {
 		return false
