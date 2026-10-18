@@ -11,8 +11,9 @@ import { ErrorMessage, Muted } from "./ui";
 
 type OpenChange = (row: SymbolChange) => void;
 
+/** Counts each change once: a moved symbol's copy under the file it left is not a second change. */
 export function countChanges(diff: SymbolDiff): number {
-  return diff.packages.reduce((count, pkg) => count + pkg.files.reduce((fileCount, file) => fileCount + file.rows.length, 0), 0);
+  return diff.packages.reduce((count, pkg) => count + pkg.files.reduce((fileCount, file) => fileCount + file.rows.filter((row) => !row.moved_away).length, 0), 0);
 }
 
 function ChangeRow({ row, onOpen }: { row: SymbolChange; onOpen: OpenChange }) {
@@ -40,14 +41,14 @@ function FileContents({ file, onOpen }: { file: SymbolDiff["packages"][number]["
   return <div className="pb-2"><ErrorMessage error={file.lines_error} />
     {file.excluded && <div className="text-xs text-amber-700">{file.excluded}</div>}
     {file.rows.map((row, index) => <ChangeRow key={`${row.class}:${row.owner}:${row.name}:${index}`} row={row} onOpen={onOpen} />)}
-    {file.hidden_rows ? <div className="pl-5 text-xs text-muted-foreground">{file.hidden_rows} changes hidden by visibility</div> : null}
+    {file.hidden_rows ? <div className="pl-5 text-xs text-muted-foreground">{file.hidden_rows} changes hidden by visibility or change type</div> : null}
   </div>;
 }
 
 function DiffTree({ diff, group, onOpen }: { diff: SymbolDiff; group: Route["historyGroup"]; onOpen: OpenChange }) {
   if (countChanges(diff) === 0) return <div className="rounded-md border border-border bg-card p-4 text-sm">No symbol changes in this range.</div>;
   if (group === "change") {
-    const rows = diff.packages.flatMap((pkg) => pkg.files.flatMap((file) => file.rows.map((row) => ({ pkg: pkg.path, file: file.path, row }))));
+    const rows = diff.packages.flatMap((pkg) => pkg.files.flatMap((file) => file.rows.filter((row) => !row.moved_away).map((row) => ({ pkg: pkg.path, file: file.path, row }))));
     return <div className="rounded-md border border-border bg-card p-3">{(["added", "removed", "signature", "structure", "body", "moved"] as const).map((kind) => {
       const matching = rows.filter(({ row }) => row.class === kind);
       return matching.length ? <details key={kind} open className="border-b border-border last:border-0">
@@ -61,7 +62,7 @@ function DiffTree({ diff, group, onOpen }: { diff: SymbolDiff; group: Route["his
     <FileContents file={file} onOpen={onOpen} />
   </details>)}</div>;
   return <div className="rounded-md border border-border bg-card p-3">{diff.packages.map((pkg) => <details key={pkg.path} open className="border-b border-border last:border-0">
-    <summary className="flex cursor-pointer items-center gap-2 py-2 text-sm font-semibold"><FolderTypeIcon open /><span className="font-mono">{pkg.path}</span><span className="ml-auto text-xs font-normal text-muted-foreground">{pkg.files.reduce((sum, file) => sum + file.rows.length, 0)} changes</span></summary>
+    <summary className="flex cursor-pointer items-center gap-2 py-2 text-sm font-semibold"><FolderTypeIcon open /><span className="font-mono">{pkg.path}</span><span className="ml-auto text-xs font-normal text-muted-foreground">{pkg.files.reduce((sum, file) => sum + file.rows.length, 0)} changes{pkg.hidden_files ? ` · ${pkg.hidden_files} files hidden by change type` : ""}</span></summary>
     <div className="pl-3">{pkg.files.map((file) => <details key={file.path} open className="border-l border-border pl-3">
       <summary className="flex cursor-pointer items-center gap-2 py-1 text-sm"><FileTypeIcon filename={file.path} /><span className="font-mono">{file.path}</span><span className="ml-auto text-xs text-muted-foreground">{file.rows.length}</span></summary>
       <FileContents file={file} onOpen={onOpen} />
