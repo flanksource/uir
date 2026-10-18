@@ -116,6 +116,11 @@ type ModuleSnapshot struct {
 	FilesChanged    *int           `gorm:"column:files_changed"`
 	FilesDeleted    *int           `gorm:"column:files_deleted"`
 	SymbolsChanged  *int           `gorm:"column:symbols_changed"`
+	// CoverageDeterministic says whether extracting the same commit, configuration and dependency set
+	// again must reach the same coverage: every load error was a fact of the sources and the module
+	// versions they pin, never of the network, the module cache or the file system. It is nil only on
+	// a row published before it was recorded, which counts as not deterministic.
+	CoverageDeterministic *bool `gorm:"column:coverage_deterministic"`
 }
 
 func (ModuleSnapshot) TableName() string { return "snapshots" }
