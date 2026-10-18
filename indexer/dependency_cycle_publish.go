@@ -162,7 +162,7 @@ func (indexer *Indexer) publishLocalGroup(ctx context.Context, check *headCheck,
 	}
 	extractions := make(map[int]moduleExtraction, len(group))
 	for _, index := range group {
-		extraction, err := extractModule(ctx, indexer.loadPackages, graph.roots[index], options.IncludeTests)
+		extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: graph.roots[index], includeTests: options.IncludeTests})
 		if err != nil {
 			return fmt.Errorf("extract module %q: %w", graph.roots[index].RootKey, err)
 		}

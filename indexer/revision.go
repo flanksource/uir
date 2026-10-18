@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flanksource/uir/storage"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -23,10 +24,10 @@ type RevisionOptions struct {
 }
 
 // IndexRevision publishes a clean historical snapshot for an already registered module without
-// moving its checkout head or changing the checkout's working tree. A stored, fully indexed snapshot
-// of a commit without dependencies is reused without extracting; otherwise the commit is extracted,
-// and a stored snapshot identical to the extraction, degraded or not, is reused instead of publishing
-// a duplicate.
+// moving its checkout head or changing the checkout's working tree. A complete stored snapshot of the
+// commit under the same configuration and dependency targets is reused without extracting; otherwise
+// the commit is extracted against its base, and a stored snapshot identical to the extraction,
+// degraded or not, is reused instead of publishing a duplicate.
 func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptions) (result ModuleResult, err error) {
 	if options.Reason != storage.ReasonHistorical && options.Reason != storage.ReasonVersionedDependency {
 		return result, fmt.Errorf("index revision %s of %q: reason %q is not historical or versioned-dependency", options.Commit, options.RootKey, options.Reason)
@@ -54,7 +55,18 @@ func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared prep
 	if existing, found, err := indexer.reusableRevision(ctx, location, root); err != nil || found {
 		return revisionResult(options, existing), err
 	}
-	extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
+	var base storage.ModuleSnapshot
+	var packages map[string]basePackage
+	if err := Phase(ctx, "revision-base", func(ctx context.Context) (err error) {
+		if base, err = indexer.revisionBase(ctx, location, root); err != nil {
+			return err
+		}
+		packages, err = basePackages(ctx, indexer.database, base)
+		return err
+	}); err != nil {
+		return result, err
+	}
+	extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests, base: packages})
 	if err != nil {
 		return result, fmt.Errorf("extract historical module %q: %w", root.RootKey, err)
 	}
@@ -62,7 +74,15 @@ func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared prep
 	if err != nil || found {
 		return revisionResult(options, identical), err
 	}
-	return indexer.publishRevision(ctx, location, extraction, options.Reason)
+	return indexer.publishRevision(ctx, revisionPublication{location: location, extraction: extraction, reason: options.Reason, baseID: base.ID})
+}
+
+// revisionPublication is one historical snapshot to publish on the base its extraction reused.
+type revisionPublication struct {
+	location   storage.ModuleLocation
+	extraction moduleExtraction
+	reason     storage.SnapshotReason
+	baseID     uuid.UUID
 }
 
 // ReusableRevision is the stored snapshot IndexRevision would reuse for options without extracting,
@@ -81,13 +101,30 @@ func (indexer *Indexer) ReusableRevision(ctx context.Context, options RevisionOp
 	return revisionResult(options, existing), true, nil
 }
 
-// reusableRevision is the complete stored snapshot of a commit without dependencies. A commit
-// with dependencies is never reused without extracting.
+// reusableRevision is the complete stored snapshot of a historical commit whose context is proven
+// without extracting. A historical root loads with GOWORK=off and without local replacements, so its
+// context is a function of the commit, the configuration and the module versions its dependencies
+// select; the dependency set hash names every selected version and, for one linked to an indexed
+// version, that version's target snapshot. A snapshot that recorded a workspace sibling package with a
+// shape or source digest read something the commit does not pin, so it is proven only by extracting.
 func (indexer *Indexer) reusableRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot) (storage.ModuleSnapshot, bool, error) {
-	if len(root.Dependencies) != 0 {
+	if !root.Historical {
+		return storage.ModuleSnapshot{}, false, fmt.Errorf("reuse revision %s of %q: the root is not historical", root.GitCommit, root.RootKey)
+	}
+	existing, found, err := indexer.storedRevision(ctx, location, root, nil)
+	if err != nil || !found {
+		return storage.ModuleSnapshot{}, false, err
+	}
+	var siblings int64
+	if err := indexer.database.WithContext(ctx).Model(&storage.SnapshotSiblingShape{}).
+		Where("snapshot_id = ? AND (export_shape_hash IS NOT NULL OR source_digest IS NOT NULL)", existing.ID).Count(&siblings).Error; err != nil {
+		return storage.ModuleSnapshot{}, false, fmt.Errorf("load sibling shapes of snapshot %s: %w", existing.ID, err)
+	}
+	if siblings != 0 {
+		PhaseCount(ctx, "sibling-recorded", 1)
 		return storage.ModuleSnapshot{}, false, nil
 	}
-	return indexer.storedRevision(ctx, location, root, nil)
+	return existing, true, nil
 }
 
 func revisionResult(options RevisionOptions, snapshot storage.ModuleSnapshot) ModuleResult {
@@ -132,21 +169,21 @@ func (indexer *Indexer) loadStoredRevision(ctx context.Context, location storage
 	return existing, true, nil
 }
 
-func (indexer *Indexer) publishRevision(ctx context.Context, location storage.ModuleLocation, extraction moduleExtraction, reason storage.SnapshotReason) (result ModuleResult, err error) {
-	root := extraction.root
+func (indexer *Indexer) publishRevision(ctx context.Context, publication revisionPublication) (result ModuleResult, err error) {
+	root, location := publication.extraction.root, publication.location
 	err = Phase(ctx, "publish", func(ctx context.Context) error {
 		return storage.RetryAllocationConflicts(ctx, indexer.database, func(transaction *gorm.DB) error {
 			var stored storage.ModuleRoot
 			if loadErr := transaction.Where("id = ?", location.RootID).Take(&stored).Error; loadErr != nil {
 				return fmt.Errorf("load root of historical module: %w", loadErr)
 			}
-			base, loadErr := loadModuleBase(ctx, transaction, stored, location)
+			base, loadErr := pinnedBase(ctx, transaction, stored, location, publication.baseID)
 			if loadErr != nil {
 				return loadErr
 			}
 			result = ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(root.Files)}
 			snapshot, publishErr := publishSnapshot(ctx, transaction, snapshotPublication{
-				root: stored, location: location, base: base, extraction: extraction, startedAt: time.Now().UTC(), reason: reason, preserveHead: true,
+				root: stored, location: location, base: base, extraction: publication.extraction, startedAt: time.Now().UTC(), reason: publication.reason, preserveHead: true,
 			}, &result)
 			if publishErr != nil {
 				return publishErr

@@ -10,16 +10,16 @@ import (
 )
 
 const (
-	// contentHashVersion keeps the token stream digest body_hash carried, now the content layer.
-	contentHashVersion       = "uir-body-hash-v1"
+	// contentHashVersion is the normalized token stream digest of the content layer.
+	contentHashVersion       = "uir-content-hash-v2"
 	publicHashVersion        = "uir-public-hash-v1"
 	privateHashVersion       = "uir-private-hash-v1"
-	packageInputHashVersion  = "uir-package-input-v3"
+	packageInputHashVersion  = "uir-package-input-v4"
 	contextHashVersion       = "uir-context-hash-v1"
 	contentSetHashVersion    = "uir-content-set-v1"
 	configurationHashVersion = "uir-configuration-v1"
 
-	exportShapeVersion           = "uir-export-shape-v2"
+	exportShapeVersion           = "uir-export-shape-v3"
 	standardExportShapeVersion   = "uir-export-std-v1"
 	moduleExportShapeVersion     = "uir-export-module-v1"
 	unprovenExportShapeVersion   = "uir-export-unproven-v1"

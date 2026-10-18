@@ -223,9 +223,9 @@ func fullLoad(config *packages.Config, patterns ...string) ([]*packages.Package,
 // extractBoth extracts root once with the production load and once with fullLoad, without start times.
 func extractBoth(ctx context.Context, root discoveredRoot) (moduleExtraction, moduleExtraction) {
 	GinkgoHelper()
-	declarations, err := extractModule(ctx, packages.Load, root, true)
+	declarations, err := extractModule(ctx, extractOptions{loadPackages: packages.Load, root: root, includeTests: true})
 	Expect(err).ToNot(HaveOccurred(), root.RootKey)
-	full, err := extractModule(ctx, fullLoad, root, true)
+	full, err := extractModule(ctx, extractOptions{loadPackages: fullLoad, root: root, includeTests: true})
 	Expect(err).ToNot(HaveOccurred(), root.RootKey)
 	declarations.indexStartedAt, full.indexStartedAt = time.Time{}, time.Time{}
 	return declarations, full
@@ -248,7 +248,7 @@ var _ = Describe("typed load of dependencies", func() {
 		root := writeTypecheckFixture(ctx, workspace)
 		forms := map[string]bool{}
 
-		_, err := extractModule(ctx, observingLoader(forms), root, true)
+		_, err := extractModule(ctx, extractOptions{loadPackages: observingLoader(forms), root: root, includeTests: true})
 
 		Expect(err).ToNot(HaveOccurred())
 		cached := filepath.Join(goEnvValue(ctx, root.LocalPath, "GOMODCACHE"), filepath.FromSlash(typecheckDepsModule)+"@"+typecheckDepsVersion)
@@ -291,7 +291,7 @@ var _ = Describe("typed load of dependencies", func() {
 		roots, err := discoverModules(ctx, mirror, false)
 		Expect(err).ToNot(HaveOccurred())
 
-		_, err = extractModule(ctx, packages.Load, roots[0], false)
+		_, err = extractModule(ctx, extractOptions{loadPackages: packages.Load, root: roots[0]})
 
 		Expect(err).To(MatchError(And(ContainSubstring(typecheckDepsModule+"/generic"), ContainSubstring("without function bodies"))))
 	})

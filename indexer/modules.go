@@ -159,7 +159,7 @@ func (indexer *Indexer) extractOrReuse(ctx context.Context, check *headCheck, ro
 		_, err := check.confirmSnapshot(ctx, root.LocalPath, head)
 		return moduleExtraction{root: root, reusedHead: head}, err
 	}
-	extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
+	extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests})
 	if err == nil {
 		check.confirmExtraction(extraction)
 	}

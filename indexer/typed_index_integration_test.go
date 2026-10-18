@@ -396,7 +396,7 @@ var _ = Describe("typed extraction", func() {
 			writeFile(filepath.Join(workspace, "money", "money.go"), moneySource(moneyAmount, moneyAdd, moneyScale, moneyUnit, moneyZero, half))
 			roots, err := discoverModules(ctx, workspace, false)
 			Expect(err).ToNot(HaveOccurred())
-			extraction, err := extractModule(ctx, engine.loadPackages, roots[0], false)
+			extraction, err := extractModule(ctx, extractOptions{loadPackages: engine.loadPackages, root: roots[0]})
 			Expect(err).ToNot(HaveOccurred())
 			before := tableCounts(database)
 

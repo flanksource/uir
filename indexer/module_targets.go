@@ -33,7 +33,7 @@ func (indexer *Indexer) moduleTargets(ctx context.Context, options ModuleOptions
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize module path %q: %w", absolute, err)
 	}
-	roots, err := locateModuleRoots(canonical)
+	roots, err := locateModuleRoots(ctx, canonical)
 	if err != nil {
 		return nil, err
 	}
