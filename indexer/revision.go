@@ -45,18 +45,11 @@ func (indexer *Indexer) IndexRevision(ctx context.Context, options RevisionOptio
 // indexPreparedRevision is IndexRevision of the commit prepareRevision already checked out for
 // options; the caller still owns the worktree's cleanup.
 func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared preparedRevision, options RevisionOptions) (result ModuleResult, err error) {
-	root, location := prepared.root, prepared.location
-	selectedRoots := []discoveredRoot{root}
-	if err := Phase(ctx, "versioned-deps", func(ctx context.Context) error {
-		PhaseCount(ctx, "dependencies", int64(len(root.Dependencies)))
-		return indexer.indexVersionedDependencies(ctx, selectedRoots, options.IncludeTests)
-	}); err != nil {
-		return result, err
-	}
-	root = selectedRoots[0]
-	if existing, found, err := indexer.reusableRevision(ctx, location, root); err != nil || found {
+	existing, found, err := indexer.reusableRevision(ctx, &prepared, options.IncludeTests, indexer.indexVersionedDependencies)
+	if err != nil || found {
 		return reusedRevision(options, existing, err)
 	}
+	root, location := prepared.root, prepared.location
 	var base storage.ModuleSnapshot
 	var packages map[string]basePackage
 	if err := Phase(ctx, "revision-base", func(ctx context.Context) (err error) {
@@ -88,15 +81,17 @@ type revisionPublication struct {
 }
 
 // ReusableRevision is the stored snapshot IndexRevision would reuse for options without extracting,
-// found by checking the commit out and discovering its module, which indexes nothing. A caller that
-// finds one needs no index run.
+// found by checking the commit out, discovering its module and linking its versioned dependencies to
+// the version snapshots already stored, which indexes and publishes nothing. A version IndexRevision
+// would index first makes the dependency set differ, so the probe misses. A caller that finds one
+// needs no index run.
 func (indexer *Indexer) ReusableRevision(ctx context.Context, options RevisionOptions) (result ModuleResult, found bool, err error) {
 	prepared, err := indexer.prepareRevision(ctx, options)
 	if err != nil {
 		return result, false, err
 	}
 	defer func() { err = errors.Join(err, prepared.cleanup()) }()
-	existing, found, err := indexer.reusableRevision(ctx, prepared.location, prepared.root)
+	existing, found, err := indexer.reusableRevision(ctx, &prepared, options.IncludeTests, indexer.storedVersions(newRunMemo()))
 	if err != nil || !found {
 		return result, false, err
 	}
@@ -104,16 +99,31 @@ func (indexer *Indexer) ReusableRevision(ctx context.Context, options RevisionOp
 	return result, err == nil, err
 }
 
-// reusableRevision is the stored snapshot of a historical commit, of complete or deterministic
-// coverage, whose context is proven without extracting. A historical root loads with GOWORK=off and without local replacements, so its
-// context is a function of the commit, the configuration and the module versions its dependencies
-// select; the dependency set hash names every selected version and, for one linked to an indexed
-// version, that version's target snapshot. A snapshot that recorded a workspace sibling package with a
-// shape or source digest read something the commit does not pin, so it is proven only by extracting.
-func (indexer *Indexer) reusableRevision(ctx context.Context, location storage.ModuleLocation, root discoveredRoot) (storage.ModuleSnapshot, bool, error) {
+// versionResolver links roots' versioned dependencies to snapshots: indexVersionedDependencies, which
+// indexes a version it needs, or linkStoredVersions, which only links stored ones.
+type versionResolver func(ctx context.Context, roots []discoveredRoot, includeTests bool) error
+
+// reusableRevision links the prepared root's versioned dependencies through resolve, keeping the linked
+// root in prepared, and is then the stored snapshot of the historical commit, of settled coverage,
+// whose context is proven without extracting. A historical root loads with GOWORK=off and without
+// local replacements, so its context is a function of the commit, the configuration and the module
+// versions its dependencies select; the dependency set hash names every selected version and, for one
+// linked to an indexed version, that version's target snapshot. A snapshot that recorded a workspace
+// sibling package with a shape or source digest read something the commit does not pin, so it is
+// proven only by extracting.
+func (indexer *Indexer) reusableRevision(ctx context.Context, prepared *preparedRevision, includeTests bool, resolve versionResolver) (storage.ModuleSnapshot, bool, error) {
+	root, location := prepared.root, prepared.location
 	if !root.Historical {
 		return storage.ModuleSnapshot{}, false, fmt.Errorf("reuse revision %s of %q: the root is not historical", root.GitCommit, root.RootKey)
 	}
+	roots := []discoveredRoot{root}
+	if err := Phase(ctx, "versioned-deps", func(ctx context.Context) error {
+		PhaseCount(ctx, "dependencies", int64(len(root.Dependencies)))
+		return resolve(ctx, roots, includeTests)
+	}); err != nil {
+		return storage.ModuleSnapshot{}, false, err
+	}
+	prepared.root, root = roots[0], roots[0]
 	existing, found, err := indexer.storedRevision(ctx, location, root, nil)
 	if err != nil || !found {
 		return storage.ModuleSnapshot{}, false, err
@@ -211,7 +221,7 @@ func (indexer *Indexer) loadStoredRevision(ctx context.Context, location storage
 		Where("configuration_hash = ? AND dependency_set_hash = ?", root.ConfigurationHash, dependencyHash(root.Dependencies))
 	switch {
 	case extraction == nil:
-		query = query.Where("(coverage IN ? OR coverage_deterministic = ?)", storage.CompleteCoverages, true)
+		return newestSettled(query, root.GitCommit)
 	case extraction.coverage.Complete():
 		query = query.Where("context_hash = ? AND coverage = ?", extraction.contextHash, extraction.coverage)
 	default:
@@ -226,6 +236,20 @@ func (indexer *Indexer) loadStoredRevision(ctx context.Context, location storage
 		return storage.ModuleSnapshot{}, false, fmt.Errorf("load clean snapshot of %s: %w", root.GitCommit, err)
 	}
 	return existing, true, nil
+}
+
+// newestSettled is the newest snapshot query selects whose coverage is settled (CoverageSettled).
+func newestSettled(query *gorm.DB, commit string) (storage.ModuleSnapshot, bool, error) {
+	var candidates []storage.ModuleSnapshot
+	if err := query.Order("completed_at DESC").Find(&candidates).Error; err != nil {
+		return storage.ModuleSnapshot{}, false, fmt.Errorf("load clean snapshots of %s: %w", commit, err)
+	}
+	for _, candidate := range candidates {
+		if candidate.CoverageSettled() {
+			return candidate, true, nil
+		}
+	}
+	return storage.ModuleSnapshot{}, false, nil
 }
 
 func (indexer *Indexer) publishRevision(ctx context.Context, publication revisionPublication) (result ModuleResult, err error) {
