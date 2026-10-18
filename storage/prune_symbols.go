@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// deleteOrphanSymbols deletes the candidate symbols that no posting and no symbol delta names, except an
+// deleteOrphanSymbols deletes the candidate symbols that no posting and no symbol or implements delta names, except an
 // owner of a symbol that stays, such as a record whose field another document still reads. A symbol is
 // deleted after every orphan it owns, since symbols.owner_id references it.
 func deleteOrphanSymbols(ctx context.Context, tx *gorm.DB, candidates []int64, result *PruneResult) error {
@@ -51,16 +51,16 @@ func deleteOrphanSymbols(ctx context.Context, tx *gorm.DB, candidates []int64, r
 	return nil
 }
 
-// unreferencedSymbols loads, by id, the symbols of handles that no posting and no symbol delta names.
+// unreferencedSymbols loads, by id, the symbols of handles that no posting, symbol delta, or implements
+// delta names.
 func unreferencedSymbols(ctx context.Context, tx *gorm.DB, handles []int64) (map[string]Symbol, error) {
 	orphans := map[string]Symbol{}
 	err := inBatches(handles, func(batch []int64) error {
 		referenced := map[int64]bool{}
-		if err := collectHandles(ctx, tx, "symbol_postings", "symbol_handle", batch, referenced); err != nil {
-			return err
-		}
-		if err := collectHandles(ctx, tx, "symbol_deltas", "symbol_handle", batch, referenced); err != nil {
-			return err
+		for _, source := range append([]handleColumn{postingHandles}, snapshotHandles...) {
+			if err := collectHandles(ctx, tx, source, source.handle, batch, referenced); err != nil {
+				return err
+			}
 		}
 		var unreferenced []int64
 		for _, handle := range batch {
