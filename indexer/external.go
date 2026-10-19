@@ -10,6 +10,7 @@ import (
 
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -110,6 +111,12 @@ func (publication Publication) extraction(kinds symbolhandle.Kinds, rows map[str
 		},
 		indexerVersion: ExternalIndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{},
 		symbols: rows, coverage: storage.CoverageIndexed, coverageDeterministic: true,
+	}
+	if publication.Options.BaseSnapshotID != "" {
+		var err error
+		if extraction.requestedBase, err = uuid.Parse(publication.Options.BaseSnapshotID); err != nil {
+			return moduleExtraction{}, fmt.Errorf("parse options.base_snapshot_id: %w", err)
+		}
 	}
 	inputHashes := make(map[string]string, len(byPackage))
 	for _, packagePath := range sortedKeys(byPackage) {

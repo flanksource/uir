@@ -37,6 +37,19 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
+	if extraction.requestedBase != uuid.Nil {
+		if options.Reason != storage.ReasonHistorical {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("explicit base snapshot requires historical publication")
+		}
+		var selected storage.ModuleSnapshot
+		if err := database.WithContext(ctx).Where("id = ?", extraction.requestedBase).First(&selected).Error; err != nil {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load explicit base snapshot %s: %w", extraction.requestedBase, err)
+		}
+		if selected.RootID != root.ID || selected.ConfigurationHash != discovered.ConfigurationHash {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("explicit base snapshot %s has root %s and configuration %s; expected root %s and configuration %s", selected.ID, selected.RootID, selected.ConfigurationHash, root.ID, discovered.ConfigurationHash)
+		}
+		base.snapshot = selected
+	}
 	if extraction.baseSnapshotID != uuid.Nil && extraction.baseSnapshotID != base.snapshot.ID {
 		return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("location %s head moved from extraction base %s: %w", location.ID, extraction.baseSnapshotID, ErrIndexInputsChanged)
 	}
