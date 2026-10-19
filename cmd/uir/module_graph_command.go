@@ -41,10 +41,11 @@ type moduleGraphOptions struct {
 }
 
 // moduleGraphLong documents the change query and the edges it cannot see.
-const moduleGraphLong = `With --since <rev>, the graph is a change query: it walks the callees of the root in the selected
-snapshot, marks each node whose symbol was added or whose signature, structure or body changed since
-the snapshot of <rev>, and each node of a module-cache dependency whose selected version changed, and
-reports a shortest path from the root to each. "changed: false" means nothing the walk reached changed.
+const moduleGraphLong = `With --since <rev>, the graph is a change query: it walks the callees of the root in both
+snapshots, marks added, removed and changed symbols, and reports added or removed call edges.
+Each change carries a shortest path from the root in the snapshot where it was reached. The selected
+graph stays at the top level and since.before holds the earlier graph. "changed: false" means neither
+bounded walk reached a change. A module-cache dependency whose selected version changed is also marked.
 
 The answer is only as complete as the call edges the index records. Known false negatives:
   - an implementation outside the import closure of the interface it satisfies
