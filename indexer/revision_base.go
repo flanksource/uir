@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -21,8 +22,11 @@ const (
 // basePackage is one package of a base snapshot: the input hash its package coverage records, and its
 // active documents by path, without content.
 type basePackage struct {
-	inputHash string
-	documents map[string]storage.Document
+	inputHash       string
+	coverage        storage.Coverage
+	diagnostics     []packageDiagnostic
+	documents       map[string]storage.Document
+	exportShapeHash *string
 }
 
 // revisionBase is the snapshot a historical commit's snapshot is stored as a delta on: the newest
@@ -75,11 +79,15 @@ func basePackages(ctx context.Context, database *gorm.DB, base storage.ModuleSna
 		return nil, err
 	}
 	var coverage []storage.PackageCoverage
-	if err := database.WithContext(ctx).Select("package_path", "input_hash").Where("snapshot_id = ?", base.ID).Find(&coverage).Error; err != nil {
+	if err := database.WithContext(ctx).Select("package_path", "input_hash", "coverage", "diagnostics", "export_shape_hash").Where("snapshot_id = ?", base.ID).Find(&coverage).Error; err != nil {
 		return nil, fmt.Errorf("load package input hashes of base snapshot %s: %w", base.ID, err)
 	}
 	for _, row := range coverage {
-		packages[row.PackagePath] = basePackage{inputHash: row.InputHash, documents: map[string]storage.Document{}}
+		var diagnostics []packageDiagnostic
+		if err := json.Unmarshal(row.Diagnostics, &diagnostics); err != nil {
+			return nil, fmt.Errorf("decode base package %q diagnostics: %w", row.PackagePath, err)
+		}
+		packages[row.PackagePath] = basePackage{inputHash: row.InputHash, coverage: row.Coverage, diagnostics: diagnostics, exportShapeHash: row.ExportShapeHash, documents: map[string]storage.Document{}}
 	}
 	for path, entry := range active {
 		known, found := packages[entry.Source.PackagePath]

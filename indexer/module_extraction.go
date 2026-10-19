@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"go/types"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 type moduleExtraction struct {
 	root           discoveredRoot
 	reusedHead     uuid.UUID
+	baseSnapshotID uuid.UUID
 	indexerVersion string
 	indexStartedAt time.Time
 	contextHash    string
@@ -82,7 +84,8 @@ type extractOptions struct {
 	includeTests bool
 	// base is the active documents of the snapshot the result will be published on, by package path.
 	// A package whose input hash equals its base's keeps the base's documents instead of rendering.
-	base map[string]basePackage
+	base         map[string]basePackage
+	baseSnapshot storage.ModuleSnapshot
 }
 
 // extractModule type-checks the root, hashes each package's inputs, and renders every document whose
@@ -162,18 +165,6 @@ func extractTypedLoad(ctx context.Context, load *typedLoad, base map[string]base
 	if extraction.diagnostics, err = snapshotDiagnostics(extraction.packages); err != nil {
 		return moduleExtraction{}, err
 	}
-	if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
-		PhaseCount(ctx, "symbols", int64(len(resolver.rows)))
-		for path, document := range extraction.documents {
-			if document, err = withSymbolFacts(document, resolver.rows); err != nil {
-				return fmt.Errorf("document for %q: %w", path, err)
-			}
-			extraction.documents[path] = document
-		}
-		return nil
-	}); err != nil {
-		return moduleExtraction{}, err
-	}
 	return extraction, nil
 }
 
@@ -185,7 +176,7 @@ func (extractor *packageExtraction) extractPackages(ctx context.Context) error {
 		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
 	}
 	for _, packagePath := range sortedKeys(grouped) {
-		extracted, err := extractor.extractPackage(packagePath, grouped[packagePath])
+		extracted, err := extractor.extractPackage(ctx, packagePath, grouped[packagePath])
 		if err != nil {
 			return fmt.Errorf("extract package %q: %w", packagePath, err)
 		}
@@ -202,7 +193,7 @@ func (extractor *packageExtraction) extractPackages(ctx context.Context) error {
 	return nil
 }
 
-func (extractor *packageExtraction) extractPackage(packagePath string, files []discoveredFile) (extractedPackage, error) {
+func (extractor *packageExtraction) extractPackage(ctx context.Context, packagePath string, files []discoveredFile) (extractedPackage, error) {
 	load, shapes, extraction := extractor.load, extractor.shapes, extractor.extraction
 	state, err := load.classifyPackage(files)
 	if err != nil {
@@ -238,7 +229,7 @@ func (extractor *packageExtraction) extractPackage(packagePath string, files []d
 		}
 		extracted.exportShapeHash = &shape
 	}
-	if base, found := extractor.base[packagePath]; found && base.inputHash == extracted.inputHash {
+	if base, found := extractor.base[packagePath]; found && base.inputHash == extracted.inputHash && base.coverage == extracted.coverage && reflect.DeepEqual(base.diagnostics, extracted.diagnostics) {
 		return extracted, reuseBaseDocuments(extraction, base, files)
 	}
 	for _, file := range files {
@@ -246,14 +237,23 @@ func (extractor *packageExtraction) extractPackage(packagePath string, files []d
 		if err != nil {
 			return extractedPackage{}, err
 		}
+		document := extractedDocument{
+			inputHash: extracted.inputHash, coverage: coverage,
+			symbolCount: len(content.Symbols), occurrenceCount: len(content.Occurrences),
+		}
+		if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
+			document, err = withSymbolFacts(document, content, extractor.builder.resolver.rows)
+			PhaseCount(ctx, "symbols", int64(len(document.symbolIDs)))
+			return err
+		}); err != nil {
+			return extractedPackage{}, fmt.Errorf("document for %q: %w", file.PathKey, err)
+		}
 		encoded, err := json.Marshal(content)
 		if err != nil {
 			return extractedPackage{}, fmt.Errorf("encode document for %q: %w", file.PathKey, err)
 		}
-		extraction.documents[file.PathKey] = extractedDocument{
-			inputHash: extracted.inputHash, coverage: coverage, content: storage.JSON(encoded),
-			symbolCount: len(content.Symbols), occurrenceCount: len(content.Occurrences),
-		}
+		document.content = storage.JSON(encoded)
+		extraction.documents[file.PathKey] = document
 		extractor.rendered++
 	}
 	return extracted, nil
@@ -300,13 +300,9 @@ func renderDocument(builder *documentBuilder, state packageState, file discovere
 // postings: definition from symbols, reference from every occurrence with a symbol, and embeds from
 // each embeds entry, none for builtins. It also collects the rows the document needs,
 // owners included, so publication can write them first.
-func withSymbolFacts(document extractedDocument, rows map[string]storage.Symbol) (extractedDocument, error) {
+func withSymbolFacts(document extractedDocument, content storage.DocumentContent, rows map[string]storage.Symbol) (extractedDocument, error) {
 	if document.reused || document.coverage != storage.CoverageIndexed && document.coverage != storage.CoveragePartial {
 		return document, nil
-	}
-	var content storage.DocumentContent
-	if err := json.Unmarshal(document.content, &content); err != nil {
-		return extractedDocument{}, err
 	}
 	counts, needed, err := countSymbolFacts(content, rows)
 	if err != nil {

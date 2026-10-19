@@ -37,6 +37,9 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
+	if extraction.baseSnapshotID != uuid.Nil && extraction.baseSnapshotID != base.snapshot.ID {
+		return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("location %s head moved from extraction base %s: %w", location.ID, extraction.baseSnapshotID, ErrIndexInputsChanged)
+	}
 	if options.Reason == storage.ReasonHistorical && !options.Force {
 		existing, found, err := matchingHistoricalSnapshot(ctx, database, location, extraction)
 		if err != nil {

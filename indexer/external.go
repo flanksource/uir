@@ -157,7 +157,7 @@ func (publication Publication) extractPackage(extraction *moduleExtraction, kind
 		if _, err := storage.DecodeDocument(document.unwritten(extracted), storage.SourceRevision{PathKey: document.PathKey, PackagePath: document.PackagePath}, storage.WithKinds(kinds)); err != nil {
 			return extractedPackage{}, err
 		}
-		extracted, err := withSymbolFacts(extracted, extraction.symbols)
+		extracted, err := withSymbolFacts(extracted, document.Content, extraction.symbols)
 		if err != nil {
 			return extractedPackage{}, fmt.Errorf("document %q: %w", document.PathKey, err)
 		}
