@@ -24,6 +24,7 @@ type moduleExtraction struct {
 	root           discoveredRoot
 	reusedHead     uuid.UUID
 	baseSnapshotID uuid.UUID
+	requestedBase  uuid.UUID
 	indexerVersion string
 	indexStartedAt time.Time
 	contextHash    string
