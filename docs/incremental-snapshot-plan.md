@@ -1,6 +1,8 @@
 # Incremental Git snapshots with checkpoints
 
-Status: proposed implementation plan, 2026-10-11, revised 2026-10-18 with the Captain hash-chain review and the documents review. The changes and performance targets below have not been implemented or verified.
+Status: partial implementation, started 2026-10-19 after the 2026-10-18 Captain hash-chain and documents reviews. PostgreSQL work is deferred. The sub-second performance targets, checkpoint generations, incremental extraction and final acceptance gates below remain open.
+
+The current SQLite correctness slice preserves original publication statistics when pruning rebases a snapshot, and compares bounded call graphs from both snapshots so removed implementations and dispatch edges remain visible. The existing export-shape, document-membership and ancestor-base changes are recorded in their phases below.
 
 ## Outcome
 
@@ -241,7 +243,7 @@ The fixture is a planned deliverable, not an implemented verifier in this planni
 "Has anything in public function A's call graph changed between X and Y?" needs no new hash. Answer it at query time:
 
 1. Take the changed set: symbols whose fingerprints differ between X and Y, from `symbol_deltas` through `storage.EffectiveSymbols`.
-2. Walk forward from A in Y over call, interface-dispatch, method-value reference and var-initializer edges, and report every path that reaches the changed set.
+2. Walk forward from A in both X and Y over call, interface-dispatch, method-value reference and var-initializer edges. Report paths to changed symbols reached in either snapshot, and compare edge identities so losing a dispatch target is detected even if the target's own fingerprints did not change. Keep Y's graph as the selected graph and return X's graph with the comparison, with snapshot-qualified paths.
 3. Treat any edge into a module-cache dependency whose selected version changed as changed, because those dependencies have no per-symbol facts.
 
 Expose it as `uir module graph --since <rev>` through `cmd/uir/module_graph_command.go` and `query.Pipeline.Graph` (`query/graph.go:121`). First close the edge gaps listed in the hash-chain review: implementers outside the interface's import closure, generic and type-set dispatch, method values and func-typed fields. A stored, SCC-condensed `closure_fp` per symbol is deferred until the query misses a measured latency budget; a closure hash over incomplete edges would only produce false negatives faster.

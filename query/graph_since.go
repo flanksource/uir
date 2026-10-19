@@ -46,11 +46,15 @@ type GraphChanges struct {
 	Revision       string `json:"revision"`
 	FromSnapshotID string `json:"from_snapshot_id"`
 	ToSnapshotID   string `json:"to_snapshot_id"`
-	// Changed is true when a node the graph drew changed, or the walk reached a package of a changed
-	// dependency that the exclusions left out.
+	// Changed is true when either walk reaches a changed symbol, a call edge is added or removed,
+	// or either walk reaches a changed dependency that the exclusions left out.
 	Changed bool `json:"changed"`
-	// Nodes are the changed nodes the graph drew, in the graph's node order, each with the path to it.
+	// Before is the bounded graph of the same root in the earlier snapshot, absent for a newly added root.
+	Before *graph.Graph `json:"before,omitempty"`
+	// Nodes are changed symbols reached in either snapshot, current nodes first.
 	Nodes []GraphChangedNode `json:"nodes"`
+	// Edges are call or access edges added or removed between the bounded walks.
+	Edges []GraphChangedEdge `json:"edges"`
 	// Symbols counts the root's changed symbols by reason, reached or not.
 	Symbols map[GraphChangeReason]int `json:"symbols"`
 	// Dependencies are the dependencies whose selection changed, by module path.
@@ -60,10 +64,20 @@ type GraphChanges struct {
 type GraphChangedNode struct {
 	ID     string            `json:"id"`
 	Reason GraphChangeReason `json:"reason"`
+	// SnapshotID identifies the graph whose node and path this entry names.
+	SnapshotID string `json:"snapshot_id"`
 	// Module is the dependency of a GraphChangeDependency node.
 	Module string `json:"module,omitempty"`
 	// Path is the node ids of a shortest walk from the root to the node, root first.
 	Path []string `json:"path"`
+}
+
+type GraphChangedEdge struct {
+	ID     string            `json:"id"`
+	Reason GraphChangeReason `json:"reason"`
+	// SnapshotID identifies the graph whose edge and path this entry names.
+	SnapshotID string   `json:"snapshot_id"`
+	Path       []string `json:"path"`
 }
 
 // GraphDependencyChange is a dependency whose selection differs between the snapshots: From or To
@@ -72,7 +86,7 @@ type GraphDependencyChange struct {
 	Module string `json:"module"`
 	From   string `json:"from,omitempty"`
 	To     string `json:"to,omitempty"`
-	// Excluded is true when the walk reached a package of the module that the exclusions left out,
+	// Excluded is true when either walk reached a package of the module that the exclusions left out,
 	// so no drawn node carries the change.
 	Excluded bool `json:"excluded,omitempty"`
 }
@@ -106,9 +120,13 @@ func (pipeline *Pipeline) sinceSides(ctx context.Context, since GraphSince, scop
 	return &sinceSides{request: since, from: from, to: matched[0]}, nil
 }
 
-// graphChanges marks the changed nodes of a built graph: a symbol of the root whose fingerprints
-// differ or that was added, and a node of a dependency whose selection changed.
-func (pipeline *Pipeline) graphChanges(ctx context.Context, sides *sinceSides, built *graph.Graph, facts func(string) graphPackageFacts) (*GraphChanges, error) {
+// graphChanges compares the bounded walks and the fingerprints of every symbol either one reaches.
+func (pipeline *Pipeline) graphChanges(ctx context.Context, request graphBuild, built *graph.Graph, facts func(string) graphPackageFacts) (*GraphChanges, error) {
+	sides := request.since
+	previous, err := pipeline.previousGraph(ctx, request)
+	if err != nil {
+		return nil, err
+	}
 	symbols, err := pipeline.symbolChanges(ctx, sides)
 	if err != nil {
 		return nil, err
@@ -117,13 +135,23 @@ func (pipeline *Pipeline) graphChanges(ctx context.Context, sides *sinceSides, b
 	if err != nil {
 		return nil, err
 	}
-	handles, err := pipeline.symbolHandles(ctx, built.Nodes)
+	var before *graph.Graph
+	if previous != nil {
+		before = previous.built
+		markExcludedDependencies(dependencies, before.Omitted.Excluded, previous.source.packageFacts)
+	}
+	nodes := slices.Clone(built.Nodes)
+	if before != nil {
+		nodes = append(nodes, before.Nodes...)
+	}
+	handles, err := pipeline.symbolHandles(ctx, nodes)
 	if err != nil {
 		return nil, err
 	}
 	changes := &GraphChanges{
 		Revision: sides.request.Revision, FromSnapshotID: sides.from.ID.String(), ToSnapshotID: sides.to.ID.String(),
-		Nodes: []GraphChangedNode{}, Symbols: map[GraphChangeReason]int{}, Dependencies: []GraphDependencyChange{},
+		Before: before, Nodes: []GraphChangedNode{}, Edges: sides.edgeChanges(before, built),
+		Symbols: map[GraphChangeReason]int{}, Dependencies: []GraphDependencyChange{},
 	}
 	for _, reason := range symbols {
 		changes.Symbols[reason]++
@@ -131,14 +159,18 @@ func (pipeline *Pipeline) graphChanges(ctx context.Context, sides *sinceSides, b
 	for _, node := range built.Nodes {
 		handle, indexed := handles[node.ID]
 		if reason, changed := symbols[handle]; indexed && changed {
-			changes.Nodes = append(changes.Nodes, GraphChangedNode{ID: node.ID, Reason: reason})
+			changes.Nodes = append(changes.Nodes, GraphChangedNode{ID: node.ID, Reason: reason, SnapshotID: sides.to.ID.String()})
 		} else if module := facts(node.Group).module; dependencies[module].Module != "" {
-			changes.Nodes = append(changes.Nodes, GraphChangedNode{ID: node.ID, Reason: GraphChangeDependency, Module: module})
+			changes.Nodes = append(changes.Nodes, GraphChangedNode{ID: node.ID, Reason: GraphChangeDependency, Module: module, SnapshotID: sides.to.ID.String()})
 		}
 	}
+	changes.previousNodes(before, symbols, handles)
 	changes.markPaths(built)
-	changes.addDependencies(dependencies, built.Omitted.Excluded, facts)
-	changes.Changed = len(changes.Nodes) > 0 || slices.ContainsFunc(changes.Dependencies, func(change GraphDependencyChange) bool { return change.Excluded })
+	markExcludedDependencies(dependencies, built.Omitted.Excluded, facts)
+	for _, module := range slices.Sorted(maps.Keys(dependencies)) {
+		changes.Dependencies = append(changes.Dependencies, dependencies[module])
+	}
+	changes.Changed = len(changes.Nodes)+len(changes.Edges) > 0 || slices.ContainsFunc(changes.Dependencies, func(change GraphDependencyChange) bool { return change.Excluded })
 	return changes, nil
 }
 
@@ -148,22 +180,27 @@ func (changes *GraphChanges) markPaths(built *graph.Graph) {
 		ids = append(ids, node.ID)
 	}
 	paths := built.Paths(ids)
+	var beforePaths map[string][]string
+	if changes.Before != nil {
+		beforePaths = changes.Before.Paths(ids)
+	}
 	for index := range changes.Nodes {
-		changes.Nodes[index].Path = paths[changes.Nodes[index].ID]
+		node := &changes.Nodes[index]
+		if node.SnapshotID == changes.FromSnapshotID {
+			node.Path = beforePaths[node.ID]
+		} else {
+			node.Path = paths[node.ID]
+		}
 	}
 }
 
-// addDependencies lists the changed dependencies by module path, marking those the walk reached only
-// through packages the exclusions left out.
-func (changes *GraphChanges) addDependencies(dependencies map[string]GraphDependencyChange, excluded map[string]int, facts func(string) graphPackageFacts) {
+// markExcludedDependencies marks the changed dependencies reached through excluded packages.
+func markExcludedDependencies(dependencies map[string]GraphDependencyChange, excluded map[string]int, facts func(string) graphPackageFacts) {
 	for group := range excluded {
 		if change, changed := dependencies[facts(group).module]; changed {
 			change.Excluded = true
 			dependencies[change.Module] = change
 		}
-	}
-	for _, module := range slices.Sorted(maps.Keys(dependencies)) {
-		changes.Dependencies = append(changes.Dependencies, dependencies[module])
 	}
 }
 
@@ -278,10 +315,14 @@ func sinceStage(changes *GraphChanges, built *graph.Graph) ResolutionStage {
 	for _, count := range changes.Symbols {
 		symbols += count
 	}
-	value := fmt.Sprintf("%s (snapshot %s): %d changed symbols, %d changed dependencies, %d changed nodes reached",
-		changes.Revision, changes.FromSnapshotID, symbols, len(changes.Dependencies), len(changes.Nodes))
-	if built.Omitted.BeyondDepth > 0 || built.Omitted.NodeLimit {
-		value += "; the walk stopped at its depth or node limit, so changes past it are not reported"
+	value := fmt.Sprintf("%s (snapshot %s): %d changed symbols, %d changed dependencies, %d changed nodes reached, %d added or removed edges",
+		changes.Revision, changes.FromSnapshotID, symbols, len(changes.Dependencies), len(changes.Nodes), len(changes.Edges))
+	limited := built.Omitted.BeyondDepth > 0 || built.Omitted.NodeLimit
+	if changes.Before != nil {
+		limited = limited || changes.Before.Omitted.BeyondDepth > 0 || changes.Before.Omitted.NodeLimit
+	}
+	if limited {
+		value += "; a walk stopped at its depth or node limit, so changes past it are not reported"
 	}
 	return ResolutionStage{Name: "since", Value: value}
 }
