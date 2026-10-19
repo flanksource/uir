@@ -218,6 +218,7 @@ func (pipeline *Pipeline) resolveGraph(ctx context.Context, selection moduleScop
 	}
 	clock.lap("resolve")
 	request.root = roots[0]
+	request.scopes = selection.scopes
 	if result, err = pipeline.buildGraph(ctx, index, request, result); err != nil {
 		return GraphResult{}, false, err
 	}
@@ -227,14 +228,21 @@ func (pipeline *Pipeline) resolveGraph(ctx context.Context, selection moduleScop
 
 type graphBuild struct {
 	root       ModuleSymbol
+	scopes     []moduleScope
 	options    GraphOptions
 	exclusions graphExclusions
 	since      *sinceSides
 }
 
-func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, request graphBuild, result GraphResult) (GraphResult, error) {
+type graphWalk struct {
+	built  *graph.Graph
+	source *indexGraphSource
+	reader *guardReader
+}
+
+func buildIndexedGraph(ctx context.Context, index *compactIndex, request graphBuild) (graphWalk, error) {
 	sources := newScopeSources(index.indexContext)
-	reader := newGuardReader(pipeline.database, sources)
+	reader := newGuardReader(index.database, sources)
 	options := request.options
 	source := newIndexGraphSource(index, sources, reader, options.Access)
 	built, err := graph.Build(ctx, source, []string{request.root.ID}, graph.Options{
@@ -242,21 +250,30 @@ func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, r
 		Exclude: func(node graph.Node) bool { return request.exclusions.excludes(source.packageFacts(node.Group)) },
 	})
 	if err != nil {
+		return graphWalk{}, err
+	}
+	built.Omitted.UnreadableSource = reader.unreadablePaths()
+	return graphWalk{built: built, source: source, reader: reader}, nil
+}
+
+func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, request graphBuild, result GraphResult) (GraphResult, error) {
+	walk, err := buildIndexedGraph(ctx, index, request)
+	if err != nil {
 		return GraphResult{}, err
 	}
+	built, source, reader := walk.built, walk.source, walk.reader
 	result.Graph = *built
 	result.Packages = graphPackages(built, source.packages, request.exclusions)
 	root := request.root
 	result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: root.QueryName})
 	result.Stages = append(result.Stages, source.stages...)
 	if unreadable := reader.unreadablePaths(); len(unreadable) > 0 {
-		result.Omitted.UnreadableSource = unreadable
 		result.Stages = append(result.Stages, ResolutionStage{Name: "guards", Value: fmt.Sprintf(
 			"%d sources unreadable, their call sites carry no guards; %s: %v", len(unreadable), unreadable[0], reader.unreadable[unreadable[0]])})
 	}
 	result.Stages = append(result.Stages, ResolutionStage{Name: "graph", Value: fmt.Sprintf("%d nodes, %d edges", len(built.Nodes), len(built.Edges))})
 	if request.since != nil {
-		if result.Since, err = pipeline.graphChanges(ctx, request.since, built, source.packageFacts); err != nil {
+		if result.Since, err = pipeline.graphChanges(ctx, request, built, source.packageFacts); err != nil {
 			return GraphResult{}, err
 		}
 		result.Stages = append(result.Stages, sinceStage(result.Since, built))
