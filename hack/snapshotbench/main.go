@@ -19,6 +19,10 @@ func dispatch(ctx context.Context, args []string) error {
 		return fmt.Errorf("usage: go run ./hack/snapshotbench run|case|verify <options>")
 	}
 	switch args[0] {
+	case "impact":
+		return runImpact(ctx, args[1:])
+	case "impact-report":
+		return reportImpact(args[1:])
 	case "captain":
 		return runCaptain(ctx, args[1:])
 	case "trace-paths":
