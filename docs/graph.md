@@ -148,17 +148,21 @@ uir graph example.org/chain.A --since v1.4.0 --depth 6
     ╰── body C: A → B → C
 ```
 
-The changed set is computed from `storage.EffectiveSymbols` of both snapshots, by symbol handle: a symbol that is new is `added`, one whose public fingerprint differs `signature`, private fingerprint `structure`, content fingerprint `body`, and one that is gone `removed` (counted, but never a node of the newer graph). A node of a module-cache dependency whose selection in `snapshot_dependencies` changed (selected version, replacement, or resolved target snapshot) is `dependency-version`, because dependencies have no per-symbol facts. When the walk reached such a dependency only through packages the exclusions leave out, the dependency is listed with `excluded: true`; rerun with `--exclude none` to see where it is entered.
+The root is walked in both snapshots with the same depth, node limit, access and exclusion options. The top-level graph remains the selected snapshot's graph; `since.before` holds the earlier graph, including removed nodes and their source locations. A newly added root has no earlier graph. Other roots in the scope stay pinned to the same selected snapshots in both walks.
+
+The changed set is computed from `storage.EffectiveSymbols` of both snapshots, by symbol handle: a symbol that is new is `added`, one whose public fingerprint differs `signature`, private fingerprint `structure`, content fingerprint `body`, and one that is gone `removed`. A changed symbol reached in either walk is reported with a shortest path in that snapshot. Added and removed edge identities are reported separately, so losing an interface dispatch target is a change even when the implementation method's own fingerprints did not change. A node of a module-cache dependency whose selection in `snapshot_dependencies` changed (selected version, replacement, or resolved target snapshot) is `dependency-version`, because dependencies have no per-symbol facts. When either walk reached such a dependency through a package the exclusions leave out, the dependency is listed with `excluded: true`; rerun with `--exclude none` to see where it is entered.
 
 | `since` field | Meaning |
 | --- | --- |
 | `revision`, `from_snapshot_id`, `to_snapshot_id` | What was compared. |
-| `changed` | True when a drawn node changed, or a changed dependency was reached through an excluded package. |
-| `nodes` | Each changed drawn node: `id`, `reason`, `module` (for `dependency-version`), and `path`, the node ids of a shortest walk from the root, root first. |
+| `changed` | True when either walk reached a changed symbol, an edge was added or removed, or a changed dependency was reached through an excluded package. |
+| `before` | The earlier bounded graph, absent when the root was added. Its `omitted` field reports that walk's limits. |
+| `nodes` | Each changed node reached in either snapshot: `id`, `reason`, `snapshot_id`, `module` (for `dependency-version`), and `path`, the node ids of a shortest walk from the root, root first. |
+| `edges` | Each added or removed edge: `id`, `reason` (`added` or `removed`), `snapshot_id`, and `path` from the root through the edge's destination. |
 | `symbols` | The root's changed symbols counted by reason, reached or not. |
 | `dependencies` | Every dependency whose selection changed: `module`, `from`, `to`, `excluded`. |
 
-A `since` stage summarises the counts and says when the walk stopped at its depth or node limit.
+A change's `snapshot_id` identifies whether its node, edge and path belong to the top-level graph or `since.before`. A `since` stage summarises the counts and says when either walk stopped at its depth or node limit. Edge changes describe these bounded walks; raising a limit can reveal more changes.
 
 The answer is only as complete as the call edges the index records, so `changed: false` is not a proof. Known false negatives:
 

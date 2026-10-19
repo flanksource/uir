@@ -45,4 +45,20 @@ var _ = Describe("dependency selections a change query compares", func() {
 		_, err := changedDependencies(captured(), storage.SnapshotDependenciesResult{})
 		Expect(err).To(MatchError(ContainSubstring("captured")))
 	})
+
+	It("retains an excluded dependency reached only in the earlier walk", func() {
+		changes, err := changedDependencies(captured(storage.SnapshotDependency{ModulePath: pricing, SelectedVersion: "v1.0.0"}), captured())
+		Expect(err).ToNot(HaveOccurred())
+		facts := func(group string) graphPackageFacts {
+			Expect(group).To(Equal(pricing + "/api"))
+			return graphPackageFacts{module: pricing}
+		}
+
+		markExcludedDependencies(changes, map[string]int{pricing + "/api": 1}, facts)
+		markExcludedDependencies(changes, nil, facts)
+
+		Expect(changes).To(Equal(map[string]GraphDependencyChange{
+			pricing: {Module: pricing, From: "v1.0.0", Excluded: true},
+		}))
+	})
 })
