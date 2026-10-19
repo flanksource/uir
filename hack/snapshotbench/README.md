@@ -1,5 +1,27 @@
 # Incremental Git snapshot profiling
 
+## SQLite change-impact measurements
+
+`impact` measures `graph --since` and history pruning against an existing, checkpointed Captain SQLite corpus. It copies the corpus before opening it, saves the running executable and records unprofiled query/transaction latency, allocated bytes and serialized response size. Setup, migrations and effective-state checks are outside the timers. The corpus must contain the two commits selected by `--from` and `--to`, with the later snapshot based on the earlier one. Defaults use the two Captain commits in `captain_run.go`.
+
+Build the same harness against the before and after production sources, using identical sibling dependencies. Run the binaries serially in alternating order, using new output directories each time:
+
+```bash
+go run ./hack/snapshotbench impact --db .tmp/captain-profile/wave3/uir.db --out "$PWD/.tmp/impact/after-1" --label after --samples 10
+```
+
+`--only graph` or `--only prune` selects one operation. Graphs use depth 4 and a 150-node limit by default (`--depth`, `--limit`). Each selector is measured with fresh pipelines and with a reused pipeline; both have warm OS caches. Each prune uses a fresh database copy, with one survivor rebased, and verifies document/source bindings, symbol fingerprints and implements facts afterward. One warmup per cohort is excluded. These are operation measurements, not indexing or ordinary-commit acceptance measurements. PostgreSQL is excluded.
+
+Compare completed runs from both binaries, requiring identical corpus hashes, snapshot identities, runtime, bounds and current graph digests:
+
+```bash
+go run ./hack/snapshotbench impact-report --before "$PWD/.tmp/impact/before-1,$PWD/.tmp/impact/before-2" --after "$PWD/.tmp/impact/after-1,$PWD/.tmp/impact/after-2" --out "$PWD/.tmp/impact/report"
+```
+
+Each run retains raw samples in `results.json`, its executable in `runner`, and the copied corpus in `seed.db`. The report includes median latency, allocations and response sizes; `summary.json` also records min, nearest-rank p95 and maximum.
+
+## Historical indexing profiles
+
 This runner profiles committed sources in isolated clones. It uses the native UIR Go indexer for mission-control-oipa and the offline OIPA filesystem lowerer for rules-dev-baseline. Original repositories are read only. Each corpus and indexing path has a separate SQLite database; each operation runs in a separate Gavel fixture invocation to preserve commit order.
 
 Build the producer with `make build` in the OIPA checkout before starting. `go run` compiles and copies the runner before any measurement. The runner also copies the OIPA and Gavel executables into the new run directory and records their SHA-256 fingerprints and Go build information.
