@@ -148,6 +148,27 @@ var _ = Describe("module call graph rendering", func() {
 		Expect(graphLines(result)[len(graphLines(result))-1]).To(Equal("╰── unchanged since v1"))
 	})
 
+	It("names a removed node and edge from the earlier graph", func() {
+		root := graph.Node{ID: "root", Kind: "func", Label: "Run", Group: "example.org/app"}
+		removed := graph.Node{ID: "removed", Kind: "method", Label: "Mail.Notify", Depth: 1}
+		result := moduleGraphResult{GraphResult: query.GraphResult{
+			Graph: graph.Graph{Roots: []string{root.ID}, Nodes: []graph.Node{root}},
+			Since: &query.GraphChanges{Revision: "v1", Changed: true,
+				Before: &graph.Graph{Roots: []string{root.ID}, Nodes: []graph.Node{root, removed}},
+				Nodes:  []query.GraphChangedNode{{ID: removed.ID, Reason: query.GraphChangeRemoved, Path: []string{root.ID, removed.ID}}},
+				Edges:  []query.GraphChangedEdge{{ID: "root|removed|dispatch", Reason: query.GraphChangeRemoved, Path: []string{root.ID, removed.ID}}},
+			},
+		}}
+		Expect(graphLines(result)).To(Equal([]string{
+			"ƒ Run example.org/app",
+			"╰── changed since v1",
+			"    ├── removed Mail.Notify: Run → Mail.Notify",
+			"    ╰── removed edge Run → Mail.Notify",
+		}))
+		result.Since.Nodes = nil
+		Expect(graphLines(result)).To(ContainElement("    ╰── removed edge Run → Mail.Notify"))
+	})
+
 	It("names the package of a callee outside the caller's, and summarises what the graph left out", func() {
 		root := graph.Node{ID: "root", Kind: "func", Label: "Run", Group: "example.org/app", Out: 4,
 			Location: &graph.Location{Path: "app.go", Line: 3}}

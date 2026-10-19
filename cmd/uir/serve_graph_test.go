@@ -150,6 +150,40 @@ var _ = Describe("module call graph", func() {
 		Expect(result.Packages).To(Equal([]query.GraphPackage{{Path: ordersRoot, Nodes: 6, Excluded: true}}))
 	})
 
+	It("serves a removed implementation and its former path in a change query", func(ctx SpecContext) {
+		workspace, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+		Expect(err).ToNot(HaveOccurred())
+		gitIn(workspace, "init", "--quiet", "--initial-branch=main")
+		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module "+ordersRoot+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
+		var snapshots []string
+		var before string
+		for _, source := range []string{ordersSource, strings.Replace(ordersSource, "func (Mail) Notify(message string) {}", "", 1)} {
+			Expect(os.WriteFile(filepath.Join(workspace, ordersPath), []byte(source), 0o644)).To(Succeed())
+			gitIn(workspace, "add", "--", "go.mod", ordersPath)
+			gitIn(workspace, "commit", "--quiet", "--message", "fixture")
+			indexed, err := addModules(ctx, database, workspace, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(indexed).To(HaveLen(1))
+			snapshots = append(snapshots, indexed[0].SnapshotID)
+			if before == "" {
+				before = gitIn(workspace, "rev-parse", "HEAD")
+			}
+		}
+		response := get(url.Values{"selector": {"orders.Submit"}, "root": {ordersRoot}, "location": {workspace}, "since": {before}})
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var result query.GraphResult
+		Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
+		Expect(result.Since).ToNot(BeNil())
+		Expect(result.Since.Changed).To(BeTrue())
+		Expect(result.Since.FromSnapshotID).To(Equal(snapshots[0]))
+		Expect(result.Since.ToSnapshotID).To(Equal(snapshots[1]))
+		Expect(result.Since.Before).ToNot(BeNil())
+		Expect(result.Since.Before.Nodes).To(ContainElement(HaveField("Label", "Mail.Notify")))
+		Expect(result.Nodes).ToNot(ContainElement(HaveField("Label", "Mail.Notify")))
+		Expect(result.Since.Nodes).To(ConsistOf(And(HaveField("Reason", query.GraphChangeRemoved), HaveField("SnapshotID", snapshots[0]), HaveField("Path", HaveLen(2)))))
+		Expect(result.Since.Edges).To(ConsistOf(And(HaveField("Reason", query.GraphChangeRemoved), HaveField("SnapshotID", snapshots[0]), HaveField("Path", HaveLen(2)))))
+	})
+
 	It("accepts the canonical symbol id of a node in place of a selector", func() {
 		selected := get(url.Values{"selector": {"orders.Submit"}, "direction": {"callees"}, "depth": {"1"}})
 		Expect(selected.Code).To(Equal(http.StatusOK), selected.Body.String())

@@ -51,10 +51,15 @@ func changedNodeName(changes *query.GraphChanges) func(graph.Node) api.Text {
 // sinceTree lists each changed node with the path to it, and each changed dependency.
 func sinceTree(result query.GraphResult) *graph.TreeNode {
 	changes := result.Since
-	if len(changes.Nodes) == 0 && len(changes.Dependencies) == 0 {
+	if len(changes.Nodes)+len(changes.Edges) == 0 && len(changes.Dependencies) == 0 {
 		return &graph.TreeNode{Label: clicky.Text("unchanged since "+changes.Revision, uir.StyleMuted)}
 	}
 	labels := map[string]string{}
+	if changes.Before != nil {
+		for _, node := range changes.Before.Nodes {
+			labels[node.ID] = node.Label
+		}
+	}
 	for _, node := range result.Nodes {
 		labels[node.ID] = node.Label
 	}
@@ -66,6 +71,14 @@ func sinceTree(result query.GraphResult) *graph.TreeNode {
 		}
 		tree.Children = append(tree.Children, &graph.TreeNode{Label: clicky.Text(string(node.Reason), uir.StyleWarning).Space().
 			Append(labels[node.ID] + ": " + strings.Join(path, " → "))})
+	}
+	for _, edge := range changes.Edges {
+		path := make([]string, 0, len(edge.Path))
+		for _, id := range edge.Path {
+			path = append(path, labels[id])
+		}
+		tree.Children = append(tree.Children, &graph.TreeNode{Label: clicky.Text(string(edge.Reason)+" edge", uir.StyleWarning).Space().
+			Append(strings.Join(path, " → "))})
 	}
 	for _, dependency := range changes.Dependencies {
 		line := fmt.Sprintf("%s %s → %s", dependency.Module, dependency.From, dependency.To)

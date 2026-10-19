@@ -88,21 +88,6 @@ func decodeDiff(ctx context.Context, runtime *commandRuntime, args ...string) sy
 	return result
 }
 
-// captureStdout runs fn with os.Stdout redirected and returns what it wrote.
-func captureStdout(fn func() error) (string, error) {
-	GinkgoHelper()
-	reader, writer, err := os.Pipe()
-	Expect(err).To(Succeed())
-	original := os.Stdout
-	os.Stdout = writer
-	runErr := fn()
-	os.Stdout = original
-	Expect(writer.Close()).To(Succeed())
-	output, err := io.ReadAll(reader)
-	Expect(err).To(Succeed())
-	return string(output), runErr
-}
-
 var _ = Describe("uir diff", func() {
 	It("prints a commit diff as JSON with exported rows by default", func(ctx SpecContext) {
 		database := openCommandDatabase(ctx)
