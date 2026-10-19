@@ -44,8 +44,8 @@ func (plan prunePlan) apply(ctx context.Context, tx *gorm.DB, result *PruneResul
 }
 
 // rebaseSnapshot makes a kept snapshot whose base is deleted stand alone: one set delta per path,
-// document binding, and symbol it serves replaces its own deltas, it loses its base, and its stats are recorded again against
-// no base. The handles its old symbol deltas named become orphan candidates.
+// document binding, and symbol it serves replaces its own deltas, and it loses its base. Its recorded
+// publication stats remain unchanged. The handles its old symbol deltas named become orphan candidates.
 func rebaseSnapshot(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased rebasedSnapshot, candidates map[int64]bool) error {
 	snapshot := rebased.snapshot
 	for _, source := range snapshotHandles {
@@ -76,7 +76,7 @@ func rebaseSnapshot(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased r
 	if updated.RowsAffected != 1 {
 		return fmt.Errorf("clear the base of snapshot %s: updated %d rows", snapshot.ID, updated.RowsAffected)
 	}
-	return recordDerivedSnapshotStats(ctx, tx, snapshot.ID)
+	return nil
 }
 
 func createRebasedDeltas(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased rebasedSnapshot) error {

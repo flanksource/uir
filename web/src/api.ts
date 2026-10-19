@@ -45,8 +45,8 @@ export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local
 
 export type SnapshotKind = "head" | "historical" | "versioned";
 
-// ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts are against
-// base_snapshot_id; index_started_at is absent on snapshots published before it was recorded.
+// ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts describe
+// its original publication, including after rebasing; index_started_at is absent on older snapshots.
 export type ModuleSnapshot = {
   id: string;
   root_key: string;
@@ -225,14 +225,18 @@ export type ModuleGraphResult = ModuleGraph & {
   since?: ModuleGraphChanges;
 };
 export type ModuleGraphChangeReason = "added" | "removed" | "signature" | "structure" | "body" | "dependency-version";
-/** A changed node the graph drew; `path` is the node ids of a shortest walk from the root, root first. */
-export type ModuleGraphChangedNode = { id: string; reason: ModuleGraphChangeReason; module?: string; path: string[] };
+/** A changed node reached in either snapshot; `snapshot_id` selects the graph containing `path`. */
+export type ModuleGraphChangedNode = { id: string; reason: ModuleGraphChangeReason; snapshot_id: string; module?: string; path: string[] };
+export type ModuleGraphChangedEdge = { id: string; reason: "added" | "removed"; snapshot_id: string; path: string[] };
 export type ModuleGraphDependencyChange = { module: string; from?: string; to?: string; excluded?: boolean };
 export type ModuleGraphChanges = {
   revision: string; from_snapshot_id: string; to_snapshot_id: string;
-  /** Whether anything the walk reached changed. */
+  /** Whether either walk reaches a changed symbol, or an edge or reached dependency changed. */
   changed: boolean;
+  /** The earlier bounded graph, absent when the root was added. */
+  before?: ModuleGraph;
   nodes: ModuleGraphChangedNode[];
+  edges: ModuleGraphChangedEdge[];
   symbols: Partial<Record<ModuleGraphChangeReason, number>>;
   dependencies: ModuleGraphDependencyChange[];
 };
