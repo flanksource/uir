@@ -61,7 +61,7 @@ func (indexer *Indexer) indexPreparedRevision(ctx context.Context, prepared prep
 	}); err != nil {
 		return result, err
 	}
-	extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests, base: packages})
+	extraction, err := indexer.extractFromBase(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests, base: packages, baseSnapshot: base})
 	if err != nil {
 		return result, fmt.Errorf("extract historical module %q: %w", root.RootKey, err)
 	}

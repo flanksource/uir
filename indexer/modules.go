@@ -159,8 +159,23 @@ func (indexer *Indexer) extractOrReuse(ctx context.Context, check *headCheck, ro
 		_, err := check.confirmSnapshot(ctx, root.LocalPath, head)
 		return moduleExtraction{root: root, reusedHead: head}, err
 	}
-	extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests})
+	var base storage.ModuleSnapshot
+	var packages map[string]basePackage
+	if !options.Force {
+		var found bool
+		var err error
+		if base, found, err = loadHead(ctx, indexer.database, root); err != nil {
+			return moduleExtraction{}, err
+		}
+		if found {
+			if packages, err = basePackages(ctx, indexer.database, base); err != nil {
+				return moduleExtraction{}, err
+			}
+		}
+	}
+	extraction, err := indexer.extractFromBase(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests, base: packages, baseSnapshot: base})
 	if err == nil {
+		extraction.baseSnapshotID = base.ID
 		check.confirmExtraction(extraction)
 	}
 	return extraction, err
