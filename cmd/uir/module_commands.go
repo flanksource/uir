@@ -228,7 +228,9 @@ func registerModuleCommands(root *cobra.Command) {
 		return queryModules(ctx, database, options)
 	})
 	queryCommand.Use = "query [expression]"
-	queryCommand.Short = "Run a compact or SQL navigation query against indexed snapshots"
+	queryCommand.Short = "Run compact or SQL navigation and stored file/callable metric queries against indexed snapshots"
+	queryCommand.Long = "Query immutable indexed snapshots. SQL supports files() with file.lines and file.definitions, and callable symbol.metrics.param_count and symbol.metrics.body_lines. Use files(include_excluded => TRUE) with file.build_constraint [NOT] REQUIRES 'tag' to inspect modern Go build constraints, including build-excluded files. Build constraints read verified snapshot source bytes. Metrics are recorded during indexing; reindex or republish a revision when its requested metrics are unavailable."
+	queryCommand.Example = "uir query 'SELECT path, file.lines, file.definitions FROM files() WHERE file.lines < 100 AND file.definitions < 3'"
 	queryCommand.Args = cobra.MaximumNArgs(1)
 	setModuleRoute(queryCommand, "modules/query")
 	catalog := clicky.AddNamedCommandWithContext("query-catalog", root, struct{}{}, func(ctx context.Context, _ struct{}) (query.SQLCatalog, error) {
@@ -242,7 +244,7 @@ func registerModuleCommands(root *cobra.Command) {
 		}
 		return pipeline.QueryCatalog(ctx)
 	})
-	catalog.Short = "List query functions, symbol kinds, and property schemas"
+	catalog.Short = "List query functions, symbol kinds, metric fields, and property schemas"
 	setModuleRoute(catalog, "modules/query-catalog")
 	catalog.Annotations["clicky/operation-method"] = http.MethodGet
 	suggest := clicky.AddNamedCommandWithContext("suggest", root, moduleSuggestOptions{}, func(ctx context.Context, options moduleSuggestOptions) ([]query.ModuleSymbol, error) {
@@ -367,8 +369,10 @@ func queryModules(ctx context.Context, database *gorm.DB, options moduleQueryOpt
 		path = &moduleCallPath{Symbols: result.Path.Symbols, Calls: moduleQueryRows(result.Path.Calls)}
 	}
 	matches := moduleQueryRows(result.Matches)
-	if err := populateQueryUsage(ctx, pipeline, matches); err != nil {
-		return moduleQueryResult{}, err
+	if language != query.LanguageSQL {
+		if err := populateQueryUsage(ctx, pipeline, matches); err != nil {
+			return moduleQueryResult{}, err
+		}
 	}
 	return moduleQueryResult{
 		sql:     language == query.LanguageSQL,
