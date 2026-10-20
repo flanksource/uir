@@ -19,6 +19,7 @@ export default defineConfig({
         { text: 'Go AST indexing', link: '/indexing' },
         { text: 'Compact queries', link: '/query' },
         { text: 'SQL navigation', link: '/sql-query' },
+        { text: 'SQL lint rules', link: '/lint' },
         { text: 'Call graphs', link: '/graph' },
         { text: 'Symbol diffs', link: '/diff' },
         { text: 'Historical imports', link: '/historical-import' },

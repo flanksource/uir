@@ -19,6 +19,15 @@ func dispatch(ctx context.Context, args []string) error {
 		return fmt.Errorf("usage: go run ./hack/snapshotbench run|case|verify <options>")
 	}
 	switch args[0] {
+	case "save-runner":
+		if len(args) != 2 {
+			return fmt.Errorf("save-runner requires one new executable path")
+		}
+		source, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return copyExecutable(source, args[1])
 	case "impact":
 		return runImpact(ctx, args[1:])
 	case "impact-report":
