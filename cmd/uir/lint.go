@@ -18,10 +18,11 @@ type lintOptions struct {
 	Exclude  []string `flag:"exclude" help:"Exclude exact rule IDs or project-relative file globs (repeat or comma-separate; exclusions win)"`
 	NoIndex  bool     `flag:"no-index" help:"Require current stored facts without refreshing the index"`
 	Snapshot string   `flag:"snapshot" help:"Lint an immutable historical snapshot without refreshing"`
+	GroupBy  string   `flag:"group-by" help:"Group findings by symbol or file (default: file)"`
 }
 
 func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
-	command := clicky.AddNamedCommandWithContext("lint", root, lintOptions{}, func(ctx context.Context, options lintOptions) ([]*linters.LinterResult, error) {
+	command := clicky.AddNamedCommandWithContext("lint", root, lintOptions{}, func(ctx context.Context, options lintOptions) ([]*lint.Result, error) {
 		directory, err := os.Getwd()
 		if err != nil {
 			return nil, err
@@ -34,7 +35,7 @@ func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 		if err != nil {
 			return lintFailure(err), err
 		}
-		if _, err := config.Filter(lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude}); err != nil {
+		if _, err := config.Filter(lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, GroupBy: options.GroupBy}); err != nil {
 			return lintFailure(err), err
 		}
 		if options.NoIndex && options.Snapshot != "" {
@@ -45,8 +46,8 @@ func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 		if err != nil {
 			return lintFailure(err), err
 		}
-		results := []*linters.LinterResult{lint.Run(ctx, database, config, lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot})}
-		if linters.HasFailures(results) {
+		results := []*lint.Result{lint.Run(ctx, database, config, lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy})}
+		if linters.HasFailures([]*linters.LinterResult{results[0].LinterResult}) {
 			return results, errors.New("UIR lint failed")
 		}
 		return results, nil
@@ -56,6 +57,6 @@ func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 	clicky.MarkLocalOnly(command)
 }
 
-func lintFailure(err error) []*linters.LinterResult {
-	return []*linters.LinterResult{{Linter: "uir", Error: err.Error()}}
+func lintFailure(err error) []*lint.Result {
+	return []*lint.Result{{LinterResult: &linters.LinterResult{Linter: "uir", Error: err.Error()}}}
 }

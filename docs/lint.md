@@ -13,6 +13,8 @@ uir lint --config path/to/.uir.yaml --no-index
 uir lint --config path/to/.uir.yaml --snapshot SNAPSHOT_ID
 uir lint --include 'cmd/**' --exclude '**/*_test.go'
 uir lint --exclude function-parameters
+uir lint --exclude function-parameters --group-by symbol
+uir lint --group-by file --format json
 ```
 
 Configuration discovery starts in the current directory and stops at the Git root. `--config` selects an explicit file. The configuration directory defines the project root; configurations do not inherit or merge. Version 1 accepts only `version`, `lint.include_tests` (default false) and `lint.rules`. Each rule requires a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. The ID `uir/coverage` is reserved for run diagnostics. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
@@ -38,7 +40,9 @@ By default, lint incrementally indexes Go modules below the project root and pin
 
 Partial or syntax-only coverage produces a fileless warning under `uir/coverage`; rules continue against available facts. Missing required metrics, catalog binding errors, index failures and message failures are execution errors. Findings completed before an execution failure remain in the JSON report. File-level findings have no invented line or column.
 
-Error findings and execution failures exit nonzero. Warnings and info alone exit zero. JSON output is an array containing the canonical Gavel `LinterResult`, including `success`, `error`, `duration`, `violations`, `file_count` and `rule_count`. `success` describes execution, so an error-severity finding may appear in a successful report while the command exits nonzero.
+`--group-by symbol|file` groups findings for review. File grouping is the default display. Symbol grouping combines findings from different rules under the declaration owning the source location; call and relationship findings belong to the caller/source symbol, independently of the SQL projection. Groups use canonical symbol IDs and file paths, so identically named symbols stay distinct. Findings without a symbol appear under file findings, and fileless coverage warnings appear under run diagnostics. Grouping preserves every finding, its severity and location, and the command's exit status. Explicit grouping also adds `group_by` and a `groups` array to JSON when findings exist; each group contains `file`, optional `symbol_id` and `symbol`, and `violations`. The flat `violations` array remains available for Gavel consumers. Omitting the flag preserves the standard report JSON.
+
+Error findings and execution failures exit nonzero. Warnings and info alone exit zero. JSON output is an array containing the Gavel `LinterResult` fields, including `success`, `error`, `duration`, `violations`, `file_count` and `rule_count`. `success` describes execution, so an error-severity finding may appear in a successful report while the command exits nonzero.
 
 Gavel discovers `.uir.yaml` and runs the installed `uir` binary as a native linter. Use `gavel lint --linters uir` for Gavel snapshots, baselines, summaries and UI. Analysis always runs with full project context; a normal file scope filters reported findings afterward. Changing `.uir.yaml` reports the full owning project. Fileless run warnings survive file scopes.
 

@@ -1,6 +1,10 @@
 package lint
 
-import "github.com/flanksource/uir/query"
+import (
+	"fmt"
+
+	"github.com/flanksource/uir/query"
+)
 
 type Selection struct {
 	Rules       []Rule
@@ -8,6 +12,9 @@ type Selection struct {
 }
 
 func (config *Config) Filter(options Options) (*Selection, error) {
+	if options.GroupBy != "" && options.GroupBy != "file" && options.GroupBy != "symbol" {
+		return nil, fmt.Errorf("invalid --group-by %q: expected symbol or file", options.GroupBy)
+	}
 	rules, err := config.Select(options.Rules)
 	if err != nil {
 		return nil, err

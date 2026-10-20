@@ -22,12 +22,14 @@ type Options struct {
 	Exclude  []string
 	NoIndex  bool
 	Snapshot string
+	GroupBy  string
 }
 
-func Run(ctx context.Context, database *gorm.DB, config *Config, options Options) *linters.LinterResult {
+func Run(ctx context.Context, database *gorm.DB, config *Config, options Options) *Result {
 	started := time.Now()
-	result := &linters.LinterResult{Linter: "uir", Violations: []models.Violation{}}
+	result := &Result{LinterResult: &linters.LinterResult{Linter: "uir", Violations: []models.Violation{}}, GroupBy: options.GroupBy}
 	err := execute(ctx, database, config, options, result)
+	result.sortGroups()
 	result.Duration = time.Since(started)
 	result.Success = err == nil
 	if err != nil {
@@ -36,7 +38,7 @@ func Run(ctx context.Context, database *gorm.DB, config *Config, options Options
 	return result
 }
 
-func execute(ctx context.Context, database *gorm.DB, config *Config, options Options, result *linters.LinterResult) error {
+func execute(ctx context.Context, database *gorm.DB, config *Config, options Options, result *Result) error {
 	if config == nil || config.Path == "" {
 		return errors.New("a loaded lint configuration is required")
 	}
@@ -96,7 +98,7 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 				if row.Match.Column != nil {
 					finding.Column = *row.Match.Column
 				}
-				result.Violations = append(result.Violations, finding)
+				result.addFinding(finding, row.WitnessSymbol)
 				return nil
 			})
 			for _, gap := range queried.Coverage {
@@ -110,7 +112,7 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 				coverage[key] = true
 				warning := models.NewViolationBuilder().WithMessage(fmt.Sprintf("%s: %s coverage in snapshot %s (%d diagnostics)", gap.PackagePath, gap.Coverage, gap.SnapshotID, gap.Diagnostics)).WithSource("uir").WithRuleFromLinter("uir", "uir/coverage").Build()
 				warning.Severity = models.SeverityWarning
-				result.Violations = append(result.Violations, warning)
+				result.addFinding(warning, nil)
 			}
 			result.FileCount = len(files)
 			if err != nil {

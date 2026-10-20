@@ -7,12 +7,38 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("SQL row visitor", func() {
+	It("retains owning symbols for declarations and native relationships independently of projections", func(ctx SpecContext) {
+		database := openQueryDatabase(ctx, "sqlite")
+		publication := domainPublication()
+		_, err := indexer.Publish(ctx, database, publication)
+		Expect(err).NotTo(HaveOccurred())
+		pipeline, err := query.NewPipeline(database)
+		Expect(err).NotTo(HaveOccurred())
+		for _, sample := range []struct{ source, value, owner string }{
+			{"outgoing(http.route:Orders)", "Handle", "Orders"},
+			{"incoming(func:Handle)", "Orders", "Orders"},
+			{"func:Handle", "Handle", "Handle"},
+		} {
+			var rows []query.SQLRow
+			_, err := pipeline.VisitSQL(ctx, "SELECT symbol.name AS name FROM "+sample.source, query.ModuleScopeOptions{RootKey: publication.RootKey}, func(row query.SQLRow) error {
+				rows = append(rows, row)
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rows).To(HaveLen(1))
+			Expect(rows[0].Values).To(Equal(map[string]any{"name": sample.value}))
+			Expect(rows[0].WitnessSymbol).NotTo(BeNil())
+			Expect(rows[0].WitnessSymbol.Name).To(Equal(sample.owner))
+			Expect(rows[0].Match.Path).To(Equal(sample.owner + ".txt"))
+		}
+	})
 	It("rejects pagination and terminal sources before opening a database", func() {
 		for _, input := range []string{"SELECT path FROM files() LIMIT 1", "SELECT * FROM graph(func:*)", "SELECT * FROM path(func:A, func:B)", "invalid"} {
 			Expect(query.ValidateSQLRows(input)).To(HaveOccurred(), input)

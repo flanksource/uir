@@ -23,6 +23,7 @@ var sqlWildcardFields = []string{"symbol", "symbol.id", "symbol.kind", "symbol.n
 
 type sqlRecord struct {
 	match     ModuleMatch
+	witness   *ModuleSymbol
 	values    map[string]any
 	buildTags map[string]bool
 }
@@ -122,6 +123,9 @@ func (index *compactIndex) sqlRecords(ctx context.Context, value compactValue, p
 		if id != "" {
 			ids[id] = true
 		}
+		if witness := witnessSymbolID(match); witness != "" {
+			ids[witness] = true
+		}
 	}
 	symbols, err := index.symbolsByID(ctx, sortedKeys(ids))
 	if err != nil {
@@ -161,9 +165,23 @@ func (index *compactIndex) sqlRecords(ctx context.Context, value compactValue, p
 				}
 			}
 		}
-		records = append(records, sqlRecord{match: match, values: values})
+		record := sqlRecord{match: match, values: values}
+		if witness, found := byID[witnessSymbolID(match)]; found {
+			record.witness = &witness
+		}
+		records = append(records, record)
 	}
 	return records, nil
+}
+
+func witnessSymbolID(match ModuleMatch) string {
+	if match.EnclosingID != "" {
+		return match.EnclosingID
+	}
+	if match.Role == "definition" || match.DefinitionLine != nil {
+		return match.SymbolID
+	}
+	return ""
 }
 
 func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQueryResult) error {
@@ -190,7 +208,7 @@ func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQuery
 			for _, column := range rows.columns {
 				projected[column.Name] = record.values[column.Field]
 			}
-			if err := rows.visit(SQLRow{Values: projected, Match: record.match}); err != nil {
+			if err := rows.visit(SQLRow{Values: projected, Match: record.match, WitnessSymbol: record.witness}); err != nil {
 				return err
 			}
 		}
