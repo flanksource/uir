@@ -20,6 +20,7 @@ type SQLFunction struct {
 }
 
 var SQLFunctions = []SQLFunction{
+	{Name: "files", Arguments: 0, Options: []string{"include_excluded"}},
 	{Name: "definitions", Arguments: 1},
 	{Name: "callers", Arguments: 1, Options: []string{"depth"}, Depth: 1},
 	{Name: "callees", Arguments: 1, Options: []string{"depth"}, Depth: 1},
@@ -44,6 +45,7 @@ type sqlOptions struct {
 	depth, nodes         int
 	direction            string
 	via, exclude, access []string
+	includeExcluded      bool
 }
 
 func sqlError(pos lexer.Position, format string, args ...any) error {
@@ -73,17 +75,28 @@ func bindSQLSource(source *sqlsyntax.Source, kinds symbolhandle.Kinds, nested bo
 	if nested && bound.function.Terminal {
 		return nil, sqlError(source.Pos, "%s is a terminal result and cannot be nested", name)
 	}
-	if len(source.Arguments) != bound.function.Arguments {
-		return nil, sqlError(source.Pos, "%s requires %d source arguments", name, bound.function.Arguments)
+	if nested && name == "files" {
+		return nil, sqlError(source.Pos, "files() is a file source and cannot be used in symbol navigation")
 	}
-	for _, argument := range source.Arguments {
-		child, err := bindSQLSource(argument, kinds, true)
+	var named []*sqlsyntax.Option
+	for _, parameter := range source.Parameters {
+		if parameter.Option != nil {
+			named = append(named, parameter.Option)
+			continue
+		}
+		if len(named) > 0 {
+			return nil, sqlError(parameter.Pos, "source arguments must precede named options")
+		}
+		child, err := bindSQLSource(parameter.Source, kinds, true)
 		if err != nil {
 			return nil, err
 		}
 		bound.arguments = append(bound.arguments, child)
 	}
-	options, err := bindSQLOptions(source.Options, bound.function)
+	if len(bound.arguments) != bound.function.Arguments {
+		return nil, sqlError(source.Pos, "%s requires %d source arguments", name, bound.function.Arguments)
+	}
+	options, err := bindSQLOptions(named, bound.function)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +143,14 @@ func bindSQLOptions(options []*sqlsyntax.Option, function SQLFunction) (sqlOptio
 		}
 		seen[name] = true
 		value := option.Value.Value()
+		if name == "include_excluded" {
+			flag, ok := value.(bool)
+			if !ok {
+				return bound, sqlError(option.Pos, "%s requires TRUE or FALSE", name)
+			}
+			bound.includeExcluded = flag
+			continue
+		}
 		if name == "depth" || name == "nodes" {
 			number, ok := value.(float64)
 			upper := 8

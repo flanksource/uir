@@ -16,6 +16,8 @@ var _ = Describe("SQL navigation grammar", func() {
 		Entry("native incoming options", "SELECT * FROM incoming(messaging.topic:OrderCreated, via => 'messaging.publishes_to')"),
 		Entry("graph bounds", "SELECT * FROM graph(k8s.service:checkout, via => 'k8s.selects,k8s.uses_config', direction => 'outgoing', depth => 3)"),
 		Entry("nested navigation", "SELECT symbol.name AS name FROM callers(callees(method:Store.Save)) ORDER BY name DESC LIMIT 20"),
+		Entry("excluded file option", "SELECT path FROM files(include_excluded => TRUE) WHERE file.build_constraint NOT REQUIRES 'hack'"),
+		Entry("required tag with alias", "SELECT f.build_constraint FROM files(include_excluded => FALSE) AS f WHERE NOT (f.build_constraint REQUIRES 'hack')"),
 		Entry("membership and predicate precedence", "select * from func:* where NOT (symbol IN method:Store.* OR line IS NULL) AND depth >= 2"),
 		Entry("quoted selector", `SELECT * FROM definitions(func:"Premium Calc (Annual)")`),
 		Entry("quoted contextual selector", `SELECT * FROM pkg:"Regional Plan":"Group Life/**"`),
@@ -45,7 +47,7 @@ var _ = Describe("SQL navigation grammar", func() {
 		parsed, err := sqlsyntax.Parse("SELECT * FROM callers(callees(method:Store.Save))")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(parsed.Source.Name).To(Equal("callers"))
-		Expect(parsed.Source.Arguments[0].Name).To(Equal("callees"))
-		Expect(parsed.Source.Arguments[0].Arguments[0].Selector).To(Equal("method:Store.Save"))
+		Expect(parsed.Source.Parameters[0].Source.Name).To(Equal("callees"))
+		Expect(parsed.Source.Parameters[0].Source.Parameters[0].Source.Selector).To(Equal("method:Store.Save"))
 	})
 })

@@ -15,27 +15,40 @@ var sqlFields = map[string]string{
 	"symbol.module": "string", "symbol.package": "string", "symbol.owner": "string", "symbol.visibility": "string",
 	"path": "string", "line": "number", "column": "number", "package": "string", "module": "string", "role": "string",
 	"dispatch": "boolean", "depth": "number", "snapshot": "string", "relationship.kind": "string", "relationship.resolution": "string",
+	"symbol.metrics.param_count": "integer", "symbol.metrics.body_lines": "integer",
+	"symbol.type": "string",
 }
 
 var sqlWildcardFields = []string{"symbol", "symbol.id", "symbol.kind", "symbol.name", "symbol.query_name", "symbol.module", "symbol.package", "symbol.owner", "symbol.visibility", "symbol.props", "path", "line", "column", "package", "module", "role", "dispatch", "depth", "snapshot", "relationship.kind", "relationship.resolution", "relationship.props"}
 
 type sqlRecord struct {
-	match  ModuleMatch
-	values map[string]any
+	match     ModuleMatch
+	values    map[string]any
+	buildTags map[string]bool
 }
 
 type sqlRows struct {
-	fields    map[string]string
-	alias     string
-	columns   []QueryColumn
-	order     []*sqlsyntax.Ordering
-	predicate sqlPredicate
+	fields     map[string]string
+	alias      string
+	columns    []QueryColumn
+	order      []*sqlsyntax.Ordering
+	predicate  sqlPredicate
+	required   map[string]bool
+	buildTags  map[string]bool
+	fileSource bool
+	visit      func(SQLRow) error
 }
 
 func (rows *sqlRows) field(name string) (string, string, error) {
 	field := name
 	if rows.alias != "" && strings.HasPrefix(field, rows.alias+".") {
 		field = "symbol.props." + strings.TrimPrefix(field, rows.alias+".")
+		if rows.fileSource {
+			field = strings.TrimPrefix(name, rows.alias+".")
+			if _, exists := rows.fields[field]; !exists {
+				field = "file." + field
+			}
+		}
 	}
 	kind, ok := rows.fields[field]
 	if !ok {
@@ -44,6 +57,10 @@ func (rows *sqlRows) field(name string) (string, string, error) {
 	if kind == "" || kind == "mixed" {
 		return "", "", fmt.Errorf("field %q has no unambiguous schema type", name)
 	}
+	if rows.required == nil {
+		rows.required = map[string]bool{}
+	}
+	rows.required[field] = true
 	return field, kind, nil
 }
 
@@ -51,7 +68,11 @@ func (rows *sqlRows) bind(query *sqlsyntax.Query) error {
 	rows.alias = query.Alias
 	columns := query.Projection.Columns
 	if query.Projection.Wildcard {
-		for _, field := range sqlWildcardFields {
+		wildcard := sqlWildcardFields
+		if rows.fileSource {
+			wildcard = sqlFileWildcardFields
+		}
+		for _, field := range wildcard {
 			columns = append(columns, &sqlsyntax.Column{Field: field})
 		}
 	}
@@ -145,7 +166,7 @@ func (index *compactIndex) sqlRecords(ctx context.Context, value compactValue, p
 	return records, nil
 }
 
-func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQueryResult) {
+func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQueryResult) error {
 	if rows.predicate != nil {
 		records = slices.DeleteFunc(records, func(record sqlRecord) bool { return rows.predicate(record) != sqlTrue })
 	}
@@ -163,6 +184,18 @@ func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQuery
 	})
 	result.Total = len(records)
 	result.Columns = rows.columns
+	if rows.visit != nil {
+		for _, record := range records {
+			projected := map[string]any{}
+			for _, column := range rows.columns {
+				projected[column.Name] = record.values[column.Field]
+			}
+			if err := rows.visit(SQLRow{Values: projected, Match: record.match}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	result.Rows = make([]map[string]any, 0, min(limit, len(records)))
 	result.Matches = make([]ModuleMatch, 0, min(limit, len(records)))
 	for _, record := range records[:min(limit, len(records))] {
@@ -173,6 +206,7 @@ func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQuery
 		result.Rows = append(result.Rows, projected)
 		result.Matches = append(result.Matches, record.match)
 	}
+	return nil
 }
 
 func sqlCompareValues(left, right any) int {

@@ -57,6 +57,9 @@ func sqlSourceKinds(source *sqlSource, kinds symbolhandle.Kinds) ([]string, erro
 }
 
 func sqlPropertyFields(source *sqlSource, kinds symbolhandle.Kinds, catalog storage.DomainCatalog) (map[string]string, error) {
+	if source.function.Name == "files" {
+		return maps.Clone(sqlFileFields), nil
+	}
 	fields := maps.Clone(sqlFields)
 	fields["symbol.props"] = "object"
 	fields["relationship.props"] = "object"

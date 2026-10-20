@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/flanksource/uir/internal/buildconstraint"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -22,13 +23,14 @@ const snapshotCacheSize = 256
 // under another handle. What heads and primaries select, and the kind registry, can change with every
 // publication, so they live in a generation that a query keeps only while the cache token still matches.
 type indexCache struct {
-	mu         sync.Mutex
-	generation *cacheGeneration
-	symbols    *symbolFacts
-	modules    map[int32]string
-	snapshots  *lru[uuid.UUID, *snapshotFacts]
-	documents  *lru[uuid.UUID, decodedDocument]
-	capacity   int
+	mu           sync.Mutex
+	generation   *cacheGeneration
+	symbols      *symbolFacts
+	modules      map[int32]string
+	snapshots    *lru[uuid.UUID, *snapshotFacts]
+	documents    *lru[uuid.UUID, decodedDocument]
+	buildHeaders *lru[string, buildconstraint.Header]
+	capacity     int
 }
 
 func newIndexCache(documents int) *indexCache {
@@ -43,6 +45,7 @@ func (cache *indexCache) reset() {
 	cache.modules = map[int32]string{}
 	cache.snapshots = newLRU[uuid.UUID, *snapshotFacts](snapshotCacheSize)
 	cache.documents = newLRU[uuid.UUID, decodedDocument](cache.capacity)
+	cache.buildHeaders = newLRU[string, buildconstraint.Header](4096)
 }
 
 // cacheToken is what a query reads to decide whether the kept generation still holds: every location
