@@ -10,9 +10,9 @@ import (
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-// DocumentFormatVersion is the version of DocumentContent written to documents.content. Format 6 moved
-// implements out of documents into snapshot-level implements facts (EffectiveImplements).
-const DocumentFormatVersion = 6
+// DocumentFormatVersion versions documents.content. Format 8 adds resolved variable types;
+// format 6 moved implements into snapshot-level facts (EffectiveImplements).
+const DocumentFormatVersion = 8
 
 // snapshotImplementsFormat is the first document format whose symbols carry no implements entries.
 const snapshotImplementsFormat = 6
@@ -43,30 +43,32 @@ type DocumentContent struct {
 // hashes (docs/symbol-index-storage.md#hashes-and-identities). Implements is only present in documents
 // older than format 6; no reader consults it, since implements facts are snapshot-level now.
 type DocumentSymbol struct {
-	Props        map[string]any `json:"props,omitempty"`
-	ID           *string        `json:"id"`
-	Key          string         `json:"key"`
-	Kind         string         `json:"kind"`
-	Visibility   string         `json:"visibility"`
-	Shape        string         `json:"shape"`
-	PublicShape  string         `json:"public_shape,omitempty"`
-	TypeForm     string         `json:"type_form,omitempty"`
-	PublicHash   string         `json:"public_hash,omitempty"`
-	PrivateHash  string         `json:"private_hash,omitempty"`
-	ContentHash  string         `json:"content_hash"`
-	Name         Range          `json:"name"`
-	NameBytes    ByteSpan       `json:"name_bytes"`
-	Extent       Range          `json:"extent"`
-	ExtentBytes  ByteSpan       `json:"extent_bytes"`
-	Implements   []string       `json:"implements,omitempty"`
-	Embeds       []string       `json:"embeds,omitempty"`
-	Identifier   uir.Identifier `json:"identifier"`
-	ParentKey    string         `json:"parent_key,omitempty"`
-	ChildSlot    string         `json:"child_slot,omitempty"`
-	Ordinal      int            `json:"ordinal"`
-	Payload      JSON           `json:"payload,omitempty"`
-	SemanticHash string         `json:"semantic_hash,omitempty"`
-	Field        *Field         `json:"field,omitempty"`
+	DeclaredType *string          `json:"declared_type,omitempty"`
+	Metrics      *CallableMetrics `json:"metrics,omitempty"`
+	Props        map[string]any   `json:"props,omitempty"`
+	ID           *string          `json:"id"`
+	Key          string           `json:"key"`
+	Kind         string           `json:"kind"`
+	Visibility   string           `json:"visibility"`
+	Shape        string           `json:"shape"`
+	PublicShape  string           `json:"public_shape,omitempty"`
+	TypeForm     string           `json:"type_form,omitempty"`
+	PublicHash   string           `json:"public_hash,omitempty"`
+	PrivateHash  string           `json:"private_hash,omitempty"`
+	ContentHash  string           `json:"content_hash"`
+	Name         Range            `json:"name"`
+	NameBytes    ByteSpan         `json:"name_bytes"`
+	Extent       Range            `json:"extent"`
+	ExtentBytes  ByteSpan         `json:"extent_bytes"`
+	Implements   []string         `json:"implements,omitempty"`
+	Embeds       []string         `json:"embeds,omitempty"`
+	Identifier   uir.Identifier   `json:"identifier"`
+	ParentKey    string           `json:"parent_key,omitempty"`
+	ChildSlot    string           `json:"child_slot,omitempty"`
+	Ordinal      int              `json:"ordinal"`
+	Payload      JSON             `json:"payload,omitempty"`
+	SemanticHash string           `json:"semantic_hash,omitempty"`
+	Field        *Field           `json:"field,omitempty"`
 }
 
 // Explorable reports whether the symbol carries the explorer and nodes projection.
@@ -179,6 +181,18 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 			return fmt.Errorf("diagnostic %d: %w", index, err)
 		}
 	}
+	for _, symbol := range content.Symbols {
+		if symbol.DeclaredType != nil && (content.Version < 8 || symbol.Kind != "var" || symbol.ID == nil || *symbol.DeclaredType == "" || document.Coverage == CoverageSyntax) {
+			return fmt.Errorf("symbol %s: declared_type requires a proven variable, a nonempty canonical type and document format 8 or newer", symbol.Key)
+		}
+	}
+	if content.Version < 7 {
+		for _, symbol := range content.Symbols {
+			if symbol.Metrics != nil {
+				return fmt.Errorf("callable metrics require document format 7 or newer")
+			}
+		}
+	}
 	if err := validateRelationships(content); err != nil {
 		return err
 	}
@@ -220,6 +234,15 @@ func validateSymbolEntries(symbols []DocumentSymbol, kinds symbolhandle.Kinds) (
 		subject := fmt.Sprintf("symbol %d (%s)", index, symbol.Key)
 		if _, err := kinds.Lookup(symbol.Kind); err != nil {
 			return nil, fmt.Errorf("%s: %w", subject, err)
+		}
+		if symbol.Metrics != nil {
+			kind, err := kinds.Lookup(symbol.Kind)
+			if err != nil {
+				return nil, err
+			}
+			if err := symbol.Metrics.Validate(kind.Category); err != nil {
+				return nil, fmt.Errorf("%s: %w", subject, err)
+			}
 		}
 		switch {
 		case symbol.Key == "" || symbol.Key != symbol.Identifier.IdentityKey():
