@@ -101,6 +101,9 @@ func (rows *sqlRows) bindCondition(ctx context.Context, index *compactIndex, con
 	if comparison.Member != nil {
 		return rows.bindMembership(ctx, index, comparison, field)
 	}
+	if comparison.Requires != nil {
+		return rows.bindBuildRequirement(comparison, field)
+	}
 	if comparison.Match != nil {
 		if kind != "string" {
 			return nil, sqlError(comparison.Pos, "MATCH requires a string field, got %s", kind)

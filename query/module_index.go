@@ -68,14 +68,15 @@ type rootDocuments struct {
 // keeps them across queries; decoded holds what this query decoded, whether or not the cache kept it.
 // kinds is the database's kind registry, which decides each symbol's category.
 type indexContext struct {
-	database *gorm.DB
-	cache    *indexCache
-	scopes   []indexScope
-	roots    []rootDocuments
-	rootKeys map[string]int
-	decoded  map[uuid.UUID]decodedDocument
-	symbols  *symbolFacts
-	kinds    symbolhandle.Kinds
+	declarationProjection bool
+	database              *gorm.DB
+	cache                 *indexCache
+	scopes                []indexScope
+	roots                 []rootDocuments
+	rootKeys              map[string]int
+	decoded               map[uuid.UUID]decodedDocument
+	symbols               *symbolFacts
+	kinds                 symbolhandle.Kinds
 }
 
 func newIndexContext(ctx context.Context, pipeline *Pipeline, scopes []moduleScope) (*indexContext, error) {
