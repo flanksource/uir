@@ -15,12 +15,25 @@ var _ = Describe("Captain historical profile", func() {
 	It("replays the exact first and second commits and then measures stored revision reuse", func() {
 		first := "567b8ab33aec1c8aafcefec233894d16153e4337"
 		second := "246a1cbfc2e48dc5567165a68890c734cc02e99d"
-		measurements := captainMeasurements(first, second)
+		measurements := captainMeasurements(captainSequence{First: first, Second: second, Path: "historical"})
 		Expect(measurements).To(Equal([]measurement{
 			{ID: "00-first", Corpus: "captain", Producer: "go", Path: "historical", Kind: "revision", Commit: first, RootKey: "github.com/flanksource/captain"},
 			{ID: "01-second", Corpus: "captain", Producer: "go", Path: "historical", Kind: "revision", Commit: second, RootKey: "github.com/flanksource/captain"},
 			{ID: "02-repeat", Corpus: "captain", Producer: "go", Path: "historical", Kind: "repeat", Commit: second, RootKey: "github.com/flanksource/captain"},
 		}))
+	})
+
+	It("replays initial, changed and unchanged heads through the head indexing path", func() {
+		sequence := captainMeasurements(captainSequence{First: captainFirst, Second: captainSecond, Path: "head"})
+		Expect(sequence).To(Equal([]measurement{
+			{ID: "00-first", Corpus: "captain", Producer: "go", Path: "head", Kind: "initial", Commit: captainFirst, RootKey: "github.com/flanksource/captain"},
+			{ID: "01-second", Corpus: "captain", Producer: "go", Path: "head", Kind: "revision", Commit: captainSecond, RootKey: "github.com/flanksource/captain"},
+			{ID: "02-repeat", Corpus: "captain", Producer: "go", Path: "head", Kind: "repeat", Commit: captainSecond, RootKey: "github.com/flanksource/captain"},
+		}))
+	})
+
+	It("rejects an unknown indexing path before cloning or opening a database", func() {
+		Expect(runCaptain(context.Background(), []string{"--path", "unknown"})).To(MatchError("captain indexing path must be historical or head"))
 	})
 
 	It("counts changed package inputs by all files that must receive a new document", func() {

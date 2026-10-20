@@ -46,7 +46,7 @@
       "content_hash": "78b3273881de9c9268b1f6e09cc8d5de856973a5f78abc5264e0edb2bc248586",
       "source": "<Record name=\"Policy\">\n  <Field name=\"Amount\"/>\n</Record>\n",
       "content": {
-        "version": 6,
+        "version": 8,
         "package_path": "Co/Prod/records",
         "symbols": [
           {
@@ -137,7 +137,7 @@
       "content_hash": "6598a4aa3d587fcb9f51dc56d7f490298514c53dacaa7084a126f126f9dc01b6",
       "source": "<Rule name=\"Calc\">\n  <Set field=\"Policy.Amount\" value=\"100\"/>\n</Rule>\n",
       "content": {
-        "version": 6,
+        "version": 8,
         "package_path": "Co/Prod/rules",
         "symbols": [
           {

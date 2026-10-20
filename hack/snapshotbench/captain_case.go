@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	rpchttp "github.com/flanksource/clicky/rpc/http"
 	"gorm.io/gorm"
 )
 
@@ -20,8 +21,9 @@ type captainRuntime struct {
 
 type captainCaseResult struct {
 	observation
-	Runtime captainRuntime `json:"runtime"`
-	SQL     sqlProfile     `json:"sql"`
+	Runtime captainRuntime   `json:"runtime"`
+	SQL     sqlProfile       `json:"sql"`
+	Work    map[string]int64 `json:"work"`
 }
 
 func measureCaptainCase(ctx context.Context, database *gorm.DB, entry measurement, profile bool) (measured captainCaseResult, returnErr error) {
@@ -54,9 +56,10 @@ func measureCaptainCase(ctx context.Context, database *gorm.DB, entry measuremen
 		}
 	}
 	var before, after runtime.MemStats
+	timed, timings := rpchttp.WithTimings(ctx)
 	runtime.ReadMemStats(&before)
 	started := time.Now()
-	result.Modules, err = indexGo(ctx, indexDB, entry)
+	result.Modules, err = indexGo(timed, indexDB, entry)
 	result.IndexMS = milliseconds(started)
 	stopErr := stop()
 	runtime.ReadMemStats(&after)
@@ -65,6 +68,15 @@ func measureCaptainCase(ctx context.Context, database *gorm.DB, entry measuremen
 		HeapBefore:     before.HeapAlloc, HeapAfter: after.HeapAlloc,
 		GCCycles:  after.NumGC - before.NumGC,
 		GCPauseMS: float64(after.PauseTotalNs-before.PauseTotalNs) / float64(time.Millisecond),
+	}
+	measured.Work = map[string]int64{}
+	for _, counter := range []struct{ phase, name, key string }{
+		{"typecheck", "packages", "packages_in_load"},
+		{"typecheck", "files", "typed_root_files"},
+		{"typecheck", "parsed", "parsed_files"},
+		{"render-documents", "rendered", "rendered_documents"},
+	} {
+		measured.Work[counter.key], _ = timings.Counter(counter.phase, counter.name)
 	}
 	if sql != nil {
 		measured.SQL = sql.snapshot()
