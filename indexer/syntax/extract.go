@@ -226,12 +226,20 @@ func (indexed *File) addFunction(pathKey string, declaration *ast.FuncDecl, impo
 	if err != nil {
 		return fmt.Errorf("describe %s in %q: %w", declaration.Name.Name, pathKey, err)
 	}
+	facts.Metrics = &storage.CallableMetrics{Version: storage.MetricsVersion, ParamCount: len(params)}
+	if declaration.Body != nil {
+		lines := indexed.fileSet.PositionFor(declaration.Body.Rbrace, false).Line - indexed.fileSet.PositionFor(declaration.Body.Lbrace, false).Line + 1
+		facts.Metrics.BodyLines = &lines
+	}
 	indexed.Nodes = append(indexed.Nodes, newNode(builder.Build(), "methods", len(indexed.Nodes), parentIdentity, facts))
 	indexed.addCalls(declaration, identifier, imports)
 	return nil
 }
 
 func (indexed *File) addCalls(declaration *ast.FuncDecl, from uir.Identifier, imports map[string]string) {
+	if declaration.Body == nil {
+		return
+	}
 	callIndex := 0
 	ast.Inspect(declaration.Body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)

@@ -16,6 +16,7 @@ const contentHashVersion = "uir-content-hash-v2"
 
 // Declaration are the diff inputs a syntax document records for one declared symbol.
 type Declaration struct {
+	Metrics     *storage.CallableMetrics
 	Kind        string
 	Visibility  string
 	Shape       string

@@ -26,6 +26,7 @@ var infrastructureFailures = []string{
 	"Bad Gateway", "Service Unavailable", "Gateway Timeout", "Internal Server Error", "Too Many Requests", "unexpected EOF",
 	"verifying ", "checksum mismatch", "SECURITY ERROR", "permission denied", "input/output error", "no space left on device",
 	"too many open files", "read-only file system", "context deadline exceeded", "context canceled", "signal: killed",
+	"does not contain modules listed in go.work", "outside modules listed in go.work",
 }
 
 // deterministicLoadError reports whether loading the same commit, configuration and dependency set

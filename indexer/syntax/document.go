@@ -50,7 +50,7 @@ func (indexed *File) Document() storage.DocumentContent {
 			ContentHash: node.ContentHash, Name: lines.RangeOf(node.Name), NameBytes: node.Name,
 			Extent: lines.RangeOf(node.Extent), ExtentBytes: node.Extent, Identifier: node.Identifier,
 			ParentKey: node.ParentIdentity, ChildSlot: node.ChildSlot, Ordinal: node.Ordinal,
-			Payload: node.Payload, SemanticHash: node.SemanticHash, Field: node.Field,
+			Payload: node.Payload, SemanticHash: node.SemanticHash, Field: node.Field, Metrics: node.Metrics,
 		})
 	}
 	for _, call := range indexed.Calls {

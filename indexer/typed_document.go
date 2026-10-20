@@ -110,6 +110,7 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 		symbol.ContentHash, symbol.NameBytes, symbol.ExtentBytes = contentHash, name, extent
 		symbol.Name, symbol.Extent = source.lines.RangeOf(name), source.lines.RangeOf(extent)
 		if projected {
+			symbol.Metrics = projection.Metrics
 			symbol.Identifier, symbol.ParentKey, symbol.ChildSlot = projection.Identifier, projection.ParentIdentity, projection.ChildSlot
 			symbol.Ordinal, symbol.Payload, symbol.SemanticHash, symbol.Field = projection.Ordinal, projection.Payload, projection.SemanticHash, projection.Field
 		} else if symbol.Identifier, err = builder.typedIdentifier(*symbol.ID, source.packagePath); err != nil {
@@ -151,9 +152,21 @@ func (builder *documentBuilder) typedSymbol(declared declaration) (storage.Docum
 	}
 	row, id := builder.resolver.rows[resolved.ID], resolved.ID
 	public, private := layerHashes(shapes)
+	var metrics *storage.CallableMetrics
+	if function, ok := declared.object.(*types.Func); ok {
+		metrics = &storage.CallableMetrics{Version: storage.MetricsVersion, ParamCount: function.Signature().Params().Len()}
+	}
+	var declaredType *string
+	if row.Kind == "var" {
+		encoded, valid := encodeType(declared.object.Type())
+		if !valid {
+			return storage.DocumentSymbol{}, false, fmt.Errorf("encode type of variable %s", declared.name.Name)
+		}
+		declaredType = &encoded
+	}
 	return storage.DocumentSymbol{
 		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shapes.Private, PublicShape: shapes.Public, TypeForm: typeFormOf(declared.object),
-		PublicHash: public, PrivateHash: private, Embeds: embeds,
+		PublicHash: public, PrivateHash: private, Embeds: embeds, Metrics: metrics, DeclaredType: declaredType,
 	}, true, nil
 }
 
