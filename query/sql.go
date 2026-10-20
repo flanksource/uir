@@ -46,6 +46,10 @@ func DetectLanguage(input string, requested Language) (Language, error) {
 }
 
 func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options ModuleScopeOptions) (ModuleQueryResult, error) {
+	return pipeline.executeSQL(ctx, input, options, nil)
+}
+
+func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options ModuleScopeOptions, visit func(SQLRow) error) (ModuleQueryResult, error) {
 	if pipeline == nil || pipeline.database == nil {
 		return ModuleQueryResult{}, errors.New("UIR query database is required")
 	}
@@ -91,8 +95,11 @@ func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options Modu
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	rows := sqlRows{fields: fields}
+	rows := sqlRows{fields: fields, fileSource: source.function.Name == "files", visit: visit}
 	if err := rows.bind(parsed); err != nil {
+		return ModuleQueryResult{}, err
+	}
+	if err := rows.requirePredicateFields(parsed.Where); err != nil {
 		return ModuleQueryResult{}, err
 	}
 	session, trace := pipeline.session()
@@ -106,11 +113,37 @@ func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options Modu
 		return ModuleQueryResult{}, err
 	}
 	result := ModuleQueryResult{Operation: OperationSet, Matches: []ModuleMatch{}, Coverage: coverage, Stages: []ResolutionStage{{Name: "parse", Value: "sql"}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, selectionCoverageStage(selection, coverage)}}
+	if rows.fileSource {
+		rows.predicate, err = rows.bindPredicate(ctx, nil, parsed.Where)
+		if err != nil {
+			return ModuleQueryResult{}, err
+		}
+		records, err := session.sqlFileRecords(ctx, sqlFileOptions{
+			scopes: selection.scopes, lines: rows.required["file.lines"], includeExcluded: source.options.includeExcluded,
+			buildConstraint: rows.required["file.build_constraint"], buildTags: sortedKeys(rows.buildTags),
+		})
+		if err != nil {
+			return ModuleQueryResult{}, err
+		}
+		sortSQLRecords(records)
+		if err := rows.project(records, limit, &result); err != nil {
+			return result, err
+		}
+		clock.lap("execute")
+		result.Stages = append(result.Stages, clock.stages(trace)...)
+		return result, nil
+	}
 	base, err := newIndexContext(ctx, session, selection.scopes)
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
 	index := newCompactIndex(base)
+	index.declarationProjection = rows.needsMetrics() && !rows.needsProperties() && !rows.required["symbol.type"] && !parsed.Projection.Wildcard
+	if rows.required["symbol.type"] {
+		if err := index.requireVariableTypes(ctx); err != nil {
+			return ModuleQueryResult{}, err
+		}
+	}
 	rows.predicate, err = rows.bindPredicate(ctx, index, parsed.Where)
 	if err != nil {
 		return ModuleQueryResult{}, err
@@ -148,10 +181,24 @@ func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options Modu
 		return ModuleQueryResult{}, err
 	}
 	sortSQLRecords(records)
-	if err := index.sqlRecordProperties(ctx, records); err != nil {
-		return ModuleQueryResult{}, err
+	if !index.declarationProjection {
+		if err := index.sqlRecordProperties(ctx, records); err != nil {
+			return ModuleQueryResult{}, err
+		}
 	}
-	rows.project(records, limit, &result)
+	if rows.needsMetrics() {
+		if err := index.sqlRecordMetrics(ctx, records); err != nil {
+			return ModuleQueryResult{}, err
+		}
+	}
+	if rows.required["symbol.type"] {
+		if err := index.sqlRecordTypes(ctx, records); err != nil {
+			return ModuleQueryResult{}, err
+		}
+	}
+	if err := rows.project(records, limit, &result); err != nil {
+		return result, err
+	}
 	clock.lap("execute")
 	result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: fmt.Sprintf("%d rows", result.Total)})
 	result.Stages = append(result.Stages, clock.stages(trace)...)

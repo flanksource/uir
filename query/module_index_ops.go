@@ -14,6 +14,9 @@ func (index *indexContext) declarations(ctx context.Context, symbolIDs []string,
 	if err != nil {
 		return nil, err
 	}
+	if index.declarationProjection {
+		return index.projectedDeclarations(ctx, postings, kind)
+	}
 	if err := index.prefetch(ctx, postings); err != nil {
 		return nil, err
 	}

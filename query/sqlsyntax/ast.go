@@ -15,12 +15,17 @@ type Query struct {
 }
 
 type Source struct {
-	Pos       lexer.Position
-	EndPos    lexer.Position
-	Selector  string    `parser:"( @Selector"`
-	Name      string    `parser:"| @Ident '('"`
-	Arguments []*Source `parser:"@@ (',' @@)*"`
-	Options   []*Option `parser:"(',' @@)* ')' )"`
+	Pos        lexer.Position
+	EndPos     lexer.Position
+	Selector   string       `parser:"( @Selector"`
+	Name       string       `parser:"| @Ident '('"`
+	Parameters []*Parameter `parser:"(@@ (',' @@)*)? ')' )"`
+}
+
+type Parameter struct {
+	Pos    lexer.Position
+	Option *Option `parser:"@@ |"`
+	Source *Source `parser:"@@"`
 }
 
 type Option struct {
@@ -62,12 +67,18 @@ type Condition struct {
 }
 
 type Comparison struct {
-	Pos     lexer.Position
-	Field   string      `parser:"@Ident"`
-	Compare *Compare    `parser:"( @@ |"`
-	Member  *Membership `parser:"@@ |"`
-	Match   *Match      `parser:"@@ |"`
-	Null    *NullCheck  `parser:"@@ )"`
+	Pos      lexer.Position
+	Field    string       `parser:"@Ident"`
+	Compare  *Compare     `parser:"( @@ |"`
+	Member   *Membership  `parser:"@@ |"`
+	Match    *Match       `parser:"@@ |"`
+	Requires *Requirement `parser:"@@ |"`
+	Null     *NullCheck   `parser:"@@ )"`
+}
+
+type Requirement struct {
+	Not bool      `parser:"@'NOT'? 'REQUIRES'"`
+	Tag SQLString `parser:"@String"`
 }
 
 type Compare struct {
