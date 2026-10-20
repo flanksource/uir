@@ -33,6 +33,7 @@ Run `make docs-check` to type-check and test the documentation tooling, and `mak
 | [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and call projection queries. |
 | [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
 | [`docs/sql-query.md`](docs/sql-query.md) | SQL navigation, typed domain properties, native relationships, and a runnable publication example. |
+| [`docs/lint.md`](docs/lint.md) | `.uir.yaml` SQL lint rules, automatic indexing, historical checks, and Gavel integration. |
 | [`docs/diff.md`](docs/diff.md) | `uir diff`: commit selection, symbol classification, shape diff rendering, line attribution, and failure modes. |
 | [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
