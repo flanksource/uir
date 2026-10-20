@@ -15,6 +15,13 @@ func (index *compactIndex) evaluateSQL(ctx context.Context, source *sqlSource, r
 		value, err := index.resolveSelector(ctx, *source.selector)
 		return value, false, err
 	}
+	if (source.function.Name == "references" || source.function.Name == "reads" || source.function.Name == "writes") && source.arguments[0].selector != nil {
+		left, err := index.referencedSymbols(ctx, *source.arguments[0].selector)
+		if err != nil {
+			return compactValue{}, false, err
+		}
+		return index.sqlStep(ctx, left, source.function.Name, source.options, result)
+	}
 	left, _, err := index.evaluateSQL(ctx, source.arguments[0], result)
 	if err != nil {
 		return compactValue{}, false, err
