@@ -13,6 +13,8 @@ import (
 type SQLRow struct {
 	Values map[string]any
 	Match  ModuleMatch
+	// WitnessSymbol owns the source location, independently of projected symbols.
+	WitnessSymbol *ModuleSymbol
 }
 
 // ValidateSQLRows checks row-producing SQL syntax without opening an index.
