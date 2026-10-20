@@ -37,7 +37,11 @@ func sourceRevisions(ctx context.Context, database *gorm.DB, rootID uuid.UUID, f
 		}
 		current[file.PathKey] = revision
 	}
-	return current, nil
+	metrics := make([]storage.SourceMetrics, 0, len(files))
+	for _, file := range files {
+		metrics = append(metrics, storage.SourceMetrics{SourceRevisionID: current[file.PathKey].ID, Version: storage.MetricsVersion, Lines: physicalLineCount(file.Content)})
+	}
+	return current, storage.StoreSourceMetrics(ctx, database, metrics)
 }
 
 func createSourceDeltas(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, previous, current map[string]storage.SourceRevision) error {
