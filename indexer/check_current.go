@@ -7,8 +7,13 @@ import (
 	"path/filepath"
 )
 
+type CheckOptions struct {
+	IncludeTests    bool
+	AllowIncomplete bool
+}
+
 // CheckCurrent verifies an existing location head against the checkout without publishing a snapshot.
-func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, includeTests bool) (ModuleResult, error) {
+func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, options CheckOptions) (ModuleResult, error) {
 	if indexer == nil || indexer.database == nil {
 		return ModuleResult{}, errors.New("UIR index database is required")
 	}
@@ -20,7 +25,7 @@ func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, includeTe
 	if err != nil {
 		return ModuleResult{}, fmt.Errorf("canonicalize checkout %q: %w", path, err)
 	}
-	roots, err := discoverModules(ctx, canonical, includeTests)
+	roots, err := discoverModules(ctx, canonical, options.IncludeTests)
 	if err != nil {
 		return ModuleResult{}, err
 	}
@@ -38,10 +43,10 @@ func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, includeTe
 		if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash {
 			return ModuleResult{}, fmt.Errorf("stale UIR index for %q at %q; run uir reindex", root.RootKey, root.LocalPath)
 		}
-		if err := indexer.checkContext(ctx, root, head.ContextHash, includeTests); err != nil {
+		if err := indexer.checkContext(ctx, root, head.ContextHash, options.IncludeTests); err != nil {
 			return ModuleResult{}, err
 		}
-		if !head.Coverage.Complete() {
+		if !options.AllowIncomplete && !head.Coverage.Complete() {
 			return ModuleResult{}, fmt.Errorf("incomplete UIR index for %q at %q: coverage %s", root.RootKey, root.LocalPath, head.Coverage)
 		}
 		return ModuleResult{RootKey: root.RootKey, Location: root.LocalPath, SnapshotID: head.ID.String()}, nil

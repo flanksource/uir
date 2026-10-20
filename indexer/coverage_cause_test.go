@@ -11,6 +11,10 @@ import (
 // 6b1a6093bec8 reports (GOWORK=off, -mod=readonly): its go.mod pins commons-db and captain versions
 // that lack packages the commit imports.
 var _ = Describe("coverage cause classification", func() {
+	It("rejects a workspace that does not select the requested module", func() {
+		pkg := &packages.Package{PkgPath: "./...", Errors: []packages.Error{{Kind: packages.ListError, Msg: "pattern ./...: directory prefix . does not contain modules listed in go.work or their selected dependencies"}}}
+		Expect(infrastructureListError(pkg)).To(MatchError(ContainSubstring("go.work")))
+	})
 	DescribeTable("a load error is deterministic only when it is a fact of the commit and its pinned modules",
 		func(kind packages.ErrorKind, message string, deterministic bool) {
 			Expect(deterministicLoadError(packages.Error{Kind: kind, Msg: message})).To(Equal(deterministic))
