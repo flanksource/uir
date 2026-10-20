@@ -119,7 +119,7 @@ func prepareRefactor(ctx context.Context, runtime *commandRuntime, options refac
 	if err != nil {
 		return preparedRefactor{}, fmt.Errorf("refactor requires a current, fully indexed checkout: %w", err)
 	}
-	current, err := engine.CheckCurrent(ctx, source.Location, includeTests)
+	current, err := engine.CheckCurrent(ctx, source.Location, indexer.CheckOptions{IncludeTests: includeTests})
 	if err != nil {
 		return preparedRefactor{}, fmt.Errorf("refactor requires a current, fully indexed checkout: %w", err)
 	}
