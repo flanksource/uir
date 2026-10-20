@@ -28,6 +28,7 @@ type captainRun struct {
 	First        string              `json:"first"`
 	Second       string              `json:"second"`
 	Profiled     bool                `json:"profiled"`
+	Path         string              `json:"path"`
 	ProducerSHA  string              `json:"producer_sha256"`
 	ProducerGit  string              `json:"producer_git_commit"`
 	ProducerTree string              `json:"producer_git_status"`
@@ -47,8 +48,12 @@ func runCaptain(ctx context.Context, args []string) (returnErr error) {
 	first := flags.String("first", captainFirst, "first historical commit")
 	second := flags.String("second", captainSecond, "second historical commit")
 	profile := flags.Bool("profile", true, "capture CPU, heap, trace and SQL profiles")
+	path := flags.String("path", "historical", "historical or head indexing")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *path != "head" && *path != "historical" {
+		return errors.New("captain indexing path must be historical or head")
 	}
 	working, err := os.Getwd()
 	if err != nil {
@@ -87,7 +92,7 @@ func runCaptain(ctx context.Context, args []string) (returnErr error) {
 	if err := os.Mkdir(directory, 0o755); err != nil {
 		return err
 	}
-	run := captainRun{Directory: directory, StartedAt: time.Now().UTC(), First: *first, Second: *second, Profiled: *profile, Sources: sources, Checkouts: map[string]string{}}
+	run := captainRun{Directory: directory, StartedAt: time.Now().UTC(), First: *first, Second: *second, Profiled: *profile, Path: *path, Sources: sources, Checkouts: map[string]string{}}
 	defer func() { returnErr = errors.Join(returnErr, writeJSON(filepath.Join(directory, "manifest.json"), run)) }()
 	if run.ProducerSHA, err = executableDigest(); err != nil {
 		return err
@@ -125,10 +130,17 @@ func runCaptain(ctx context.Context, args []string) (returnErr error) {
 	if err := registerCaptainCheckouts(ctx, database, run.Checkouts); err != nil {
 		return err
 	}
-	for _, entry := range captainMeasurements(*first, *second) {
+	for _, entry := range captainMeasurements(captainSequence{First: *first, Second: *second, Path: *path}) {
 		entry.Checkout, entry.Database, entry.Directory = run.Checkouts["captain"], databasePath, filepath.Join(directory, entry.ID)
 		if err := os.Mkdir(entry.Directory, 0o755); err != nil {
 			return err
+		}
+		if *path == "head" {
+			started := time.Now()
+			if _, err := commandOutput(ctx, "git", "-C", entry.Checkout, "checkout", "--detach", entry.Commit); err != nil {
+				return err
+			}
+			entry.CheckoutMS = milliseconds(started)
 		}
 		fmt.Fprintf(os.Stderr, "%s %s\n", entry.ID, entry.Commit)
 		observed, err := measureCaptainCase(ctx, database, entry, *profile)

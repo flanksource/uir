@@ -38,8 +38,11 @@ func reportCaptain(ctx context.Context, database *gorm.DB, run captainRun) error
 		}
 	}
 	var report strings.Builder
-	fmt.Fprintf(&report, "# Captain historical index profile\n\nRun: `%s` · profiled: `%t` · UIR executable SHA-256: `%s`.\n\n", run.Directory, run.Profiled, run.ProducerSHA)
+	fmt.Fprintf(&report, "# Captain %s index measurements\n\nRun: `%s` · profiled: `%t` · UIR executable SHA-256: `%s`.\n\n", run.Path, run.Directory, run.Profiled, run.ProducerSHA)
 	report.WriteString("The database was empty apart from four registered checkouts. Requests ran in one process, in order. Source verification and report queries ran after each timed index request.\n\n")
+	if run.Path == "head" {
+		report.WriteString("Head checkout advancement is outside the index timer and recorded separately as case.CheckoutMS. Index timings cover native IndexModules through publication. Run with GOWORK=off to isolate these cloned modules from an enclosing developer workspace.\n\n")
+	}
 	if run.Profiled {
 		report.WriteString("CPU and trace profiles cover indexing only. Heap profiles do not force a GC between requests.\n\n")
 	}
@@ -48,6 +51,11 @@ func reportCaptain(ctx context.Context, database *gorm.DB, run captainRun) error
 		module := observed.Modules[0]
 		fmt.Fprintf(&report, "| %s | %.12s | %.1f | %d | %d | %t | %.1f | %d | %.1f | %d | %.1f |\n", observed.Case.ID, observed.Case.Commit, observed.IndexMS, module.ParsedFiles, module.ReusedFiles, module.Unchanged, float64(observed.Runtime.AllocatedBytes)/1e6, observed.Runtime.GCCycles, observed.Runtime.GCPauseMS, observed.SQL.Count, observed.SQL.TotalMS)
 	}
+	report.WriteString("\n| Request | Packages in loads | Typed root files | Parsed files | Rendered documents |\n| --- | ---: | ---: | ---: | ---: |\n")
+	for _, observed := range run.Cases {
+		fmt.Fprintf(&report, "| %s | %d | %d | %d | %d |\n", observed.Case.ID, observed.Work["packages_in_load"], observed.Work["typed_root_files"], observed.Work["parsed_files"], observed.Work["rendered_documents"])
+	}
+	report.WriteString("\nWork counters aggregate every dependency and root index within the request. Rendered documents count extraction work, independently of parsed/reused publication counters. SQL zeroes in unprofiled runs mean unmeasured.\n")
 	fmt.Fprintf(&report, "\nBetween the commits, %d non-test Go files changed. Package input hashes changed in %d packages covering %d files; %d packages were removed. Full details: [package changes](package-changes.json).\n", productionChanges, changes.ChangedPackages, changes.ChangedFiles, changes.RemovedPackages)
 	for _, observed := range run.Cases {
 		fmt.Fprintf(&report, "\n## %s\n\n", observed.Case.ID)
