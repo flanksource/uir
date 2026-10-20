@@ -37,6 +37,15 @@ func Unmarshal(data []byte, v any) error {
 	return jsonv2.Unmarshal(data, v, jsonv2.WithUnmarshalers(slotUnmarshalers))
 }
 
+// unmarshalDecode is the decode every UnmarshalJSONFrom delegates to. It carries
+// the slot unmarshalers itself because a method can be entered without them:
+// encoding/json built on encoding/json/v2 (Go 1.27, or GOEXPERIMENT=jsonv2)
+// calls UnmarshalJSONFrom ahead of UnmarshalJSON, so a plain json.Unmarshal of a
+// struct holding a block reaches here with no UIR options on the decoder.
+func unmarshalDecode(dec *jsontext.Decoder, v any) error {
+	return jsonv2.UnmarshalDecode(dec, v, jsonv2.WithUnmarshalers(slotUnmarshalers))
+}
+
 // slotKeyPrefix marks a slot's kind key. No UIR field name starts with it, so a
 // slot whose first key lacks it is the legacy inline layout — what the Python and
 // Java producers and every artifact written before the tagged layout carry — and
@@ -190,7 +199,7 @@ func (s *BlockStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		Refinement *StatementType `json:"statement_refinement,omitempty"`
 	}{alias: (*alias)(s)}
 	s.Children = nil
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	return checkBlockKind(s, s.GetStatementType(), aux.Refinement)
@@ -209,7 +218,7 @@ func (t *TestStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		Refinement *StatementType `json:"statement_refinement,omitempty"`
 	}{blockAlias: (*blockAlias)(&t.BlockStmt)}
 	t.Children = nil
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	t.Name = aux.Name
@@ -227,12 +236,12 @@ func (f *FunctionDeclStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		*baseAlias
 		Function *MethodNode `json:"function"`
 	}{baseAlias: (*baseAlias)(&f.statementBase), Function: &f.MethodNode}
-	return jsonv2.UnmarshalDecode(dec, &aux)
+	return unmarshalDecode(dec, &aux)
 }
 
 func (m *MethodNode) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	type alias MethodNode
-	return jsonv2.UnmarshalDecode(dec, (*alias)(m))
+	return unmarshalDecode(dec, (*alias)(m))
 }
 
 func (s *MethodCallStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
@@ -241,7 +250,7 @@ func (s *MethodCallStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		*alias
 		Method Node `json:"Method,omitempty"`
 	}{alias: (*alias)(s)}
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	s.Method = aux.Method
@@ -255,7 +264,7 @@ func (s *DispatchCallStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		Method     Node   `json:"Method,omitempty"`
 		Candidates []Node `json:"candidates,omitempty"`
 	}{alias: (*alias)(s)}
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	for i, candidate := range aux.Candidates {
@@ -273,7 +282,7 @@ func (s *EndpointCallStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		*alias
 		Endpoint Node `json:"endpoint,omitempty"`
 	}{alias: (*alias)(s)}
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	s.Endpoint = aux.Endpoint
@@ -286,7 +295,7 @@ func (s *RecordReadStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		*alias
 		Record Node `json:"Record,omitempty"`
 	}{alias: (*alias)(s)}
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	s.Record = aux.Record
@@ -299,7 +308,7 @@ func (s *RecordWriteStmt) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		*alias
 		Record Node `json:"Record,omitempty"`
 	}{alias: (*alias)(s)}
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	s.Record = aux.Record
@@ -315,7 +324,7 @@ func (r *UIRRelationship) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		From Node `json:"from,omitempty"`
 		To   Node `json:"to,omitempty"`
 	}{alias: (*alias)(r)}
-	if err := jsonv2.UnmarshalDecode(dec, &aux); err != nil {
+	if err := unmarshalDecode(dec, &aux); err != nil {
 		return err
 	}
 	r.From = nil
