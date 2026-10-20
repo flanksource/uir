@@ -1,0 +1,13 @@
+version: 1
+lint:
+  include_tests: true
+  rules:
+    - id: hack-build-tag
+      severity: warning
+      message: "{{.path}} must require the hack build tag"
+      query: |
+        SELECT path
+        FROM files(include_excluded => TRUE)
+        WHERE path MATCH '**/hack/**/*.go'
+          AND file.build_constraint NOT REQUIRES 'hack'
+        ORDER BY path
