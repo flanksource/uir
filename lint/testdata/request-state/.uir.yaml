@@ -1,0 +1,20 @@
+version: 1
+lint:
+  include_tests: true
+  rules:
+    - id: no-global-request-state
+      severity: error
+      message: "package-level request state {{.name}} is shared across users; pass it explicitly or through context"
+      query: |
+        SELECT symbol.name AS name
+        FROM var:*
+        WHERE symbol.type = 'context.Context'
+           OR symbol.type = 'github.com/oipa/cli/internal/config.Config'
+           OR symbol.type = '*github.com/oipa/cli/internal/config.Config'
+           OR symbol.type = 'github.com/oipa/cli/internal/envctx.Runtime'
+           OR symbol.type = '*github.com/oipa/cli/internal/envctx.Runtime'
+           OR symbol.type = 'github.com/oipa/cli/internal/oipa/oipactx.OipaContext'
+           OR symbol.type = '*github.com/oipa/cli/internal/oipa/oipactx.OipaContext'
+           OR symbol.type = 'gorm.io/gorm.DB'
+           OR symbol.type = '*gorm.io/gorm.DB'
+        ORDER BY path, line, name
