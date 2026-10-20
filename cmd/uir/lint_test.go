@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/flanksource/gavel/linters"
+	"github.com/flanksource/uir/lint"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -41,6 +42,39 @@ var _ = Describe("UIR lint command", func() {
 			Expect(results[0].Success).To(BeTrue())
 			Expect(results[0].Violations).To(HaveLen(sample.count))
 		}
+		for _, groupBy := range []string{"file", "symbol"} {
+			output, err := captureStdout(func() error {
+				command := newRootCommand(&commandRuntime{database: database})
+				command.SetArgs([]string{"lint", "--config", path, "--group-by", groupBy, "--no-index", "--format", "json", "--no-progress"})
+				return command.ExecuteContext(ctx)
+			})
+			Expect(err).To(MatchError("UIR lint failed"))
+			var results []*lint.Result
+			Expect(json.Unmarshal([]byte(output), &results)).To(Succeed(), output)
+			Expect(results).To(HaveLen(1))
+			Expect(results[0].GroupBy).To(Equal(groupBy))
+			Expect(results[0].Groups).NotTo(BeEmpty())
+			Expect(results[0].Violations).To(HaveLen(2))
+			if groupBy == "symbol" {
+				Expect(results[0].Groups).To(HaveLen(2))
+				Expect(results[0].Groups).To(ContainElement(HaveField("Symbol", ContainSubstring("Sample"))))
+			} else {
+				Expect(results[0].Groups).To(HaveLen(1))
+			}
+		}
+	})
+	It("rejects invalid grouping before opening a database", func(ctx SpecContext) {
+		runtime := &commandRuntime{DSN: "invalid://must-not-open"}
+		path := filepath.Join(GinkgoT().TempDir(), ".uir.yaml")
+		Expect(os.WriteFile(path, []byte("version: 1\nlint:\n  rules:\n    - {id: files, query: 'SELECT path FROM files()', message: '{{.path}}'}\n"), 0o600)).To(Succeed())
+		output, err := captureStdout(func() error {
+			command := newRootCommand(runtime)
+			command.SetArgs([]string{"lint", "--config", path, "--group-by", "rule", "--format", "json", "--no-progress"})
+			return command.ExecuteContext(ctx)
+		})
+		Expect(err).To(MatchError(ContainSubstring("group-by")))
+		Expect(output).To(ContainSubstring("group-by"))
+		Expect(runtime.database).To(BeNil())
 	})
 	It("registers a local command and reports config errors as JSON before opening a database", func(ctx SpecContext) {
 		runtime := &commandRuntime{DSN: "invalid://must-not-open"}
