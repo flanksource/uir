@@ -22,6 +22,16 @@ Each run retains raw samples in `results.json`, its executable in `runner`, and 
 
 ## Historical indexing profiles
 
+The Captain replay supports both native indexing paths and actual extraction counters:
+
+```bash
+mkdir -p .tmp/captain-runners
+go run ./hack/snapshotbench save-runner .tmp/captain-runners/candidate
+GOWORK=off .tmp/captain-runners/candidate captain --profile=false --path head --out .tmp/captain-profile/candidate-head
+```
+
+Use `--path historical` (the default) for retained historical requests. `save-runner` copies the executable built by `go run` to a new path, allowing the build workspace and measured runtime environment to be selected independently. Head runs advance only the private cloned checkout; checkout time is recorded separately from native `IndexModules` latency. `GOWORK=off` isolates the cloned module from an enclosing developer workspace. Each replay indexes the first pinned Captain commit, the second, then repeats the second in one process and a fresh SQLite database. `work` counters record packages in loads, parsed files, typed root files and rendered documents across dependency and root operations; publication parsed/reused counts remain separate. Unprofiled runs collect no SQL profile.
+
 This runner profiles committed sources in isolated clones. It uses the native UIR Go indexer for mission-control-oipa and the offline OIPA filesystem lowerer for rules-dev-baseline. Original repositories are read only. Each corpus and indexing path has a separate SQLite database; each operation runs in a separate Gavel fixture invocation to preserve commit order.
 
 Build the producer with `make build` in the OIPA checkout before starting. `go run` compiles and copies the runner before any measurement. The runner also copies the OIPA and Gavel executables into the new run directory and records their SHA-256 fingerprints and Go build information.

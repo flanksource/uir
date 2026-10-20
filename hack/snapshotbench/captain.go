@@ -19,12 +19,20 @@ type packageChangeSummary struct {
 	Rows            []packageChange `json:"rows"`
 }
 
-func captainMeasurements(first, second string) []measurement {
-	base := measurement{Corpus: "captain", Producer: "go", Path: "historical", RootKey: "github.com/flanksource/captain"}
+type captainSequence struct {
+	First, Second, Path string
+}
+
+func captainMeasurements(options captainSequence) []measurement {
+	base := measurement{Corpus: "captain", Producer: "go", Path: options.Path, RootKey: "github.com/flanksource/captain"}
+	firstKind := "revision"
+	if options.Path == "head" {
+		firstKind = "initial"
+	}
 	return []measurement{
-		{ID: "00-first", Corpus: base.Corpus, Producer: base.Producer, Path: base.Path, Kind: "revision", Commit: first, RootKey: base.RootKey},
-		{ID: "01-second", Corpus: base.Corpus, Producer: base.Producer, Path: base.Path, Kind: "revision", Commit: second, RootKey: base.RootKey},
-		{ID: "02-repeat", Corpus: base.Corpus, Producer: base.Producer, Path: base.Path, Kind: "repeat", Commit: second, RootKey: base.RootKey},
+		{ID: "00-first", Corpus: base.Corpus, Producer: base.Producer, Path: base.Path, Kind: firstKind, Commit: options.First, RootKey: base.RootKey},
+		{ID: "01-second", Corpus: base.Corpus, Producer: base.Producer, Path: base.Path, Kind: "revision", Commit: options.Second, RootKey: base.RootKey},
+		{ID: "02-repeat", Corpus: base.Corpus, Producer: base.Producer, Path: base.Path, Kind: "repeat", Commit: options.Second, RootKey: base.RootKey},
 	}
 }
 
