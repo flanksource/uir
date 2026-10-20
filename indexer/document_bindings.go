@@ -235,7 +235,10 @@ func publishDocument(ctx context.Context, database *gorm.DB, next pendingDocumen
 			return 0, err
 		}
 		if inserted {
-			return document.Ordinal, createPostings(ctx, database, document, rootOrdinal, next.extracted.postings, handles)
+			if err := createPostings(ctx, database, document, rootOrdinal, next.extracted.postings, handles); err != nil {
+				return 0, err
+			}
+			return document.Ordinal, publishDeclarationMetrics(ctx, database, metricPublication{document: document, handles: handles})
 		}
 		key := storage.DocumentKey{PathKey: document.PathKey, Digest: *document.ContentDigest}
 		stored, err := storage.DocumentsByKey(ctx, database, document.RootID, []storage.DocumentKey{key}, true)
@@ -255,5 +258,5 @@ func publishDocument(ctx context.Context, database *gorm.DB, next pendingDocumen
 	if !same || next.existing.Coverage != document.Coverage {
 		return 0, fmt.Errorf("document for %q under input hash %s changed without an indexer version change", document.PathKey, document.InputHash)
 	}
-	return next.existing.Ordinal, nil
+	return next.existing.Ordinal, publishDeclarationMetrics(ctx, database, metricPublication{document: *next.existing, handles: handles})
 }
