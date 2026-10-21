@@ -89,7 +89,7 @@ func discoverRevisionRoot(ctx context.Context, checkout revisionCheckout, option
 	if err != nil {
 		return discoveredRoot{}, fmt.Errorf("canonicalize historical module at %q: %w", checkout.relative, err)
 	}
-	roots, err := discoverModules(ctx, modulePath, options.IncludeTests)
+	roots, err := discoverModules(ctx, modulePath, discoveryOptions{IncludeTests: options.IncludeTests})
 	if err != nil {
 		return discoveredRoot{}, err
 	}
@@ -115,6 +115,10 @@ func historicalRoot(ctx context.Context, root discoveredRoot, options RevisionOp
 	root.Revision = root.GitCommit
 	root.Historical = true
 	root.ModuleVersion = options.Version
+	return isolateRoot(ctx, root, options.IncludeTests, manifests)
+}
+
+func isolateRoot(ctx context.Context, root discoveredRoot, includeTests bool, manifests string) (discoveredRoot, error) {
 	environment, err := readGoEnvironmentWithWork(ctx, root.LocalPath, true)
 	if err != nil {
 		return root, err
@@ -130,7 +134,7 @@ func historicalRoot(ctx context.Context, root discoveredRoot, options RevisionOp
 		return root, err
 	}
 	root.ContentSetHash = contentSetHash(root.Files, manifestHashes)
-	root.ConfigurationHash = configurationHash(options.IncludeTests, root.Variant)
+	root.ConfigurationHash = configurationHash(includeTests, root.Variant)
 	root.Dependencies, err = readDependencies(ctx, root)
 	return root, err
 }

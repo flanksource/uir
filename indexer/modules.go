@@ -226,7 +226,7 @@ func countDependencies(ctx context.Context, roots []discoveredRoot) {
 
 func discoverRequestedModules(ctx context.Context, options ModuleOptions) ([]discoveredRoot, error) {
 	if options.ExactLocation == "" {
-		return discoverModules(ctx, options.Path, options.IncludeTests)
+		return discoverModules(ctx, options.Path, discoveryOptions{IncludeTests: options.IncludeTests})
 	}
 	root, err := discoverModule(ctx, options.Path, options.ExactLocation, options.IncludeTests)
 	if err != nil {

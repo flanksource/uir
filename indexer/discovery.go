@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flanksource/commons-db/git"
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/mod/modfile"
 )
@@ -55,11 +54,15 @@ type discoveredFile struct {
 	ModifiedAt   time.Time
 }
 
-func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, includeTests bool) error {
-	root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
-	root.Revision = root.GitCommit
-	root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
-	visible, err := git.ListVisiblePaths(ctx, root.LocalPath)
+func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, options discoveryOptions) error {
+	if options.Source == nil {
+		root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
+		root.Revision = root.GitCommit
+		root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
+	} else {
+		setSourceIdentity(root, *options.Source)
+	}
+	visible, err := discoveryVisibility(ctx, root.LocalPath, options.Source)
 	if err != nil {
 		return err
 	}
@@ -74,7 +77,7 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 			}
 			return rootDirectoryAction(current, entry.Name(), root.LocalPath, roots)
 		}
-		if filepath.Ext(entry.Name()) != ".go" || (!includeTests && strings.HasSuffix(entry.Name(), "_test.go")) {
+		if filepath.Ext(entry.Name()) != ".go" || (!options.IncludeTests && strings.HasSuffix(entry.Name(), "_test.go")) {
 			return nil
 		}
 		if !visible.Contains(current) {
@@ -91,10 +94,12 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		return fmt.Errorf("discover Go sources in root %q: %w", root.RootKey, err)
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].PathKey < root.Files[j].PathKey })
-	if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.GitCommit, root.Files); err != nil {
-		return err
+	if options.Source == nil {
+		if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.GitCommit, root.Files); err != nil {
+			return err
+		}
 	}
-	environment, err := readGoEnvironment(ctx, root.LocalPath)
+	environment, err := readGoEnvironmentWithWork(ctx, root.LocalPath, options.Source != nil)
 	if err != nil {
 		return fmt.Errorf("root %q: %w", root.RootKey, err)
 	}
@@ -113,7 +118,7 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 			root.LastModifiedAt = manifest.ModifiedAt
 		}
 	}
-	if root.GitCommit != "" && environment.WorkFile != "" {
+	if options.Source == nil && root.GitCommit != "" && environment.WorkFile != "" {
 		dirty, err := workspaceManifestDirty(ctx, root.LocalPath, root.GitCommit, environment.WorkFile)
 		if err != nil {
 			return err
@@ -122,10 +127,10 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 			root.WorktreeState = storage.WorktreeDirty
 		}
 	}
-	if root.WorktreeState == storage.WorktreeDirty {
+	if options.Source == nil && root.WorktreeState == storage.WorktreeDirty {
 		root.Revision = dirtyRevision(root.GitCommit, root.LastModifiedAt)
 	}
-	root.ConfigurationHash = configurationHash(includeTests, environment.Variant)
+	root.ConfigurationHash = configurationHash(options.IncludeTests, environment.Variant)
 	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
 	return nil
 }
