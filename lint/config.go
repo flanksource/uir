@@ -18,9 +18,11 @@ import (
 const ConfigName = ".uir.yaml"
 
 type Config struct {
-	Version int      `yaml:"version"`
-	Lint    Settings `yaml:"lint"`
-	Path    string   `yaml:"-"`
+	Version         int      `yaml:"version"`
+	Lint            Settings `yaml:"lint"`
+	Path            string   `yaml:"-"`
+	Root            string   `yaml:"-"`
+	includeTestsSet bool
 }
 
 type Settings struct {
@@ -49,18 +51,30 @@ func Load(path string) (config *Config, err error) {
 	}()
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
-	config = &Config{}
-	if err := decoder.Decode(config); err != nil {
+	var document struct {
+		Version int `yaml:"version"`
+		Lint    struct {
+			IncludeTests *bool  `yaml:"include_tests"`
+			Rules        []Rule `yaml:"rules"`
+		} `yaml:"lint"`
+	}
+	if err := decoder.Decode(&document); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return nil, fmt.Errorf("%s: expected one YAML document: %v", path, err)
 	}
+	config = &Config{Version: document.Version, Lint: Settings{Rules: document.Lint.Rules}}
+	if document.Lint.IncludeTests != nil {
+		config.includeTestsSet = true
+		config.Lint.IncludeTests = *document.Lint.IncludeTests
+	}
 	config.Path, err = filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
+	config.Root = filepath.Dir(config.Path)
 	if config.Version != 1 {
 		return nil, fmt.Errorf("%s: unsupported version %d", path, config.Version)
 	}
@@ -94,35 +108,6 @@ func Load(path string) (config *Config, err error) {
 		}
 	}
 	return config, nil
-}
-
-func Discover(directory, explicit string) (string, error) {
-	if explicit != "" {
-		return filepath.Abs(explicit)
-	}
-	current, err := filepath.Abs(directory)
-	if err != nil {
-		return "", err
-	}
-	for {
-		path := filepath.Join(current, ConfigName)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
-		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
-			break
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-	return "", fmt.Errorf("no %s found from %s up to the repository root", ConfigName, directory)
 }
 
 func (config *Config) Select(ids []string) ([]Rule, error) {

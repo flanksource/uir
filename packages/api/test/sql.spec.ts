@@ -3,6 +3,16 @@ import { getQueryCatalog, runModuleQuery } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("preserves file function and struct counts for consolidation queries", async () => {
+  const sql = "SELECT path, file.functions, file.structs FROM files() WHERE file.lines < 150";
+  const result = { operation: "set", total: 2, declarations: [], symbols: [], coverage: [], stages: [],
+    matches: [{ path: "record.go", source_id: "source-record", snapshot_id: "snapshot-small" }],
+    columns: [{ name: "file.functions", field: "file.functions", type: "integer" }, { name: "file.structs", field: "file.structs", type: "integer" }],
+    rows: [{ path: "record.go", "file.functions": 0, "file.structs": 1 }, { path: "run.go", "file.functions": 1, "file.structs": 0 }] };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { headers: { "Server-Timing": "total;dur=1" } })));
+  await expect(runModuleQuery(sql, "example.org/small", "snapshot-small", { language: "sql" })).resolves.toMatchObject({ data: result });
+});
+
 it("preserves build constraints and non-Go NULLs in SQL responses", async () => {
   const sql = "SELECT file.build_constraint FROM files(include_excluded => TRUE)";
   const result = { operation: "set", total: 3, declarations: [], symbols: [], matches: [{ path: "hack/tool.go", coverage: "excluded", source_id: "source-build", snapshot_id: "snapshot-build" }], coverage: [], stages: [],

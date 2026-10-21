@@ -33,6 +33,25 @@ func metricCheckout() string {
 }
 
 var _ = Describe("SQL metrics", func() {
+	It("counts functions and structs independently of fields and interface signatures", func(ctx SpecContext) {
+		database := openQueryDatabase(ctx, "sqlite")
+		checkout := metricCheckout()
+		Expect(os.WriteFile(filepath.Join(checkout, "struct.go"), []byte("package metrics\ntype Record struct { Name string; Count int }\nfunc (Record) Run() {}\ntype Alias = Record\n"), 0o644)).To(Succeed())
+		indexed := indexCheckout(ctx, database, checkout)
+		pipeline, err := query.NewPipeline(database)
+		Expect(err).NotTo(HaveOccurred())
+		result := runQuery(ctx, pipeline, "SELECT path, f.functions, f.structs FROM files(include_excluded => TRUE) AS f ORDER BY path", query.ModuleScopeOptions{SnapshotID: indexed.SnapshotID})
+		Expect(result.Rows).To(Equal([]map[string]any{
+			{"path": "empty.go", "f.functions": 0, "f.structs": 0},
+			{"path": "excluded.go", "f.functions": 0, "f.structs": 0},
+			{"path": "interface.go", "f.functions": 0, "f.structs": 0},
+			{"path": "large.go", "f.functions": 1, "f.structs": 0},
+			{"path": "many.go", "f.functions": 0, "f.structs": 0},
+			{"path": "small.go", "f.functions": 1, "f.structs": 0},
+			{"path": "struct.go", "f.functions": 1, "f.structs": 1},
+		}))
+	})
+
 	It("projects caller and callee metrics while retaining the call-site witness", func(ctx SpecContext) {
 		database := openQueryDatabase(ctx, "sqlite")
 		checkout := metricCheckout()
@@ -62,7 +81,7 @@ var _ = Describe("SQL metrics", func() {
 		result := runQuery(ctx, pipeline, "SELECT f.path, f.lines FROM files() AS f WHERE f.lines >= 99 AND f.lines < 100 AND f.definitions < 3", scope)
 		Expect(result.Rows).To(Equal([]map[string]any{{"f.path": "below.go", "f.lines": 99}}))
 		result = runQuery(ctx, pipeline, "SELECT * FROM files() WHERE path = 'many.go'", scope)
-		Expect(result.Columns).To(HaveLen(6))
+		Expect(result.Columns).To(HaveLen(8))
 		Expect(result.Rows[0]).To(HaveKeyWithValue("file.definitions", 3))
 	})
 
