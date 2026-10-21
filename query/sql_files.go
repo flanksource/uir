@@ -8,20 +8,23 @@ import (
 
 	"github.com/flanksource/uir/internal/buildconstraint"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
 )
 
 var sqlFileFields = map[string]string{
 	"path": "string", "module": "string", "package": "string", "snapshot": "string",
 	"file.lines": "integer", "file.definitions": "integer",
+	"file.functions": "integer", "file.structs": "integer",
 	"file.build_constraint": "string",
 }
 
-var sqlFileWildcardFields = []string{"path", "module", "package", "snapshot", "file.lines", "file.definitions"}
+var sqlFileWildcardFields = []string{"path", "module", "package", "snapshot", "file.lines", "file.definitions", "file.functions", "file.structs"}
 
 type sqlFileOptions struct {
 	scopes          []moduleScope
 	lines           bool
+	declarations    bool
 	includeExcluded bool
 	buildConstraint bool
 	buildTags       []string
@@ -29,6 +32,14 @@ type sqlFileOptions struct {
 
 func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOptions) ([]sqlRecord, error) {
 	var records []sqlRecord
+	var declarations map[uuid.UUID]map[string]any
+	if options.declarations {
+		var err error
+		declarations, err = pipeline.sqlFileDeclarationCounts(ctx, options.scopes)
+		if err != nil {
+			return nil, err
+		}
+	}
 	builds := fileBuildConstraints{headers: map[string]buildconstraint.Header{}, computed: map[string]map[string]bool{}, tags: options.buildTags}
 	for _, scope := range options.scopes {
 		start := len(records)
@@ -56,6 +67,7 @@ func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOpt
 				SourceID: document.Source.ID.String(), Coverage: string(document.Document.Coverage)}
 			values := map[string]any{"path": path, "module": match.RootKey, "package": match.PackagePath,
 				"snapshot": match.SnapshotID, "file.definitions": document.Document.SymbolCount}
+			maps.Copy(values, declarations[document.Document.ID])
 			if options.lines {
 				count, found := lines[document.Source.ID]
 				if !found {
@@ -72,6 +84,40 @@ func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOpt
 		}
 	}
 	return records, nil
+}
+
+func (pipeline *Pipeline) sqlFileDeclarationCounts(ctx context.Context, scopes []moduleScope) (map[uuid.UUID]map[string]any, error) {
+	index, err := newIndexContext(ctx, pipeline, scopes)
+	if err != nil {
+		return nil, err
+	}
+	if err := index.prefetch(ctx, index.scopeDocumentPostings()); err != nil {
+		return nil, err
+	}
+	counts := make(map[uuid.UUID]map[string]any, len(index.decoded))
+	for id, document := range index.decoded {
+		functions, structs := 0, 0
+		for _, symbol := range document.content.Symbols {
+			switch symbol.Kind {
+			case symbolhandle.KindFunc.String():
+				functions++
+			case symbolhandle.KindMethod.String():
+				if symbol.ChildSlot != "" {
+					functions++
+				}
+			case symbolhandle.KindType.String():
+				form, err := storage.ClassifyTypeShape(symbol)
+				if err != nil {
+					return nil, fmt.Errorf("count structs in %q: %w", document.path, err)
+				}
+				if form == "struct" {
+					structs++
+				}
+			}
+		}
+		counts[id] = map[string]any{"file.functions": functions, "file.structs": structs}
+	}
+	return counts, nil
 }
 
 func (pipeline *Pipeline) sqlSourceLines(ctx context.Context, documents map[string]storage.ActiveDocument) (map[uuid.UUID]int, error) {

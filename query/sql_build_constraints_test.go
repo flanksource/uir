@@ -135,7 +135,7 @@ var _ = Describe("SQL build constraints", func() {
 		}
 		aliased := runQuery(ctx, pipeline, "SELECT f.path, f.build_constraint FROM files(include_excluded => TRUE) AS f WHERE NOT (f.build_constraint NOT REQUIRES 'hack') ORDER BY f.path", scope)
 		Expect(aliased.Rows).To(Equal([]map[string]any{{"f.path": "hack/compound.go", "f.build_constraint": "(hack || linux) && !linux"}, {"f.path": "hack/valid.go", "f.build_constraint": "hack"}}))
-		Expect(runQuery(ctx, pipeline, "SELECT * FROM files()", scope).Columns).To(HaveLen(6))
+		Expect(runQuery(ctx, pipeline, "SELECT * FROM files()", scope).Columns).To(HaveLen(8))
 		catalog, err := pipeline.QueryCatalog(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(catalog.Fields).To(HaveKeyWithValue("file.build_constraint", "string"))

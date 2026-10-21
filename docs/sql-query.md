@@ -89,6 +89,8 @@ uir query 'SELECT symbol.name, path, line, symbol.metrics.param_count, symbol.me
 | --- | --- |
 | `file.lines` | Physical source lines, including blanks and comments. Empty content has zero lines; a terminating newline adds no extra line; CRLF counts once. |
 | `file.definitions` | The active document's indexed declaration count, including fields, package variables and constants, excluding references and function-local bindings. |
+| `file.functions` | Number of declared functions and concrete methods; excludes interface signatures, function literals and function-valued variables. |
+| `file.structs` | Number of declared struct types; excludes fields, interfaces and type aliases. |
 | `symbol.metrics.param_count` | Value parameters, expanding grouped names and counting a variadic parameter once. Receivers and type parameters do not count. |
 | `symbol.metrics.body_lines` | Inclusive physical span of the body's delimiters. Documentation and signature-only lines do not count. A one-line body counts as one; a declaration without a body returns `NULL`. |
 

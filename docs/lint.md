@@ -21,9 +21,41 @@ uir lint --changed main...HEAD --group-by symbol
 uir lint --staged
 ```
 
-Configuration discovery starts in the current directory and stops at the Git root. `--config` selects an explicit file. The configuration directory defines the project root; configurations do not inherit or merge. Version 1 accepts only `version`, `lint.include_tests` (default false) and `lint.rules`. Each rule requires a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. The ID `uir/coverage` is reserved for run diagnostics. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
+Configuration discovery merges `~/.uir.yaml` first, then `.uir.yaml` files from the filesystem root down to the current directory, including ancestors above the Git root. Rules merge by `id`: a closer file replaces the complete rule definition, while other inherited rules remain in their original order. `lint.include_tests` inherits when omitted; an explicit `true` or `false` overrides it. Every discovered file is validated, including overridden rules. `--config` selects one explicit file without inheritance.
 
-`--exclude` disables exact configured rule IDs before execution, including rules selected with `--rule`. Other exclusion values and all `--include` values filter reported file paths relative to the configuration directory, including module subdirectories. Repeat either flag or comma-separate values; rule IDs and file globs can be mixed, for example `--exclude 'function-parameters,**/*_test.go'`. Exact rule IDs take precedence over file paths with the same name. Includes are alternatives; exclusions take precedence. File patterns use the SQL `MATCH` syntax: `*` stays within a path segment, `?` matches one character, `**` matches zero or more segments, and `/...` abbreviates `/**`. Quote globs to prevent shell expansion. Invalid globs fail before opening the database. Analysis retains the full project and dependency context, so excluding a callee's file does not hide a violation in an included caller. Fileless coverage warnings are always retained when rules run. Excluding every selected rule succeeds with zero rules and skips indexing and queries.
+The nearest configuration inside the repository defines the project root. With only home or external ancestor configuration, lint uses the Git root, or the current directory outside Git; it never indexes the home directory merely because it contains the shared configuration. Outside Git, a non-home ancestor configuration defines the project root. An explicit file defines its own project root. Include/exclude globs remain relative to this project root. Discovery follows ancestors of the invocation directory; it does not recursively load configurations below it.
+
+Version 1 accepts only `version`, `lint.include_tests` (default false) and `lint.rules`. Every file requires at least one rule with a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. The ID `uir/coverage` is reserved for run diagnostics. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
+
+For shared rules, save this as `~/.uir.yaml`:
+
+```yaml
+version: 1
+lint:
+  include_tests: true
+  rules:
+    - id: function-parameters
+      query: SELECT symbol.name AS name FROM func:* WHERE symbol.metrics.param_count > 3
+      message: '{{.name}} has too many parameters'
+      severity: warning
+```
+
+Save a project-specific replacement as `.uir.yaml` in the project root, then run `uir lint` there:
+
+```yaml
+version: 1
+lint:
+  include_tests: false
+  rules:
+    - id: function-parameters
+      query: SELECT symbol.name AS name FROM func:* WHERE symbol.metrics.param_count > 4
+      message: '{{.name}} exceeds the project parameter limit'
+      severity: error
+```
+
+The project now checks its four-parameter limit without test files. Other home rules still run. Put another `.uir.yaml` in a subdirectory and run `uir lint` from that directory to apply its overrides to that subtree. Use `uir lint --config .uir.yaml` to run only the project file.
+
+`--exclude` disables exact configured rule IDs before execution, including rules selected with `--rule`. Other exclusion values and all `--include` values filter reported file paths relative to the project root, including module subdirectories. Repeat either flag or comma-separate values; rule IDs and file globs can be mixed, for example `--exclude 'function-parameters,**/*_test.go'`. Exact rule IDs take precedence over file paths with the same name. Includes are alternatives; exclusions take precedence. File patterns use the SQL `MATCH` syntax: `*` stays within a path segment, `?` matches one character, `**` matches zero or more segments, and `/...` abbreviates `/**`. Quote globs to prevent shell expansion. Invalid globs fail before opening the database. Analysis retains the full project and dependency context, so excluding a callee's file does not hide a violation in an included caller. Fileless coverage warnings are always retained when rules run. Excluding every selected rule succeeds with zero rules and skips indexing and queries.
 
 The repository's [`.uir.example`](../.uir.example) also provides guideline-based warnings, including command files over 300 physical lines and Cobra references outside any `cmd/` path segment. The command size threshold is a configurable heuristic for moving business logic into backend packages. Cobra detection uses canonical target package identities, so import aliases do not bypass it; it requires indexed reference facts.
 
@@ -42,11 +74,15 @@ Messages use Go `text/template` with SELECT aliases as map keys. For example, `S
 
 By default, lint incrementally indexes Go modules below the project root and pins their immutable snapshots for the entire run. Dependencies provide query context. `--no-index` checks that the stored index matches current source, manifests, build configuration and local dependency context without publishing snapshots. `--snapshot` explicitly selects historical indexed facts and skips freshness checks; combine it with the configuration that should evaluate that history. The two flags are mutually exclusive.
 
+Repeated lint runs over an unchanged checkout reuse a persisted indexing checkpoint, including checkouts with untracked, staged or unstaged files. No commit is required for reuse. Each repository's SHA combines HEAD and refs with Git's changed-path status and each dirty file's last-modified time, size and mode. An identical SHA skips source discovery, dependency resolution, Go package loading and snapshot publication. Ignored scratch output does not invalidate the checkpoint.
+
+The checkpoint also verifies local dependency repositories, module and workspace manifests, build options, test selection, the indexer version and saved snapshot heads. Later source or dependency changes take the normal incremental indexing path. Non-Git inputs and snapshots with transient incomplete coverage use that path on every run. Dirty-file identity uses filesystem metadata; an edit that deliberately preserves both size and modification time requires `uir reindex --force`.
+
 `--changed` reports tracked differences from HEAD plus nonignored untracked paths while analyzing the live checkout. An optional commit or range selects an immutable source: a single commit compares with its first parent (or the empty tree for an initial commit), `A..B` compares endpoints and analyzes B, and `A...B` compares the unique merge base with B and analyzes B. Omitted range endpoints mean HEAD. `--staged` analyzes the exact captured index, including its staged `.uir.yaml` and module manifests; later staged or unstaged edits cannot alter that capture. Conflicted indexes fail explicitly. Both modes require a local Git checkout.
 
 Changed paths intersect the normal include/exclude filters. Analysis retains the full module context, findings retain original checkout paths, and grouping and the exit verdict use only the filtered findings. Deletions remain part of the selection and renames are deletion/addition pairs. A selection with no reportable paths succeeds without opening the database or indexing; it never becomes an unrestricted run. Fileless coverage warnings remain when a selected run executes. A manifest or configuration change selects that path; it does not automatically widen the selection to every Go file.
 
-Git source preparation belongs to `commons-db/git`. Bare `--changed` requires Git 2.45 or newer to disable lazy object fetching explicitly. Pinned source trees are materialized under project `.tmp/`, with raw Git blob bytes and no checkout filters or LFS hydration. Unsafe symlinks and gitlinks fail explicitly. Commit and staged snapshots publish historically under original checkout locations and do not advance saved checkout heads. Staged snapshots use the captured tree ID as their revision and store their source bytes. Pinned extraction follows historical indexing's isolated Go configuration: `GOWORK=off` and local replacements removed from a temporary module manifest, so it cannot borrow mutable external checkout replacements. `--config` names a path in the selected repository; pinned modes load its captured contents rather than the current file. Without `--config`, discovery is bounded by the selected source root.
+Git source preparation belongs to `commons-db/git`. Bare `--changed` requires Git 2.45 or newer to disable lazy object fetching explicitly. Pinned source trees are materialized under project `.tmp/`, with raw Git blob bytes and no checkout filters or LFS hydration. Unsafe symlinks and gitlinks fail explicitly. Commit and staged snapshots publish historically under original checkout locations and do not advance saved checkout heads. Staged snapshots use the captured tree ID as their revision and store their source bytes. Pinned extraction follows historical indexing's isolated Go configuration: `GOWORK=off` and local replacements removed from a temporary module manifest, so it cannot borrow mutable external checkout replacements. `--config` names a path in the selected repository; pinned modes load its captured contents rather than the current file. Without `--config`, discovery merges captured ancestor configurations up to the selected source root, excluding home and mutable external ancestors. Bare `--changed` uses normal home and ancestor inheritance from the live checkout.
 
 `--changed` and `--staged` are mutually exclusive. Neither combines with `--snapshot`. Bare `--changed` supports `--no-index`; commit/range and staged sources require indexing and reject `--no-index`. A positional revision without `--changed` fails before database access. The shared Gavel linter runner provides execution timeout, metadata, violation filtering and failure verdicts directly in-process; this command does not invoke `gavel lint uir`.
 

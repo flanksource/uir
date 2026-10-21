@@ -35,20 +35,20 @@ func Run(ctx context.Context, database *gorm.DB, config *Config, options Options
 	result := &Result{LinterResult: &linters.LinterResult{Linter: "uir", Violations: []models.Violation{}}, GroupBy: options.GroupBy}
 	workDir := options.WorkDir
 	if workDir == "" && config != nil {
-		workDir = filepath.Dir(config.Path)
+		workDir = config.Root
 	}
 	result.WorkDir = workDir
 	adapter := &sqlLinter{database: database, config: config, options: options, result: result}
 	runOptions := linters.RunOptions{WorkDir: workDir, ForceJSON: true}
 	if config != nil {
-		runOptions.ConfigDir = filepath.Dir(config.Path)
+		runOptions.ConfigDir = config.Root
 	}
 	result.LinterResult = linters.RunLinterWithTask(ctx, nil, adapter, runOptions)
 	return result
 }
 
 func execute(ctx context.Context, database *gorm.DB, config *Config, options Options, result *Result) error {
-	if config == nil || config.Path == "" {
+	if config == nil || config.Path == "" || config.Root == "" {
 		return errors.New("a loaded lint configuration is required")
 	}
 	if err := options.Validate(); err != nil {
@@ -139,7 +139,7 @@ func snapshots(ctx context.Context, database *gorm.DB, config *Config, options O
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Dir(config.Path)
+	root := config.Root
 	var modules []indexer.ModuleResult
 	switch {
 	case options.Source != nil && options.Source.Info().Kind != git.SourceWorktree:

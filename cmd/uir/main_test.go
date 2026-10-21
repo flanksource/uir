@@ -86,8 +86,24 @@ var _ = Describe("UIR module CLI", func() {
 		root.SetOut(&output)
 		root.SetArgs([]string{"--version"})
 		Expect(root.Execute()).To(Succeed())
-		Expect(output.String()).To(Equal("uir version dev\n"))
+		Expect(output.String()).To(Equal("uir version dev (git: unknown, built: unknown)\n"))
 	})
+	DescribeTable("prints linked Git revision and build date", func(args []string) {
+		previousVersion, previousCommit, previousDate := version, gitCommit, buildDate
+		DeferCleanup(func() { version, gitCommit, buildDate = previousVersion, previousCommit, previousDate })
+		version, gitCommit, buildDate = "v1.2.3", "0123456789abcdef", "2026-10-21T12:34:56Z"
+		runtime := &commandRuntime{DSN: "invalid"}
+		root := newRootCommand(runtime)
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetArgs(args)
+		Expect(root.Execute()).To(Succeed())
+		Expect(output.String()).To(Equal("uir version v1.2.3 (git: 0123456789abcdef, built: 2026-10-21T12:34:56Z)\n"))
+		Expect(runtime.database).To(BeNil())
+	},
+		Entry("version flag", []string{"--version"}),
+		Entry("version command", []string{"version"}),
+	)
 	It("prints the root version through a local version command without opening a database", func() {
 		runtime := &commandRuntime{DSN: "invalid"}
 		root := newRootCommand(runtime)

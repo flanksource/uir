@@ -59,7 +59,8 @@ jobs:
       - name: Smoke test binary
         run: |
           ./.bin/uir --help
-          test "$(./.bin/uir --version)" = "uir version $VERSION"
+          ./.bin/uir --version | rg "^uir version $VERSION \(git: $(git rev-parse HEAD), built: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$"
+          test "$(./.bin/uir version)" = "$(./.bin/uir --version)"
 
       - name: Archive binary
         run: |

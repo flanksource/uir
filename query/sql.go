@@ -120,6 +120,7 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 		}
 		records, err := session.sqlFileRecords(ctx, sqlFileOptions{
 			scopes: selection.scopes, lines: rows.required["file.lines"], includeExcluded: source.options.includeExcluded,
+			declarations:    rows.required["file.functions"] || rows.required["file.structs"],
 			buildConstraint: rows.required["file.build_constraint"], buildTags: sortedKeys(rows.buildTags),
 		})
 		if err != nil {
