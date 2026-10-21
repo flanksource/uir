@@ -146,3 +146,11 @@ make lint      # Go and browser lint
 make fmt       # go fmt + go mod tidy
 make query-parser # regenerate query/grammar.peg.go
 ```
+
+`make build` and `make install` embed the Git commit and UTC build date. Both `uir version` and `uir --version` print `uir version <version> (git: <commit>, built: <date>)`. Set `VERSION`, `GIT_COMMIT`, or `BUILD_DATE` to override build metadata; dates use RFC 3339, for example `2026-10-21T12:34:56Z`. Direct `go run` builds report `dev` with unknown commit and build date.
+
+The Docker build context excludes Git metadata, so pass the revision explicitly:
+
+```sh
+docker build --build-arg GIT_COMMIT="$(git rev-parse HEAD)" --build-arg VERSION=dev -t uir:dev .
+```

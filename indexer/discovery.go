@@ -56,6 +56,11 @@ type discoveredFile struct {
 
 func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, options discoveryOptions) error {
 	if options.Source == nil {
+		if err := observeCheckpoint(ctx, root.LocalPath); err != nil {
+			return err
+		}
+	}
+	if options.Source == nil {
 		root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
 		root.Revision = root.GitCommit
 		root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
@@ -132,6 +137,11 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 	}
 	root.ConfigurationHash = configurationHash(options.IncludeTests, environment.Variant)
 	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
+	if options.Source == nil {
+		if err := observeCheckpointWorkspace(ctx, *root); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
