@@ -63,7 +63,7 @@ func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleSco
 		}
 		return reads
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(scope.location.CanonicalPath)
+	resolvedRoot, gitDirectory, err := resolveModuleSourceLocation(scope.location.CanonicalPath)
 	if err != nil {
 		for index := range reads {
 			reads[index].err = fmt.Errorf("resolve module location %q: %w", scope.location.CanonicalPath, err)
@@ -78,8 +78,25 @@ func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleSco
 			pending = append(pending, index)
 		}
 	}
-	(&gitSources{scope: scope, resolvedRoot: resolvedRoot, sources: sources, reads: reads}).read(ctx, pending)
+	(&gitSources{scope: scope, resolvedRoot: gitDirectory, sources: sources, reads: reads}).read(ctx, pending)
 	return reads
+}
+
+// Historical modules can be absent from the checkout; Git lookup starts at their nearest existing parent.
+func resolveModuleSourceLocation(directory string) (root, existing string, err error) {
+	for current := directory; ; current = filepath.Dir(current) {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			relative, err := filepath.Rel(current, directory)
+			if err != nil {
+				return "", "", err
+			}
+			return filepath.Join(resolved, relative), resolved, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) || current == filepath.Dir(current) {
+			return "", "", err
+		}
+	}
 }
 
 // readCheckoutSource reads a source from the checkout or the snapshot's stored blob, reporting true

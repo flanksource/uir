@@ -15,6 +15,10 @@ uir lint --include 'cmd/**' --exclude '**/*_test.go'
 uir lint --exclude function-parameters
 uir lint --exclude function-parameters --group-by symbol
 uir lint --group-by file --format json
+uir lint --changed
+uir lint --changed HEAD~3..HEAD
+uir lint --changed main...HEAD --group-by symbol
+uir lint --staged
 ```
 
 Configuration discovery starts in the current directory and stops at the Git root. `--config` selects an explicit file. The configuration directory defines the project root; configurations do not inherit or merge. Version 1 accepts only `version`, `lint.include_tests` (default false) and `lint.rules`. Each rule requires a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. The ID `uir/coverage` is reserved for run diagnostics. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
@@ -38,6 +42,14 @@ Messages use Go `text/template` with SELECT aliases as map keys. For example, `S
 
 By default, lint incrementally indexes Go modules below the project root and pins their immutable snapshots for the entire run. Dependencies provide query context. `--no-index` checks that the stored index matches current source, manifests, build configuration and local dependency context without publishing snapshots. `--snapshot` explicitly selects historical indexed facts and skips freshness checks; combine it with the configuration that should evaluate that history. The two flags are mutually exclusive.
 
+`--changed` reports tracked differences from HEAD plus nonignored untracked paths while analyzing the live checkout. An optional commit or range selects an immutable source: a single commit compares with its first parent (or the empty tree for an initial commit), `A..B` compares endpoints and analyzes B, and `A...B` compares the unique merge base with B and analyzes B. Omitted range endpoints mean HEAD. `--staged` analyzes the exact captured index, including its staged `.uir.yaml` and module manifests; later staged or unstaged edits cannot alter that capture. Conflicted indexes fail explicitly. Both modes require a local Git checkout.
+
+Changed paths intersect the normal include/exclude filters. Analysis retains the full module context, findings retain original checkout paths, and grouping and the exit verdict use only the filtered findings. Deletions remain part of the selection and renames are deletion/addition pairs. A selection with no reportable paths succeeds without opening the database or indexing; it never becomes an unrestricted run. Fileless coverage warnings remain when a selected run executes. A manifest or configuration change selects that path; it does not automatically widen the selection to every Go file.
+
+Git source preparation belongs to `commons-db/git`. Bare `--changed` requires Git 2.45 or newer to disable lazy object fetching explicitly. Pinned source trees are materialized under project `.tmp/`, with raw Git blob bytes and no checkout filters or LFS hydration. Unsafe symlinks and gitlinks fail explicitly. Commit and staged snapshots publish historically under original checkout locations and do not advance saved checkout heads. Staged snapshots use the captured tree ID as their revision and store their source bytes. Pinned extraction follows historical indexing's isolated Go configuration: `GOWORK=off` and local replacements removed from a temporary module manifest, so it cannot borrow mutable external checkout replacements. `--config` names a path in the selected repository; pinned modes load its captured contents rather than the current file. Without `--config`, discovery is bounded by the selected source root.
+
+`--changed` and `--staged` are mutually exclusive. Neither combines with `--snapshot`. Bare `--changed` supports `--no-index`; commit/range and staged sources require indexing and reject `--no-index`. A positional revision without `--changed` fails before database access. The shared Gavel linter runner provides execution timeout, metadata, violation filtering and failure verdicts directly in-process; this command does not invoke `gavel lint uir`.
+
 Partial or syntax-only coverage produces a fileless warning under `uir/coverage`; rules continue against available facts. Missing required metrics, catalog binding errors, index failures and message failures are execution errors. Findings completed before an execution failure remain in the JSON report. File-level findings have no invented line or column.
 
 `--group-by symbol|file` groups findings for review. File grouping is the default display. Symbol grouping combines findings from different rules under the declaration owning the source location; call and relationship findings belong to the caller/source symbol, independently of the SQL projection. Groups use canonical symbol IDs and file paths, so identically named symbols stay distinct. Findings without a symbol appear under file findings, and fileless coverage warnings appear under run diagnostics. Grouping preserves every finding, its severity and location, and the command's exit status. Explicit grouping also adds `group_by` and a `groups` array to JSON when findings exist; each group contains `file`, optional `symbol_id` and `symbol`, and `violations`. The flat `violations` array remains available for Gavel consumers. Omitting the flag preserves the standard report JSON.
@@ -47,6 +59,8 @@ Error findings and execution failures exit nonzero. Warnings and info alone exit
 Gavel discovers `.uir.yaml` and runs the installed `uir` binary as a native linter. Use `gavel lint --linters uir` for Gavel snapshots, baselines, summaries and UI. Analysis always runs with full project context; a normal file scope filters reported findings afterward. Changing `.uir.yaml` reports the full owning project. Fileless run warnings survive file scopes.
 
 The UIR dependency is pinned to Gavel v0.0.56 for existing report types. The shared `linters.HasFailures` API and native adapter are implemented in the sibling Gavel checkout and currently validated through the ignored local workspace. Release Gavel containing those changes, then update the UIR pin and run `GOWORK=off make build` before publishing UIR. No local replacement belongs in go.mod.
+
+The changed/staged modes also consume `commons-db/git`'s prepared-source API, currently implemented in the sibling checkout. The existing commons-db v0.1.59 pin does not provide it. Publish those shared Git changes and update the commons-db pin before validating or publishing a standalone UIR release.
 
 To run the included sample against an isolated database:
 

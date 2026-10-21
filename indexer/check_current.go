@@ -25,7 +25,7 @@ func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, options C
 	if err != nil {
 		return ModuleResult{}, fmt.Errorf("canonicalize checkout %q: %w", path, err)
 	}
-	roots, err := discoverModules(ctx, canonical, options.IncludeTests)
+	roots, err := discoverModules(ctx, canonical, discoveryOptions{IncludeTests: options.IncludeTests})
 	if err != nil {
 		return ModuleResult{}, err
 	}
@@ -69,7 +69,7 @@ func (indexer *Indexer) HeadIncludesTests(ctx context.Context, path string) (boo
 	if err != nil {
 		return false, fmt.Errorf("canonicalize checkout %q: %w", path, err)
 	}
-	roots, err := locateModuleRoots(ctx, canonical)
+	roots, err := locateModuleRoots(ctx, canonical, nil)
 	if err != nil {
 		return false, err
 	}

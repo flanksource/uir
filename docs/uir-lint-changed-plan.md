@@ -1,0 +1,23 @@
+# Git-scoped UIR linting
+
+Status: implemented in the linked workspace; the TODO's three fixture checks are verified. Standalone release validation requires publishing the shared dependencies, and broad repository gates retain the unrelated failures listed below.
+
+`uir lint --changed` selects tracked differences from HEAD plus nonignored untracked files and analyzes the current checkout. `--changed SHA` selects that commit's first-parent changes and analyzes SHA; a root commit selects all files. `--changed A..B` selects differences between the endpoints and analyzes B; `A...B` compares the merge base with B. `--staged` selects staged changes and analyzes the exact captured index, including its configuration and manifests.
+
+Retain full analysis context, intersect an exact changed-file set with include/exclude filters, and preserve fileless diagnostics. Empty selections must not become unrestricted runs. Reject incompatible source selectors before database access. Bare --changed supports --no-index; historical and staged sources do not.
+
+Share immutable Git-source capture and materialization, existing indexing/extraction/publication, and existing lint reporting. Historical and staged runs preserve checkout heads, use original checkout locations, and clean scratch directories under project .tmp/. Staged snapshots have distinct identities and saved source blobs. Discover target modules and configuration even when they no longer exist in the current checkout.
+
+Source preparation is owned by `commons-db/git`: `Cache.PrepareSource` returns a `PreparedSource` with `Info`, `Changes`, and `Release`. Its API implementation and tests are tracked separately as Gavel TODO `0c44ac98-83cb-4fd7-a31f-b095e70aca53`, with the full contract and verification boundaries in the sibling checkout's `git/SOURCES.md` and `git/SOURCE_PLAN.md`. UIR consumes this shared API; the unused local snapshot prototype has been removed. `lint.Prepare` loads the source's configuration before database access, `Indexer.IndexSource` discovers and publishes pinned modules at original locations without moving heads, and the shared Gavel runner executes SQL rules, filters findings and determines the final verdict. Source-header queries can recover historical modules absent from the current checkout through their nearest existing Git parent.
+
+Add Ginkgo coverage for working changes, ignored/untracked paths, unusual filenames, empty selections, renames/deletions, root/merge commits, ranges, historical isolation, partial staging, initial commits, staged manifests/configuration, nested modules, filters, diagnostics, JSON/grouping/exit status, preservation, and cleanup. Run focused tests, go test ./..., make lint, make build, and CLI smoke checks. Preserve unrelated changes and do not commit.
+
+## Verification results
+
+`gavel todos check 81b2d6b6-a960-40ac-8543-cf7a047b24ef --timeout 5m` passed all three checks from `fixtures/uir-lint-changed.md`: shared Git preparation, UIR lint/CLI and pinned source indexing. Focused SQL lint execution also passed on SQLite and PostgreSQL. The full indexer suite passed. Both Gavel's golangci-lint and `GOTOOLCHAIN=go1.26.1 .bin/golangci-lint run ./lint ./indexer ./query ./cmd/uir` passed with zero violations. `git diff --check` passed.
+
+The linked CLI binary built successfully and returned successful empty JSON reports for `--staged`, `--changed HEAD..HEAD` and `--changed --no-index` against the project fixture, each using an invalid DSN to prove empty selections did not open a database. Integration tests exercise nonempty staged/historical CLI findings, grouping and exit codes.
+
+`make build` and module-toolchain `make lint` fail in untouched `hack/postdeploymentdiff` because the linked sqlglot package lacks `ParseDiagnostic` and `ParseScript`. Default-toolchain lint additionally cannot read Go 1.27 export data with the pinned analyzer. `go test ./...` has those hack build failures, one lint-example failure caused by the pre-existing dirty `.uir.example` threshold change, and three query graph nil-versus-empty-slice assertions. The same three graph failures reproduce with `query/module_content.go` overlaid from HEAD, independently of the source-reader change. These unrelated files were left intact.
+
+`GOWORK=off go test ./lint ./indexer ./cmd/uir -run '^$'` is blocked by missing shared Git APIs in pinned commons-db v0.1.59, including the new prepared-source API and the existing local visibility API. Publish the owning shared changes and update dependency pins before standalone release validation. No dependency replacements, commits or publication were added.
