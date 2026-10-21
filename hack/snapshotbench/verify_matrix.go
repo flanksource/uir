@@ -1,3 +1,5 @@
+//go:build hack
+
 package main
 
 import "fmt"
