@@ -398,7 +398,7 @@ var _ = Describe("typed extraction", func() {
 			indexOnce(ctx, engine, workspace)
 			half := "func Half(a Amount) Amount { return Amount{Cents: a.Cents / 2, Currency: a.Currency} }\n"
 			writeFile(filepath.Join(workspace, "money", "money.go"), moneySource(moneyAmount, moneyAdd, moneyScale, moneyUnit, moneyZero, half))
-			roots, err := discoverModules(ctx, workspace, false)
+			roots, err := discoverModules(ctx, workspace, discoveryOptions{IncludeTests: false})
 			Expect(err).ToNot(HaveOccurred())
 			extraction, err := extractModule(ctx, extractOptions{loadPackages: engine.loadPackages, root: roots[0]})
 			Expect(err).ToNot(HaveOccurred())

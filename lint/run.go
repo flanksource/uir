@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/flanksource/commons-db/git"
 	"github.com/flanksource/gavel/linters"
 	"github.com/flanksource/gavel/models"
 	"github.com/flanksource/uir/indexer"
@@ -23,18 +23,27 @@ type Options struct {
 	NoIndex  bool
 	Snapshot string
 	GroupBy  string
+	Changed  bool
+	Staged   bool
+	Revision string
+	Source   *git.PreparedSource
+	Files    []string
+	WorkDir  string
 }
 
 func Run(ctx context.Context, database *gorm.DB, config *Config, options Options) *Result {
-	started := time.Now()
 	result := &Result{LinterResult: &linters.LinterResult{Linter: "uir", Violations: []models.Violation{}}, GroupBy: options.GroupBy}
-	err := execute(ctx, database, config, options, result)
-	result.sortGroups()
-	result.Duration = time.Since(started)
-	result.Success = err == nil
-	if err != nil {
-		result.Error = err.Error()
+	workDir := options.WorkDir
+	if workDir == "" && config != nil {
+		workDir = filepath.Dir(config.Path)
 	}
+	result.WorkDir = workDir
+	adapter := &sqlLinter{database: database, config: config, options: options, result: result}
+	runOptions := linters.RunOptions{WorkDir: workDir, ForceJSON: true}
+	if config != nil {
+		runOptions.ConfigDir = filepath.Dir(config.Path)
+	}
+	result.LinterResult = linters.RunLinterWithTask(ctx, nil, adapter, runOptions)
 	return result
 }
 
@@ -42,9 +51,8 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 	if config == nil || config.Path == "" {
 		return errors.New("a loaded lint configuration is required")
 	}
-	result.WorkDir = filepath.Dir(config.Path)
-	if options.NoIndex && options.Snapshot != "" {
-		return errors.New("--no-index and --snapshot cannot be combined")
+	if err := options.Validate(); err != nil {
+		return err
 	}
 	selection, err := config.Filter(options)
 	if err != nil {
@@ -57,7 +65,7 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 			return fmt.Errorf("rule %s: configuration must be compiled with lint.Load", rule.ID)
 		}
 	}
-	if len(rules) == 0 {
+	if len(rules) == 0 || (options.Files != nil && len(options.Files) == 0) {
 		return nil
 	}
 	scopes, err := snapshots(ctx, database, config, options)
@@ -133,9 +141,12 @@ func snapshots(ctx context.Context, database *gorm.DB, config *Config, options O
 	}
 	root := filepath.Dir(config.Path)
 	var modules []indexer.ModuleResult
-	if options.NoIndex {
+	switch {
+	case options.Source != nil && options.Source.Info().Kind != git.SourceWorktree:
+		modules, err = engine.IndexSource(ctx, indexer.SourceOptions{Source: options.Source, Directory: root, IncludeTests: config.Lint.IncludeTests})
+	case options.NoIndex:
 		modules, err = engine.CheckModulesCurrent(ctx, root, indexer.CheckOptions{IncludeTests: config.Lint.IncludeTests, AllowIncomplete: true})
-	} else {
+	default:
 		var run *indexer.ModuleIndexRun
 		run, err = indexer.StartModulesTask(ctx, engine, []indexer.ModuleOptions{{Path: root, IncludeTests: config.Lint.IncludeTests, Reason: storage.ReasonReindex}})
 		if err == nil {

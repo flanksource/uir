@@ -9,6 +9,7 @@ import (
 	"github.com/flanksource/gavel/linters"
 	"github.com/flanksource/uir/lint"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 )
 
 type lintOptions struct {
@@ -19,41 +20,52 @@ type lintOptions struct {
 	NoIndex  bool     `flag:"no-index" help:"Require current stored facts without refreshing the index"`
 	Snapshot string   `flag:"snapshot" help:"Lint an immutable historical snapshot without refreshing"`
 	GroupBy  string   `flag:"group-by" help:"Group findings by symbol or file (default: file)"`
+	Changed  bool     `flag:"changed" help:"Report changed files; an optional revision or range selects an immutable commit tree"`
+	Staged   bool     `flag:"staged" help:"Lint the exact staged tree and report staged files"`
+	Revision string   `args:"true" help:"Commit, A..B or A...B (requires --changed)"`
 }
 
 func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
-	command := clicky.AddNamedCommandWithContext("lint", root, lintOptions{}, func(ctx context.Context, options lintOptions) ([]*lint.Result, error) {
+	command := clicky.AddNamedCommandWithContext("lint", root, lintOptions{}, func(ctx context.Context, options lintOptions) (results []*lint.Result, err error) {
 		directory, err := os.Getwd()
 		if err != nil {
 			return nil, err
 		}
-		path, err := lint.Discover(directory, options.Config)
+		request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision})
 		if err != nil {
 			return lintFailure(err), err
 		}
-		config, err := lint.Load(path)
-		if err != nil {
-			return lintFailure(err), err
+		defer func() {
+			if cleanup := request.Release(); cleanup != nil {
+				err = errors.Join(err, cleanup)
+				if len(results) == 0 {
+					results = lintFailure(err)
+				} else {
+					results[0].Success = false
+					if results[0].Error == "" {
+						results[0].Error = cleanup.Error()
+					} else {
+						results[0].Error += "; " + cleanup.Error()
+					}
+				}
+			}
+		}()
+		var database *gorm.DB
+		if !request.Empty() {
+			database, err = runtime.Database(ctx)
+			if err != nil {
+				return lintFailure(err), err
+			}
 		}
-		if _, err := config.Filter(lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, GroupBy: options.GroupBy}); err != nil {
-			return lintFailure(err), err
-		}
-		if options.NoIndex && options.Snapshot != "" {
-			err := errors.New("--no-index and --snapshot cannot be combined")
-			return lintFailure(err), err
-		}
-		database, err := runtime.Database(ctx)
-		if err != nil {
-			return lintFailure(err), err
-		}
-		results := []*lint.Result{lint.Run(ctx, database, config, lint.Options{Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy})}
+		results = []*lint.Result{request.Run(ctx, database)}
 		if linters.HasFailures([]*linters.LinterResult{results[0].LinterResult}) {
 			return results, errors.New("UIR lint failed")
 		}
 		return results, nil
 	})
 	command.Short = "Run SQL architecture rules from .uir.yaml"
-	command.Args = cobra.NoArgs
+	command.Args = cobra.MaximumNArgs(1)
+	command.Use = "lint [revision|A..B|A...B]"
 	clicky.MarkLocalOnly(command)
 }
 

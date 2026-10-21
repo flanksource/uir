@@ -16,14 +16,14 @@ var _ = Describe("module discovery", func() {
 		Expect(os.WriteFile(goMod, []byte("module example.org/first\n\ngo 1.26\n"), 0o644)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n\nfunc Run() {}\n"), 0o644)).To(Succeed())
 
-		first, err := discoverModules(ctx, workspace, false)
+		first, err := discoverModules(ctx, workspace, discoveryOptions{IncludeTests: false})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(first).To(HaveLen(1))
 		Expect(first[0].RootKey).To(Equal("example.org/first"))
 		Expect(first[0].Files[0].PackagePath).To(Equal("example.org/first"))
 
 		Expect(os.WriteFile(goMod, []byte("module example.org/second\n\ngo 1.26\n"), 0o644)).To(Succeed())
-		second, err := discoverModules(ctx, workspace, false)
+		second, err := discoverModules(ctx, workspace, discoveryOptions{IncludeTests: false})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(second[0].RootKey).To(Equal("example.org/second"))
 		Expect(second[0].Files[0].PackagePath).To(Equal("example.org/second"))
@@ -46,7 +46,7 @@ var _ = Describe("module discovery", func() {
 		writeFile(filepath.Join(workspace, "internal", "plain.go"), "package internal\n")
 		Expect(exec.Command("git", "-C", workspace, "init", "-q").Run()).To(Succeed())
 
-		roots, err := discoverModules(ctx, workspace, false)
+		roots, err := discoverModules(ctx, workspace, discoveryOptions{IncludeTests: false})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(roots).To(HaveLen(1))
 		keys := make([]string, 0, len(roots[0].Files))
@@ -67,7 +67,7 @@ var _ = Describe("module discovery", func() {
 		Expect(exec.Command("git", "-C", workspace, "init", "-q").Run()).To(Succeed())
 		Expect(exec.Command("git", "-C", nested, "init", "-q").Run()).To(Succeed())
 
-		roots, err := discoverModules(ctx, workspace, false)
+		roots, err := discoverModules(ctx, workspace, discoveryOptions{IncludeTests: false})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(roots).To(HaveLen(2))
 		Expect([]string{roots[0].RootKey, roots[1].RootKey}).To(Equal([]string{"example.org/app", "example.org/nested"}))
