@@ -161,7 +161,7 @@ func writeTypecheckFixture(ctx context.Context, workspace string) discoveredRoot
 	writeFile(filepath.Join(consumer, "app", "app.go"), consumerSource)
 	writeFile(filepath.Join(consumer, "app", "app_test.go"), consumerTestSource)
 	downloadModules(ctx, consumer)
-	roots, err := discoverModules(ctx, consumer, true)
+	roots, err := discoverModules(ctx, consumer, discoveryOptions{IncludeTests: true})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(roots).To(HaveLen(1))
 	return roots[0]
@@ -288,7 +288,7 @@ var _ = Describe("typed load of dependencies", func() {
 		cached := filepath.Join(goEnvValue(ctx, workspace, "GOMODCACHE"), filepath.FromSlash(typecheckDepsModule)+"@"+typecheckDepsVersion)
 		writeModule(mirror, "example.org/mirror", "\nrequire "+typecheckDepsModule+" "+typecheckDepsVersion+"\n\nreplace "+typecheckDepsModule+" => "+cached+"\n",
 			"package mirror\n\nimport \"example.org/typecheck-deps/generic\"\n\nvar Keys = generic.SortedKeys(generic.Defaults)\n")
-		roots, err := discoverModules(ctx, mirror, false)
+		roots, err := discoverModules(ctx, mirror, discoveryOptions{IncludeTests: false})
 		Expect(err).ToNot(HaveOccurred())
 
 		_, err = extractModule(ctx, extractOptions{loadPackages: packages.Load, root: roots[0]})
@@ -302,7 +302,7 @@ var _ = Describe("typed load of dependencies", func() {
 			Skip("set " + equivalenceRootsVariable + " to the checkouts to compare")
 		}
 		for _, checkout := range filepath.SplitList(checkouts) {
-			roots, err := discoverModules(ctx, checkout, true)
+			roots, err := discoverModules(ctx, checkout, discoveryOptions{IncludeTests: true})
 			Expect(err).ToNot(HaveOccurred(), checkout)
 			for _, root := range roots {
 				declarations, full := extractBoth(ctx, root)

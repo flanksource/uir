@@ -36,15 +36,20 @@ type Rule struct {
 	message  *template.Template
 }
 
-func Load(path string) (*Config, error) {
+func Load(path string) (config *Config, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		err = errors.Join(err, file.Close())
+		if err != nil {
+			config = nil
+		}
+	}()
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
-	config := &Config{}
+	config = &Config{}
 	if err := decoder.Decode(config); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

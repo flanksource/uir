@@ -7,7 +7,7 @@ import (
 
 // CheckModulesCurrent verifies all modules below path without publishing snapshots.
 func (indexer *Indexer) CheckModulesCurrent(ctx context.Context, path string, options CheckOptions) ([]ModuleResult, error) {
-	roots, err := locateModuleRoots(ctx, path)
+	roots, err := locateModuleRoots(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
