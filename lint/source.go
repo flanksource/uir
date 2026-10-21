@@ -48,24 +48,22 @@ func Prepare(ctx context.Context, directory, explicit string, options Options) (
 			return request, err
 		}
 	}
-	path, err := Discover(directory, explicit)
+	discovery := DiscoveryOptions{Directory: directory, Explicit: explicit}
+	if request.Options.Source != nil && request.Options.Source.Info().Kind != git.SourceWorktree {
+		discovery.Boundary = request.Options.Source.Info().Dir
+	}
+	request.Config, err = Discover(discovery)
 	if err != nil {
-		return request, err
-	}
-	if request.Options.Source != nil && !insideSource(path, request.Options.Source.Info().Dir) {
-		return request, errors.New("no lint configuration inside the selected Git source")
-	}
-	if request.Config, err = Load(path); err != nil {
 		return request, err
 	}
 	selection, err := request.Config.Filter(options)
 	if err != nil {
 		return request, err
 	}
-	request.Options.WorkDir = filepath.Dir(path)
+	request.Options.WorkDir = request.Config.Root
 	if request.Options.Source != nil {
 		info := request.Options.Source.Info()
-		relative, err := filepath.Rel(info.Dir, filepath.Dir(path))
+		relative, err := filepath.Rel(info.Dir, request.Config.Root)
 		if err != nil {
 			return request, err
 		}

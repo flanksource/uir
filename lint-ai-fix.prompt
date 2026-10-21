@@ -1,0 +1,67 @@
+---
+# Usage from the repository root: captain prompt run lint-ai-fix.prompt
+name: lint-ai-fix
+description: Run the UIR architecture linter and fix its findings in the current working tree.
+model: agent:gpt-5.6-sol:medium,agent:opus:medium
+effort: high
+prompt:
+  system: >-
+    Fix UIR architecture lint findings in the current developer working tree.
+    Follow repository instructions and preserve unrelated changes.
+    Prefer cohesive, targeted changes that preserve behavior and fix root causes.
+    Do not stage, commit, push, or change lint configuration to suppress findings.
+---
+Work from the UIR repository root.
+
+## Inspect the working tree
+
+Read the applicable AGENTS.md instructions, inspect git status and diffs, and read .uir.example. Preserve existing staged, unstaged, and untracked changes. Re-read each target file and its current diff before editing.
+
+## Locate UIR
+
+Use the existing executable on PATH:
+
+```sh
+command -v uir
+```
+
+Only if UIR is missing, check that deps is available, install UIR, and check PATH again. Run these commands separately:
+
+```sh
+command -v deps
+deps install flanksource/uir
+command -v uir
+```
+
+Stop and report the failure if deps is unavailable, installation fails, or uir is still unavailable on PATH. Do not build UIR from source to obtain the linter.
+
+## Run and fix lint
+
+Use the global/default UIR database, honoring its normal environment and configuration. Do not override the DSN or schema, change database environment variables, or create an isolated database.
+
+```sh
+uir lint --config .uir.example --group-by symbol --format json --no-progress
+```
+
+Allow normal incremental indexing so findings reflect the current source. Do not use historical snapshots or disable index refresh.
+
+Read the complete JSON report and stderr even when the command exits nonzero. Inspect each result's success, error, and violations fields. Warnings and info findings can exit zero; success describes execution and does not mean there are no findings. An absent, invalid, or incomplete report is a failure, not a clean run. Report coverage diagnostics explicitly; they do not prove the whole project was checked.
+
+Fix actionable source findings in cohesive batches, using symbol groups to address related rules together and retaining file-level findings and run diagnostics. Inspect callers before changing signatures and update affected callers together. Follow the repository's TDD requirements for behavior changes, and preserve behavior when refactoring.
+
+Keep .uir.example and other lint configuration unchanged. Do not disable rules, raise thresholds, exclude findings, add suppressions, weaken tests, or distort behavior just to satisfy a metric. If a correct fix is blocked, report the exact blocker and remaining findings; obtain approval before introducing a workaround.
+
+Re-run the same lint command after each batch and inspect all remaining findings. Continue until actionable findings are resolved or a concrete blocker prevents further progress. Diagnose execution and indexing failures at their source; never treat them as a successful lint run.
+
+## Verify and report
+
+Run focused tests for the changed code, then the repository-required gates as separate commands:
+
+```sh
+make build
+make lint
+go test ./...
+git diff --check
+```
+
+Re-run the UIR lint command against the final source. Report what changed, verification results, remaining findings by rule and location, coverage limitations, and any blockers. Distinguish failures caused by the edits from unrelated existing failures. Claim a clean run only when execution succeeds, the report contains no findings, and coverage diagnostics do not indicate incomplete analysis. Leave all changes uncommitted.

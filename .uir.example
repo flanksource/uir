@@ -22,44 +22,57 @@ lint:
     # ~/.agents/AGENTS.md currently recommends a range of 1,000–2,000.
     - id: go-file-lines
       severity: warning
-      message: "{{.path}} has {{.lines}} lines; keep Go files at or below 1,000 lines and split cohesive responsibilities (Core rules / C-9)"
+      message: "{{.path}} has {{.lines}} lines; keep Go files at or below 2,000 lines and split cohesive responsibilities (Core rules / C-9)"
       query: |
         SELECT path, file.lines AS lines
         FROM files()
-        WHERE path MATCH '**/*.go' AND file.lines > 1000
+        WHERE path MATCH '**/*.go' AND file.lines > 2000
         ORDER BY lines DESC, path
 
     # Core rules / C-9: applies when non-Go sources have been indexed/imported.
     # The Go indexer alone does not index TypeScript, Markdown or other languages.
     - id: other-file-lines
       severity: warning
-      message: "{{.path}} has {{.lines}} lines; keep non-Go files at or below 500 lines (Core rules / C-9)"
+      message: "{{.path}} has {{.lines}} lines; keep non-Go files at or below 1000 lines (Core rules / C-9)"
       query: |
         SELECT path, file.lines AS lines
         FROM files()
-        WHERE path NOT MATCH '**/*.go' AND file.lines > 500
+        WHERE path NOT MATCH '**/*.go' AND file.lines > 100
         ORDER BY lines DESC, path
+
+    # Count functions (including methods) and structs, not struct fields.
+    # Physical file lines include comments and blanks; exactly 150 does not match.
+    - id: small-single-declaration-file
+      severity: warning
+      message: "{{.path}} has {{.lines}} lines and a single function or struct; consider merging into a related file in the same package"
+      query: |
+        SELECT path, file.lines AS lines
+        FROM files()
+        WHERE file.lines < 150
+          AND ((file.functions = 1 AND file.structs = 0)
+            OR (file.functions = 0 AND file.structs = 1))
+        ORDER BY path
 
     # C-8: body_lines counts physical body lines, including comments and blanks.
     # Multiline signatures are excluded, so this approximates total function length.
     - id: function-body-lines
       severity: warning
-      message: "{{.name}} has a {{.lines}}-line body; keep functions at or below 50 lines (C-8)"
+      message: "{{.name}} has a {{.lines}}-line body; keep functions at or below 100 lines (C-8)"
       query: |
         SELECT symbol.name AS name, symbol.metrics.body_lines AS lines
         FROM func:*
-        WHERE symbol.metrics.body_lines > 50
+        WHERE symbol.metrics.body_lines > 100
         ORDER BY lines DESC, name
 
     # C-10: parameter count identifies candidates for named arguments/options.
     # It cannot prove whether individual call sites already use named arguments.
     - id: function-parameters
       severity: warning
-      message: "{{.name}} has {{.params}} parameters; consider named arguments or a Go options struct above two parameters (C-10)"
+      message: "{{.name}} has {{.params}} parameters; consider a Go options struct or moving sate into a context object, or moving functions onto stateful  obejcts/services"
       query: |
         SELECT symbol.name AS name, symbol.metrics.param_count AS params
         FROM func:*
-        WHERE symbol.metrics.param_count > 2
+        WHERE symbol.metrics.param_count > 4
         ORDER BY params DESC, name
 
     # Keep business logic in backend providers/stores; CLI files should wire commands.
@@ -70,7 +83,7 @@ lint:
       query: |
         SELECT path, file.lines AS lines
         FROM files()
-        WHERE path MATCH '**/cmd/**/*.go' AND file.lines > 300
+        WHERE path MATCH '**/cmd/**/*.go' AND file.lines > 200
         ORDER BY lines DESC, path
 
     # References include type uses and calls, regardless of import alias.

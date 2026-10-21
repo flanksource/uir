@@ -21,8 +21,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// version is set at link time by `make binary VERSION=...`.
-var version = "dev"
+// Build metadata is set at link time by make binary and make install.
+var (
+	version   = "dev"
+	gitCommit = "unknown"
+	buildDate = "unknown"
+)
 
 // dsnEnv and schemaEnv supply --dsn and --schema when the flags are not set.
 const (
@@ -82,7 +86,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	root := &cobra.Command{
 		Use:          "uir",
 		Short:        "Query and incrementally index Universal Intermediate Representation modules",
-		Version:      version,
+		Version:      fmt.Sprintf("%s (git: %s, built: %s)", version, gitCommit, buildDate),
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path (default $"+dsnEnv+", then ~/.config/uir/uir.db)")
