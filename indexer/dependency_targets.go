@@ -312,6 +312,9 @@ func (indexer *Indexer) unlinkedEdgeResolvable(ctx context.Context, memo *runMem
 }
 
 func versionCommit(ctx context.Context, checkout, version string) (string, error) {
+	if err := observeCheckpoint(ctx, checkout); err != nil {
+		return "", err
+	}
 	top, err := revisionGit(ctx, checkout, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
