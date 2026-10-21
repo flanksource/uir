@@ -13,7 +13,7 @@ import (
 )
 
 type lintOptions struct {
-	Config   string   `flag:"config" help:"Path to .uir.yaml (default: nearest config up to Git root)"`
+	Config   string   `flag:"config" help:"Use a single config file (default: merge home and ancestor .uir.yaml files)"`
 	Rules    []string `flag:"rule" help:"Run only these exact rule IDs"`
 	Include  []string `flag:"include" help:"Report files matching project-relative globs (repeat or comma-separate)"`
 	Exclude  []string `flag:"exclude" help:"Exclude exact rule IDs or project-relative file globs (repeat or comma-separate; exclusions win)"`

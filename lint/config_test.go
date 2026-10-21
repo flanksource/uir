@@ -51,22 +51,4 @@ var _ = Describe("Lint configuration", func() {
 		Entry("duplicate ids", validConfig+"    - {id: small, query: 'SELECT path FROM files()', message: duplicate}\n"),
 		Entry("reserved rule", "version: 1\nlint:\n  rules:\n    - {id: uir/coverage, message: coverage, query: 'SELECT path FROM files()'}\n"),
 	)
-	It("finds the nearest config and stops at a Git directory or worktree file", func() {
-		parent := GinkgoT().TempDir()
-		root := filepath.Join(parent, "project")
-		nested := filepath.Join(root, "nested")
-		Expect(os.MkdirAll(nested, 0o700)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(parent, ConfigName), []byte(validConfig), 0o600)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere"), 0o600)).To(Succeed())
-		_, err := Discover(nested, "")
-		Expect(err).To(HaveOccurred())
-		path := filepath.Join(root, ConfigName)
-		Expect(os.WriteFile(path, []byte(validConfig), 0o600)).To(Succeed())
-		found, err := Discover(nested, "")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(found).To(Equal(path))
-		found, err = Discover(nested, filepath.Join(parent, ConfigName))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(found).To(Equal(filepath.Join(parent, ConfigName)))
-	})
 })
