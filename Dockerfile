@@ -17,7 +17,8 @@ RUN go mod download
 COPY . ./
 COPY --from=web /src/web/dist ./web/dist
 ARG VERSION=dev
-RUN make binary VERSION="${VERSION}"
+ARG GIT_COMMIT
+RUN make binary VERSION="${VERSION}" GIT_COMMIT="${GIT_COMMIT}"
 RUN ./.bin/uir --version
 
 FROM debian:bookworm-slim

@@ -85,6 +85,8 @@ func checkoutRevision(ctx context.Context, options RevisionOptions) (revisionChe
 // discoverRevisionRoot discovers the module options names in the checked-out commit as a historical
 // root.
 func discoverRevisionRoot(ctx context.Context, checkout revisionCheckout, options RevisionOptions) (discoveredRoot, error) {
+	// The original repository is watched; this immutable scratch worktree is removed after indexing.
+	ctx = context.WithValue(ctx, checkpointContextKey{}, (*indexCheckpoint)(nil))
 	modulePath, err := filepath.EvalSymlinks(filepath.Join(checkout.scratch.worktree, checkout.relative))
 	if err != nil {
 		return discoveredRoot{}, fmt.Errorf("canonicalize historical module at %q: %w", checkout.relative, err)

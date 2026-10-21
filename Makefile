@@ -2,6 +2,8 @@ OS   = $(shell uname -s | tr '[:upper:]' '[:lower:]')
 ARCH = $(shell uname -m | sed 's/x86_64/amd64/')
 
 LOCALBIN ?= $(shell pwd)/.bin
+GOBIN ?= $(shell go env GOBIN)
+INSTALLBIN = $(if $(strip $(GOBIN)),$(GOBIN),$(firstword $(subst :, ,$(shell go env GOPATH)))/bin)
 export PATH := $(LOCALBIN):$(PATH)
 # Use the ignored local workspace when present; fresh checkouts use go.mod.
 GOWORK ?= auto
@@ -9,6 +11,9 @@ export GOWORK
 
 GOLANGCI_LINT_VERSION ?= v2.6.2
 VERSION ?= dev
+GIT_COMMIT ?= $(shell git rev-parse HEAD)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+VERSION_LDFLAGS = -X main.version=$(VERSION) -X main.gitCommit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -23,7 +28,9 @@ build: web-build binary ## Build the browser, compile every package, and link th
 
 .PHONY: binary
 binary: | $(LOCALBIN) ## Link the UIR CLI into .bin/uir (requires built web/dist)
-	CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION)" -o $(LOCALBIN)/uir ./cmd/uir
+	test -n "$(GIT_COMMIT)"
+	test -n "$(BUILD_DATE)"
+	CGO_ENABLED=0 go build -ldflags "-s -w $(VERSION_LDFLAGS)" -o $(LOCALBIN)/uir ./cmd/uir
 
 # The query fixture corpus database; a PostgreSQL DSN benchmarks the same fixtures on PostgreSQL.
 UIR_CORPUS_DSN ?= $(CURDIR)/.tmp/uir-corpus.db
@@ -53,8 +60,8 @@ fixture-history: binary ## Build and diff the scripted 20-commit commons history
 	HISTORY_DSN='$(UIR_HISTORY_DSN)' HISTORY_SCHEMA='$(UIR_HISTORY_SCHEMA)' gavel fixtures fixtures/bench/history.md $(GAVEL_FLAGS)
 
 .PHONY: install
-install: web-build ## Install the UIR CLI with embedded browser assets
-	go install -ldflags "-X main.version=$(VERSION)" ./cmd/uir
+install: web-build ## Build the UIR CLI with embedded browser assets into GOBIN
+	$(MAKE) binary LOCALBIN="$(INSTALLBIN)"
 
 .PHONY: web-build
 web-build: ## Build embedded browser assets
