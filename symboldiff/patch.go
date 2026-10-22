@@ -214,9 +214,10 @@ func patchSide(locator SourceLocator, request BlobRequest, content []byte) (*fil
 
 // patchSymbolID stands in for a canonical symbol id, which needs type information a patch does not
 // carry: the identity key with a function's signature reduced to its parameter types, which are what
-// a canonical id distinguishes overloads by, so renaming a parameter is a signature change.
+// a canonical id distinguishes overloads by, so renaming a parameter is a signature change. A func
+// init's signature slot is its discriminator, which stays as it is.
 func patchSymbolID(identifier uir.Identifier) (string, error) {
-	if identifier.Signature == "" {
+	if identifier.Signature == "" || syntax.PackageInit(identifier) {
 		return identifier.IdentityKey(), nil
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), "", "package p\nfunc f"+identifier.Signature, parser.SkipObjectResolution)
