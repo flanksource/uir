@@ -40,7 +40,7 @@ func h64aHandle(module, pkg, visibility, kind, local int64) int64 {
 // both checkouts, a finished task run, and one row in every index table.
 func openH64aDatabase(ctx context.Context, options storage.DBOptions, checkouts preHandleCheckouts) *gorm.DB {
 	GinkgoHelper()
-	migration := []commonsmigrate.Option{commonsmigrate.WithDir("testdata/h64a"), commonsmigrate.WithName("uir"), commonsmigrate.WithRebuilds()}
+	migration := []commonsmigrate.Option{commonsmigrate.WithDir("testdata/h64a"), commonsmigrate.WithName("uir")}
 	connection := options.DSN
 	if options.Schema != "" {
 		migration = append(migration, commonsmigrate.WithSchema(options.Schema))
