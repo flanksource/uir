@@ -89,7 +89,7 @@ func Capture(ctx context.Context, database *gorm.DB, module storage.DatabaseModu
 			err = errors.Join(err, fmt.Errorf("close schema capture client: %w", closeErr))
 		}
 	}()
-	catalog, err := sqlinspect.Inspect(ctx, client, connectionModel.Type, sqlinspect.Limits{}, sqlinspect.Options{
+	catalog, err := sqlinspect.Inspect(ctx, client, connectionModel.Type, sqlinspect.Options{
 		CacheKey: fmt.Sprintf("database-module:%s:%s:%d", module.ID, connectionModel.ID, connectionModel.UpdatedAt.UnixNano()), Refresh: true,
 	})
 	if err != nil {

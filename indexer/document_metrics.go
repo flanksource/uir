@@ -14,6 +14,20 @@ type metricPublication struct {
 	handles  map[string]int64
 }
 
+// requireMetricKeys fails when a document's symbols do not each have their own key: declaration_metrics
+// holds one row per document and key, so StoreDeclarationMetrics would drop one and then refuse the
+// write. Publication checks it before writing anything; the store keeps its own check as the last line.
+func requireMetricKeys(content storage.DocumentContent) error {
+	declared := make(map[string]bool, len(content.Symbols))
+	for index, symbol := range content.Symbols {
+		if symbol.Key == "" || declared[symbol.Key] {
+			return fmt.Errorf("declaration metrics: symbol %d has an empty or repeated key %q", index, symbol.Key)
+		}
+		declared[symbol.Key] = true
+	}
+	return nil
+}
+
 func publishDeclarationMetrics(ctx context.Context, database *gorm.DB, publication metricPublication) error {
 	var content storage.DocumentContent
 	if err := json.Unmarshal(publication.document.Content, &content); err != nil {

@@ -181,9 +181,10 @@ type packageState struct {
 }
 
 // classifyPackage maps a discovered package's files onto the load and decides its coverage: every
-// file excluded by build constraints is excluded; a go list failure, a variant without type
-// information, or a file the load did not type-check is syntax; any other error is partial.
-func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, error) {
+// file excluded by build constraints is excluded; a go list failure, a parse error, a variant without
+// type information, or a file the load did not type-check is syntax; any other error is partial. A
+// file that does not parse then fails its syntax extraction and is published degraded on its own.
+func (load *typedLoad) classifyPackage(files []discoveredFile) packageState {
 	state := packageState{typed: map[string]typedFile{}, excluded: map[string]string{}}
 	if load.loadFailure != "" {
 		state.diagnostics = append(state.diagnostics, packageDiagnostic{Message: load.loadFailure})
@@ -213,12 +214,8 @@ func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, er
 	for _, variant := range state.variants {
 		listFailed = listFailed || variant.TypesInfo == nil
 		for _, loadError := range variant.Errors {
-			diagnostic := load.diagnostic(loadError, files)
-			if loadError.Kind == packages.ParseError {
-				return packageState{}, fmt.Errorf("parse Go source %q: %s", load.relative(loadError.Pos), diagnostic.Message)
-			}
-			listFailed = listFailed || loadError.Kind == packages.ListError
-			state.diagnostics = append(state.diagnostics, diagnostic)
+			listFailed = listFailed || loadError.Kind == packages.ListError || loadError.Kind == packages.ParseError
+			state.diagnostics = append(state.diagnostics, load.diagnostic(loadError, files))
 		}
 	}
 	switch {
@@ -231,7 +228,7 @@ func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, er
 	default:
 		state.coverage = storage.CoverageIndexed
 	}
-	return state, nil
+	return state
 }
 
 // exportVariant is the variant whose API importers see: the non-test package when there is one.

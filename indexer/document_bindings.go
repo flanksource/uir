@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
@@ -31,8 +32,9 @@ type documentPlan struct {
 // to that document, with no insert and no postings, whatever its package's input hash; under force the
 // fresh extraction must equal it instead: a different result needs a new indexer version. New
 // documents get their symbol rows and handles first, then the next document ordinals, then their
-// postings; postings of a document another writer inserted are never written twice.
-func publishDocuments(ctx context.Context, database *gorm.DB, publication snapshotPublication, membership *snapshotMembership, result *ModuleResult) (map[string]int64, error) {
+// postings; postings of a document another writer inserted are never written twice. A document that
+// fails its checks is degraded in publication's extraction before anything is written.
+func publishDocuments(ctx context.Context, database *gorm.DB, publication *snapshotPublication, membership *snapshotMembership, result *ModuleResult) (map[string]int64, error) {
 	plan, err := planDocuments(ctx, database, publication, membership, result)
 	if err != nil {
 		return nil, err
@@ -61,9 +63,11 @@ func publishDocuments(ctx context.Context, database *gorm.DB, publication snapsh
 
 // planDocuments validates and digests every rendered document against its revision and the database's
 // kind registry, binds each file whose document exists, and returns the documents the publication must
-// insert, or verify under force, counting the rest as reused.
-func planDocuments(ctx context.Context, database *gorm.DB, publication snapshotPublication, membership *snapshotMembership, result *ModuleResult) (documentPlan, error) {
-	extraction := publication.extraction
+// insert, or verify under force, counting the rest as reused. A rendered document that fails a check
+// its writes would repeat is replaced by a degraded one first; the extraction's documents and packages
+// are copied before, so a retried transaction starts from the extraction as it was.
+func planDocuments(ctx context.Context, database *gorm.DB, publication *snapshotPublication, membership *snapshotMembership, result *ModuleResult) (documentPlan, error) {
+	extraction := &publication.extraction
 	if extraction.indexerVersion == "" {
 		return documentPlan{}, fmt.Errorf("publish module %q: extraction names no indexer version", extraction.root.RootKey)
 	}
@@ -71,6 +75,7 @@ func planDocuments(ctx context.Context, database *gorm.DB, publication snapshotP
 	if err != nil {
 		return documentPlan{}, err
 	}
+	extraction.documents, extraction.packages = maps.Clone(extraction.documents), slices.Clone(extraction.packages)
 	plan := documentPlan{bindings: map[string]int64{}}
 	var rendered []pendingDocument
 	for _, file := range extraction.root.Files {
@@ -87,13 +92,13 @@ func planDocuments(ctx context.Context, database *gorm.DB, publication snapshotP
 			result.ReusedFiles++
 			continue
 		}
-		document, err := renderedDocument(extraction.indexerVersion, file, revision, extracted, kinds)
+		next, err := extraction.checkedDocument(file, revision, kinds)
 		if err != nil {
 			return documentPlan{}, err
 		}
-		rendered = append(rendered, pendingDocument{document: document, extracted: extracted})
+		rendered = append(rendered, next)
 	}
-	existing, err := existingDocuments(ctx, database, publication, membership.base, rendered)
+	existing, err := existingDocuments(ctx, database, *publication, membership.base, rendered)
 	if err != nil {
 		return documentPlan{}, err
 	}
@@ -113,23 +118,59 @@ func planDocuments(ctx context.Context, database *gorm.DB, publication snapshotP
 	return plan, nil
 }
 
-// renderedDocument is the document row of a rendered file, validated against its revision and keyed by
-// its content digest.
+// checkedDocument is the pending document of a rendered file once it passes renderedDocument's checks,
+// or else the first of its degraded documents that does, which then replaces it in the extraction.
+func (extraction *moduleExtraction) checkedDocument(file discoveredFile, revision storage.SourceRevision, kinds symbolhandle.Kinds) (pendingDocument, error) {
+	extracted := extraction.documents[file.PathKey]
+	document, err := renderedDocument(extraction.indexerVersion, file, revision, extracted, kinds)
+	failure := asDocumentError(err)
+	if failure == nil {
+		return pendingDocument{document: document, extracted: extracted}, err
+	}
+	packageIndex := slices.IndexFunc(extraction.packages, func(extracted extractedPackage) bool { return extracted.path == file.PackagePath })
+	if packageIndex < 0 {
+		return pendingDocument{}, fmt.Errorf("degrade document for %q: no package %q was extracted", file.PathKey, file.PackagePath)
+	}
+	diagnostics := fileDiagnostics(extraction.packages[packageIndex].diagnostics, file.PathKey)
+	degraded, err := degradeDocument(file, extracted, diagnostics, func(candidate extractedDocument) (err error) {
+		document, err = renderedDocument(extraction.indexerVersion, file, revision, candidate, kinds)
+		return err
+	})
+	if err != nil {
+		return pendingDocument{}, fmt.Errorf("degrade document for %q after %v: %v", file.PathKey, failure, err)
+	}
+	extraction.documents[file.PathKey] = degraded.document
+	extraction.packages[packageIndex].degrade(failure, degraded.note)
+	if coverageStrength[extraction.coverage] > coverageStrength[storage.CoveragePartial] {
+		extraction.coverage = storage.CoveragePartial
+	}
+	extraction.diagnostics, err = snapshotDiagnostics(extraction.packages)
+	return pendingDocument{document: document, extracted: degraded.document}, err
+}
+
+// renderedDocument is the document row of a rendered file, validated against its revision, checked
+// for the declaration_metrics rows its write derives, and keyed by its content digest. Each of these
+// failures is the file's own, a DocumentError. The row gets its id once it passes, so a failure reads
+// the same on every run.
 func renderedDocument(indexerVersion string, file discoveredFile, revision storage.SourceRevision, extracted extractedDocument, kinds symbolhandle.Kinds) (storage.Document, error) {
 	document := storage.Document{
-		ID: uuid.New(), RootID: revision.RootID, PathKey: file.PathKey, SourceRevisionID: revision.ID,
+		RootID: revision.RootID, PathKey: file.PathKey, SourceRevisionID: revision.ID,
 		PackagePath: file.PackagePath, InputHash: extracted.inputHash, IndexerVersion: indexerVersion,
 		Coverage: extracted.coverage, SymbolCount: extracted.symbolCount, OccurrenceCount: extracted.occurrenceCount,
 		Content: extracted.content,
 	}
-	if _, err := storage.DecodeDocument(document, revision, storage.WithKinds(kinds)); err != nil {
-		return storage.Document{}, fmt.Errorf("validate extracted document: %w", err)
+	content, err := storage.DecodeDocument(document, revision, storage.WithKinds(kinds))
+	if err != nil {
+		return storage.Document{}, &DocumentError{Path: file.PathKey, Err: fmt.Errorf("validate extracted document: %w", err)}
+	}
+	if err := requireMetricKeys(content); err != nil {
+		return storage.Document{}, &DocumentError{Path: file.PathKey, Err: err}
 	}
 	digest, err := storage.DocumentDigest(document)
 	if err != nil {
-		return storage.Document{}, err
+		return storage.Document{}, &DocumentError{Path: file.PathKey, Err: err}
 	}
-	document.ContentDigest = &digest
+	document.ID, document.ContentDigest = uuid.New(), &digest
 	return document, nil
 }
 
