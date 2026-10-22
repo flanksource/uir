@@ -48,6 +48,7 @@ export type SnapshotKind = "head" | "historical" | "versioned";
 // ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts describe
 // its original publication, including after rebasing; index_started_at is absent on older snapshots.
 export type ModuleSnapshot = {
+  analysis_mode?: "syntax" | "typed";
   id: string;
   root_key: string;
   canonical_path: string;
@@ -165,7 +166,9 @@ export type ModuleQuerySymbol = {
   visibility: string;
   parameter_types: unknown;
 };
-export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: number };
+/** One persisted package diagnostic; rule is "uir/index" for a file indexed degraded and absent for a load or type error. */
+export type PackageDiagnostic = { path?: string; range?: [number, number, number, number]; rule?: string; message: string };
+export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: PackageDiagnostic[] };
 export type MissingHead = { root_key: string; location: string; message: string };
 export type ModuleStatus = { missing_heads: MissingHead[] };
 export type ModuleQueryResult = {
@@ -259,9 +262,14 @@ export type ModuleIndexResult = {
   parsed_files: number;
   reused_files: number;
   unchanged: boolean;
+  /** The snapshot's diagnostics in lint's shape, files relative to the module; they do not fail it. */
+  warnings?: IndexWarning[];
   /** Why this module of the run failed; its counts are then zero. */
   error?: string;
 };
+/** A lint-shaped warning: rule.method is "uir/index" for a file indexed degraded, "uir/coverage" for a load or type error. */
+export type IndexWarning = { file?: string; line?: number; column?: number; message?: string; source?: string;
+  rule?: { type?: string; package?: string; method?: string }; severity?: "error" | "warning" | "info" };
 /** An add or reindex answers 202 Accepted with the task run that indexes in the background. */
 export type ModuleIndexRun = { run_id: string };
 export type GitRef = { name: string; commit: string };

@@ -9,6 +9,7 @@ import (
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/api/icons"
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 )
 
 type moduleQueryDisplay struct {
@@ -241,6 +242,9 @@ func querySymbolName(row moduleQueryRow) string {
 		name := row.identifier.GetName()
 		if row.identifier.Type != "" && row.identifier.Method != "" {
 			name = row.identifier.Type + "." + name
+		}
+		if syntax.PackageInit(row.identifier) {
+			return name
 		}
 		return name + row.identifier.Signature
 	}

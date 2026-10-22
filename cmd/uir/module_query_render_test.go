@@ -7,12 +7,23 @@ import (
 	"strings"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/query"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("query symbol rendering", func() {
+	It("names a func init without the discriminator its signature slot holds", func() {
+		names := []string{}
+		for _, identifier := range []uir.Identifier{
+			{NodeType: uir.NodeTypeMethod, Package: "example.org/shop", Method: "init", Signature: "a.go#1"},
+			{NodeType: uir.NodeTypeMethod, Package: "example.org/shop", Method: "Total", Type: "Cart", Signature: "() int"},
+		} {
+			names = append(names, querySymbolName(moduleQueryRow{identifier: identifier}))
+		}
+		Expect(names).To(Equal([]string{"init", "Cart.Total() int"}))
+	})
 	It("accepts ordered grouping levels and rejects duplicates and unknown levels", func() {
 		groups, err := parseQueryGroupBy("")
 		Expect(err).NotTo(HaveOccurred())
