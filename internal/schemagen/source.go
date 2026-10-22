@@ -3,11 +3,13 @@ package schemagen
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -25,27 +27,25 @@ func (s *sourceFacts) fieldDoc(owner, field string) string {
 }
 
 func loadSource(dir, pkgPath string) (*sourceFacts, error) {
-	fset := token.NewFileSet()
-	parsed, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.ParseComments)
+	pkg, err := build.Default.ImportDir(dir, 0)
 	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", dir, err)
+		return nil, fmt.Errorf("loading package in %s: %w", dir, err)
 	}
 
-	pkg, ok := parsed[packageName]
-	if !ok {
+	if pkg.Name != packageName {
 		return nil, fmt.Errorf("no package %q in %s", packageName, dir)
 	}
 
-	names := make([]string, 0, len(pkg.Files))
-	for name := range pkg.Files {
-		names = append(names, name)
-	}
+	names := slices.Concat(pkg.GoFiles, pkg.CgoFiles)
 	sort.Strings(names)
+	fset := token.NewFileSet()
 	files := make([]*ast.File, 0, len(names))
 	for _, name := range names {
-		files = append(files, pkg.Files[name])
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", name, err)
+		}
+		files = append(files, file)
 	}
 
 	facts := &sourceFacts{

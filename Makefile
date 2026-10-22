@@ -9,7 +9,7 @@ export PATH := $(LOCALBIN):$(PATH)
 GOWORK ?= auto
 export GOWORK
 
-GOLANGCI_LINT_VERSION ?= v2.6.2
+GOLANGCI_LINT_VERSION ?= v2.15.0
 VERSION ?= dev
 GIT_COMMIT ?= $(shell git rev-parse HEAD)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -111,7 +111,7 @@ wasm-check: ## Compile the model package for js/wasm (browser-side consumers)
 vet: ## Run go vet
 	go vet ./...
 
-$(LOCALBIN)/golangci-lint: | $(LOCALBIN)
+$(LOCALBIN)/golangci-lint: Makefile | $(LOCALBIN)
 	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: lint
