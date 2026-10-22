@@ -11,6 +11,7 @@ import (
 	"text/template"
 
 	"github.com/flanksource/gavel/models"
+	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"gopkg.in/yaml.v3"
 )
@@ -31,11 +32,12 @@ type Settings struct {
 }
 
 type Rule struct {
-	ID       string                   `yaml:"id"`
-	Severity models.ViolationSeverity `yaml:"severity"`
-	Message  string                   `yaml:"message"`
-	Query    string                   `yaml:"query"`
-	message  *template.Template
+	ID           string                   `yaml:"id"`
+	Severity     models.ViolationSeverity `yaml:"severity"`
+	Message      string                   `yaml:"message"`
+	Query        string                   `yaml:"query"`
+	message      *template.Template
+	requirements query.SQLRequirements
 }
 
 func Load(path string) (config *Config, err error) {
@@ -82,7 +84,7 @@ func Load(path string) (config *Config, err error) {
 	seen := map[string]bool{}
 	for i := range config.Lint.Rules {
 		rule := &config.Lint.Rules[i]
-		if strings.TrimSpace(rule.ID) == "" || rule.ID == "uir/coverage" || seen[rule.ID] {
+		if strings.TrimSpace(rule.ID) == "" || rule.ID == indexer.RuleCoverage || rule.ID == indexer.RuleIndex || seen[rule.ID] {
 			return nil, fmt.Errorf("invalid or duplicate lint rule ID %q", rule.ID)
 		}
 		seen[rule.ID] = true
@@ -97,7 +99,8 @@ func Load(path string) (config *Config, err error) {
 		if strings.TrimSpace(rule.Message) == "" {
 			return nil, fmt.Errorf("rule %s: message is required", rule.ID)
 		}
-		if err := query.ValidateSQLRows(rule.Query); err != nil {
+		rule.requirements, err = query.AnalyzeSQLRows(rule.Query)
+		if err != nil {
 			return nil, fmt.Errorf("rule %s: %w", rule.ID, err)
 		}
 		rule.message, err = template.New(rule.ID).Option("missingkey=error").Parse(rule.Message)
