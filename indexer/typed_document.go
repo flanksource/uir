@@ -94,7 +94,11 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 			return nil, fmt.Errorf("hash %s: %w", declared.name.Name, err)
 		}
 		projection, projected := projections[name]
-		symbol, proven, err := builder.typedSymbol(declared)
+		discriminator, err := initDiscriminator(declared, projection, projected)
+		if err != nil {
+			return nil, fmt.Errorf("%s at %v: %w", declared.name.Name, source.lines.RangeOf(name), err)
+		}
+		symbol, proven, err := builder.typedSymbol(declared, discriminator)
 		if err != nil {
 			return nil, err
 		}
@@ -111,8 +115,12 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 		symbol.Name, symbol.Extent = source.lines.RangeOf(name), source.lines.RangeOf(extent)
 		if projected {
 			symbol.Metrics = projection.Metrics
+		}
+		if projected && projection.ChildSlot != "" {
 			symbol.Identifier, symbol.ParentKey, symbol.ChildSlot = projection.Identifier, projection.ParentIdentity, projection.ChildSlot
 			symbol.Ordinal, symbol.Payload, symbol.SemanticHash, symbol.Field = projection.Ordinal, projection.Payload, projection.SemanticHash, projection.Field
+		} else if !proven {
+			symbol.Identifier = projection.Identifier
 		} else if symbol.Identifier, err = builder.typedIdentifier(*symbol.ID, source.packagePath); err != nil {
 			return nil, err
 		}
@@ -126,10 +134,24 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 	return symbols, nil
 }
 
+// initDiscriminator is a func init's Identity.Discriminator: the signature slot of the syntax
+// identifier its name span projects, so its id and its document key tell the same inits apart. Every
+// other declaration has none.
+func initDiscriminator(declared declaration, projection syntax.Node, projected bool) (string, error) {
+	if !isPackageInit(declared.object) {
+		return "", nil
+	}
+	if !projected || !syntax.PackageInit(projection.Identifier) {
+		return "", errors.New("func init has no syntax declaration to take its discriminator from")
+	}
+	return projection.Identifier.Signature, nil
+}
+
 // typedSymbol is a declaration's canonical facts, or proven=false when its identity or shape
-// involves an invalid type.
-func (builder *documentBuilder) typedSymbol(declared declaration) (storage.DocumentSymbol, bool, error) {
-	resolved, err := builder.resolver.resolve(declared.object)
+// involves an invalid type. discriminator is the declaration's Identity.Discriminator, set only for a
+// func init.
+func (builder *documentBuilder) typedSymbol(declared declaration, discriminator string) (storage.DocumentSymbol, bool, error) {
+	resolved, err := builder.resolver.declaration(declared.object, discriminator)
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
 	}

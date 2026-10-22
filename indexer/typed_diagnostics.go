@@ -12,10 +12,12 @@ import (
 
 // packageDiagnostic is one load or type error of a package, positioned in one of its files when the
 // toolchain reported a position there. Messages are made relative to the module root so that a
-// document does not depend on where the checkout lives.
+// document does not depend on where the checkout lives. Rule is RuleIndex for a file whose document
+// failed and was degraded, and empty for a load or type error.
 type packageDiagnostic struct {
 	Path    string         `json:"path,omitempty"`
 	Range   *storage.Range `json:"range,omitempty"`
+	Rule    string         `json:"rule,omitempty"`
 	Message string         `json:"message"`
 }
 
