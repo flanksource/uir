@@ -150,6 +150,9 @@ var _ = Describe("DecodeDocument", func() {
 			content.Symbols[1].ContentHash = ""
 		}, "64-character content_hash are required"),
 		Entry("a key that is not the identifier key", func(_ *storage.Document, content *storage.DocumentContent) { content.Symbols[0].Key = "v1:[]" }, "does not match identifier key"),
+		Entry("a key declared twice", func(_ *storage.Document, content *storage.DocumentContent) {
+			content.Symbols[2].Identifier, content.Symbols[2].Key = content.Symbols[1].Identifier, content.Symbols[1].Key
+		}, "symbol 2: key is already declared by symbol 1"),
 		Entry("an undeclared enclosing key", func(_ *storage.Document, content *storage.DocumentContent) {
 			content.Occurrences[0].EnclosingKey = "v1:[]"
 		}, "is not declared"),

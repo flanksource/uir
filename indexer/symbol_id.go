@@ -11,14 +11,16 @@ import (
 
 const (
 	symbolIdentityDomain  = "uir-symbol"
-	symbolIdentityVersion = 1
+	symbolIdentityVersion = 2
 )
 
 // Identity is the input to a canonical symbol id; see docs/symbols.md#canonical-symbols. Go extraction
 // derives it from type-checker objects; a non-Go producer builds one for every symbol it publishes and
 // computes the ids its documents carry with SymbolID. ModuleKey is the root key of the module that
-// declares the symbol, OwnerID the id of the type, record, or screen that owns a member or method, and
-// ParameterTypes the ordered parameter types that distinguish overloads.
+// declares the symbol, OwnerID the id of the type, record, or screen that owns a member or method,
+// ParameterTypes and ResultTypes the ordered parameter and result types that distinguish overloads (Go,
+// which has no overloading, leaves ResultTypes empty), and Discriminator what tells apart declarations a
+// language lets a scope repeat with everything else equal: for a Go func init, "<file>#<n>".
 type Identity struct {
 	ModuleKey      string   `json:"module_key"`
 	PackagePath    string   `json:"package_path"`
@@ -26,6 +28,8 @@ type Identity struct {
 	OwnerID        string   `json:"owner_id,omitempty"`
 	Name           string   `json:"name"`
 	ParameterTypes []string `json:"parameter_types,omitempty"`
+	ResultTypes    []string `json:"result_types,omitempty"`
+	Discriminator  string   `json:"discriminator,omitempty"`
 }
 
 // CanonicalKey is the versioned, length-delimited encoding the id digests: every field is written as
@@ -45,10 +49,13 @@ func (identity Identity) CanonicalKey() string {
 	field(identity.Kind)
 	field(identity.OwnerID)
 	field(identity.Name)
-	field(strconv.Itoa(len(identity.ParameterTypes)))
-	for _, parameter := range identity.ParameterTypes {
-		field(parameter)
+	for _, list := range [][]string{identity.ParameterTypes, identity.ResultTypes} {
+		field(strconv.Itoa(len(list)))
+		for _, value := range list {
+			field(value)
+		}
 	}
+	field(identity.Discriminator)
 	return key.String()
 }
 

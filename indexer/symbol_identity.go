@@ -61,13 +61,41 @@ type symbolResolver struct {
 	members  map[*types.Package]map[types.Object]memberOwner
 	resolved map[types.Object]resolvedSymbol
 	rows     map[string]storage.Symbol
+	// discriminators holds the Identity.Discriminator of each func init, recorded by its declaration.
+	discriminators map[types.Object]string
+	// declarations is the declared object of each id, so two declarations never share one.
+	declarations map[string]types.Object
 }
 
 func newSymbolResolver(origins map[*types.Package]packageOrigin) *symbolResolver {
 	return &symbolResolver{
 		origins: origins, members: map[*types.Package]map[types.Object]memberOwner{},
 		resolved: map[types.Object]resolvedSymbol{}, rows: map[string]storage.Symbol{},
+		discriminators: map[types.Object]string{}, declarations: map[string]types.Object{},
 	}
+}
+
+// declaration resolves a declared object, after recording its discriminator when it is a func init. A
+// second declared object resolving to an id another declaration holds is an error, never a merge.
+func (resolver *symbolResolver) declaration(object types.Object, discriminator string) (resolvedSymbol, error) {
+	if discriminator != "" {
+		resolver.discriminators[object] = discriminator
+	}
+	resolved, err := resolver.resolve(object)
+	if err != nil || resolved.ID == "" {
+		return resolved, err
+	}
+	if declared, found := resolver.declarations[resolved.ID]; found && declared != object {
+		return resolvedSymbol{}, fmt.Errorf("%s and another declaration share symbol id %s (%s)", object.Name(), resolved.ID, resolver.rows[resolved.ID].CanonicalKey)
+	}
+	resolver.declarations[resolved.ID] = object
+	return resolved, nil
+}
+
+// isPackageInit reports whether object is a func init, which a Go package may declare many times.
+func isPackageInit(object types.Object) bool {
+	function, ok := object.(*types.Func)
+	return ok && function.Name() == "init" && function.Signature().Recv() == nil
 }
 
 func noted(note string) (resolvedSymbol, error) { return resolvedSymbol{Note: note}, nil }
@@ -123,6 +151,9 @@ func (resolver *symbolResolver) resolveObject(object types.Object) (resolvedSymb
 		}
 		if object.Signature().Recv() != nil {
 			return resolver.method(object, parameters)
+		}
+		if isPackageInit(object) && resolver.discriminators[object] == "" {
+			return resolvedSymbol{}, fmt.Errorf("func init of %s resolved before its declaration recorded a discriminator", object.Pkg().Path())
 		}
 		return resolver.declare(object, "func", "", parameters)
 	}
@@ -202,7 +233,7 @@ func (resolver *symbolResolver) declare(object types.Object, kind, ownerID strin
 	}
 	return resolver.record(Identity{
 		ModuleKey: origin.moduleKey(), PackagePath: object.Pkg().Path(), Kind: kind,
-		OwnerID: ownerID, Name: object.Name(), ParameterTypes: parameters,
+		OwnerID: ownerID, Name: object.Name(), ParameterTypes: parameters, Discriminator: resolver.discriminators[object],
 	}, visibility)
 }
 
