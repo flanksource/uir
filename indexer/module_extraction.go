@@ -13,6 +13,7 @@ import (
 
 	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
 )
 
@@ -196,10 +197,7 @@ func (extractor *packageExtraction) extractPackages(ctx context.Context) error {
 
 func (extractor *packageExtraction) extractPackage(ctx context.Context, packagePath string, files []discoveredFile) (extractedPackage, error) {
 	load, shapes, extraction := extractor.load, extractor.shapes, extractor.extraction
-	state, err := load.classifyPackage(files)
-	if err != nil {
-		return extractedPackage{}, err
-	}
+	state := load.classifyPackage(files)
 	if load.root.Historical && state.coverage == storage.CoveragePartial {
 		state.coverage = storage.CoverageSyntax
 	}
@@ -234,30 +232,59 @@ func (extractor *packageExtraction) extractPackage(ctx context.Context, packageP
 		return extracted, reuseBaseDocuments(extraction, base, files)
 	}
 	for _, file := range files {
-		content, coverage, err := renderDocument(extractor.builder, state, file, fileDiagnostics(extracted.diagnostics, file.PathKey))
+		diagnostics := fileDiagnostics(extracted.diagnostics, file.PathKey)
+		document, err := extractor.extractDocument(ctx, state, file, extracted.inputHash, diagnostics)
+		if failure := asDocumentError(err); failure != nil {
+			var degraded degradedDocument
+			failed := extractedDocument{inputHash: extracted.inputHash, coverage: state.coverage}
+			if degraded, err = degradeDocument(file, failed, diagnostics, unwrittenCheck(file)); err == nil {
+				document = degraded.document
+				extracted.degrade(failure, degraded.note)
+			}
+		}
 		if err != nil {
 			return extractedPackage{}, err
 		}
-		document := extractedDocument{
-			inputHash: extracted.inputHash, coverage: coverage,
-			symbolCount: len(content.Symbols), occurrenceCount: len(content.Occurrences),
-		}
-		if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
-			document, err = withSymbolFacts(document, content, extractor.builder.resolver.rows)
-			PhaseCount(ctx, "symbols", int64(len(document.symbolIDs)))
-			return err
-		}); err != nil {
-			return extractedPackage{}, fmt.Errorf("document for %q: %w", file.PathKey, err)
-		}
-		encoded, err := json.Marshal(content)
-		if err != nil {
-			return extractedPackage{}, fmt.Errorf("encode document for %q: %w", file.PathKey, err)
-		}
-		document.content = storage.JSON(encoded)
 		extraction.documents[file.PathKey] = document
 		extractor.rendered++
 	}
 	return extracted, nil
+}
+
+// unwrittenCheck runs publication's checks of a Go document before its file has a stored revision, so
+// extraction degrades a file to a document publication will accept.
+func unwrittenCheck(file discoveredFile) func(extractedDocument) error {
+	revision := storage.SourceRevision{PathKey: file.PathKey, PackagePath: file.PackagePath}
+	return func(candidate extractedDocument) error {
+		_, err := renderedDocument(IndexerVersion, file, revision, candidate, symbolhandle.Builtins())
+		return err
+	}
+}
+
+// extractDocument renders one file's document under its package's state and derives its symbol facts.
+// Every failure is the file's own, a DocumentError.
+func (extractor *packageExtraction) extractDocument(ctx context.Context, state packageState, file discoveredFile, inputHash string, diagnostics []storage.DocumentDiagnostic) (extractedDocument, error) {
+	content, coverage, err := renderDocument(extractor.builder, state, file, diagnostics)
+	if err != nil {
+		return extractedDocument{}, &DocumentError{Path: file.PathKey, Err: err}
+	}
+	document := extractedDocument{
+		inputHash: inputHash, coverage: coverage,
+		symbolCount: len(content.Symbols), occurrenceCount: len(content.Occurrences),
+	}
+	if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
+		document, err = withSymbolFacts(document, content, extractor.builder.resolver.rows)
+		PhaseCount(ctx, "symbols", int64(len(document.symbolIDs)))
+		return err
+	}); err != nil {
+		return extractedDocument{}, &DocumentError{Path: file.PathKey, Err: err}
+	}
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		return extractedDocument{}, &DocumentError{Path: file.PathKey, Err: fmt.Errorf("encode document: %w", err)}
+	}
+	document.content = storage.JSON(encoded)
+	return document, nil
 }
 
 // reuseBaseDocuments keeps the base's bound document for every file of a package whose input hash
