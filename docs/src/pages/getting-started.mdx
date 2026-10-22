@@ -20,11 +20,11 @@ The CLI is written to `.bin/uir`. Run `make install` to install it into your Go 
 From the repository root, index a module directory:
 
 ```bash
-.bin/uir add /path/to/module --no-workspace-uses
+.bin/uir add /path/to/module
 .bin/uir list
 ```
 
-`--no-workspace-uses` keeps discovery within the selected directory. Use `--include-workspace-uses` when you also want the modules referenced by an enclosing `go.work`. See [module indexing](/module-indexing) for checkout discovery, snapshots, and reindexing.
+`add` keeps discovery within the selected directory. Use `--all` when you also want the modules referenced by an enclosing `go.work`. See [module indexing](/module-indexing) for checkout discovery, snapshots, and reindexing.
 
 ## Query symbols
 
