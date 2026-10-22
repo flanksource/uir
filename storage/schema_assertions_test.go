@@ -86,7 +86,7 @@ func assertModuleSchema(database *gorm.DB) {
 		expected := map[string]bool{}
 		for _, field := range statement.Schema.Fields {
 			if field.DBName != "" {
-				expected[field.DBName] = field.FieldType.Kind() == reflect.Ptr
+				expected[field.DBName] = field.FieldType.Kind() == reflect.Pointer
 			}
 		}
 		columns, err := database.Migrator().ColumnTypes(table.model)
