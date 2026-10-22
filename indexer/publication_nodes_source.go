@@ -67,13 +67,13 @@ func (scope nodeScope) symbol(node uir.Node, owner *nodeSymbol, slot string, pri
 	if name == "" {
 		return nodeSymbol{}, fmt.Errorf("a %s node has no name", uir.ShapeKind(node))
 	}
-	parameters, err := nodeParameterTypes(node)
+	parameters, results, err := nodeCallableTypes(node)
 	if err != nil {
 		return nodeSymbol{}, err
 	}
 	symbol := nodeSymbol{
 		node: node, slot: slot, visibility: "exported",
-		identity: Identity{ModuleKey: scope.moduleKey, PackagePath: scope.packagePath, Kind: kind, Name: name, ParameterTypes: parameters},
+		identity: Identity{ModuleKey: scope.moduleKey, PackagePath: scope.packagePath, Kind: kind, Name: name, ParameterTypes: parameters, ResultTypes: results},
 	}
 	if private || !uir.IsPublic(node) || (owner != nil && owner.visibility == "internal") {
 		symbol.visibility = "internal"

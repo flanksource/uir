@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/flanksource/gavel/models"
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -36,6 +37,10 @@ type ModuleResult struct {
 	ParsedFiles int    `json:"parsed_files"`
 	ReusedFiles int    `json:"reused_files"`
 	Unchanged   bool   `json:"unchanged"`
+	// Warnings are the snapshot's diagnostics in lint's shape, with root-relative files: a uir/index
+	// warning for each file published with a degraded document, a uir/coverage warning for each load
+	// or type error. They do not fail the module.
+	Warnings []models.Violation `json:"warnings,omitempty" pretty:"hide"`
 	// Error is why a module of a task run failed; its other counts are then zero.
 	Error string `json:"error,omitempty"`
 }

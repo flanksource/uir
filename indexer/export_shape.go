@@ -90,20 +90,17 @@ func (shapes *exportShapes) importsOf(variants []*packages.Package) ([]importSha
 	return imports, nil
 }
 
+// workspace is a workspace package's export shape. A package whose own load reported no errors can
+// still export a type an erroring import left invalid; its API is then as unproven as one that failed
+// to type-check itself.
 func (shapes *exportShapes) workspace(pkg *packages.Package) (string, error) {
 	if len(pkg.Errors) > 0 || pkg.TypesInfo == nil {
-		imports, err := shapes.importsOf([]*packages.Package{pkg})
-		if err != nil {
-			return "", err
-		}
-		importHashes := make([]string, len(imports))
-		for i, imported := range imports {
-			importHashes[i] = imported.ExportShapeHash
-		}
-		sort.Strings(importHashes)
-		return shapes.unproven(pkg, importHashes)
+		return shapes.unprovenWorkspace(pkg)
 	}
 	pairs, err := shapes.exportedSymbols(pkg.Types)
+	if errors.Is(err, errUnprovenType) {
+		return shapes.unprovenWorkspace(pkg)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -154,6 +151,19 @@ func (shapes *exportShapes) index(pkg *packages.Package) {
 	for _, imported := range pkg.Imports {
 		shapes.index(imported)
 	}
+}
+
+func (shapes *exportShapes) unprovenWorkspace(pkg *packages.Package) (string, error) {
+	imports, err := shapes.importsOf([]*packages.Package{pkg})
+	if err != nil {
+		return "", err
+	}
+	importHashes := make([]string, len(imports))
+	for i, imported := range imports {
+		importHashes[i] = imported.ExportShapeHash
+	}
+	sort.Strings(importHashes)
+	return shapes.unproven(pkg, importHashes)
 }
 
 func (shapes *exportShapes) unproven(pkg *packages.Package, importHashes []string) (string, error) {
@@ -212,9 +222,6 @@ func (shapes *exportShapes) exportedSymbols(pkg *types.Package) ([][2]string, er
 			continue
 		}
 		api, err := shapes.resolver.apiShape(object)
-		if errors.Is(err, errUnprovenType) {
-			return nil, fmt.Errorf("exported %s has an invalid type in a package without errors", object.Name())
-		}
 		if err != nil {
 			return nil, err
 		}

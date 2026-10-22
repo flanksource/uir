@@ -125,7 +125,7 @@ var _ = Describe("module indexing", func() {
 		Expect(roots).To(BeZero())
 	})
 
-	DescribeTable("discovers nested modules and rolls back a failed workspace publication", func(ctx SpecContext, open func(context.Context) *gorm.DB) {
+	DescribeTable("discovers nested modules and publishes a member whose file does not parse as degraded", func(ctx SpecContext, open func(context.Context) *gorm.DB) {
 		database := open(ctx)
 		workspace := GinkgoT().TempDir()
 		plugin := filepath.Join(workspace, "plugin")
@@ -136,15 +136,15 @@ var _ = Describe("module indexing", func() {
 		writeFile(filepath.Join(plugin, "plugin.go"), "package plugin\n\nfunc Use() {\n")
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
-		Expect(err).To(MatchError(ContainSubstring("parse Go source")))
-		var roots int64
-		Expect(database.Model(&storage.ModuleRoot{}).Count(&roots).Error).To(Succeed())
-		Expect(roots).To(BeZero())
+		degraded, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
+		Expect(err).ToNot(HaveOccurred())
+		Expect([][]string{warningRules(degraded[0]), warningRules(degraded[1])}).To(Equal([][]string{nil, {RuleCoverage, RuleCoverage, RuleIndex}}),
+			"only the plugin, whose file does not parse, is published with warnings")
 		writeFile(filepath.Join(plugin, "plugin.go"), "package plugin\n\nfunc Use() {}\n")
 		results, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(results).To(HaveLen(2))
+		Expect(results[1].Warnings).To(BeEmpty(), "a reindex after the fix publishes the plugin without warnings")
 		var parent, child storage.ModuleLocation
 		Expect(database.Where("canonical_path = ?", results[0].Location).First(&parent).Error).To(Succeed())
 		Expect(database.Where("canonical_path = ?", results[1].Location).First(&child).Error).To(Succeed())
@@ -205,7 +205,7 @@ var _ = Describe("module indexing", func() {
 		Expect(deltas).To(ConsistOf(storage.SourceDelta{
 			SnapshotID: secondSnapshot.ID, RootID: root.ID, PathKey: "obsolete.go", Operation: storage.SourceDelete,
 		}))
-		sources, err := storage.EffectiveSources(ctx, database, secondSnapshot.ID)
+		sources, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: secondSnapshot.ID})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(sources).To(HaveKey("service.go"))
 		Expect(sources).ToNot(HaveKey("obsolete.go"))

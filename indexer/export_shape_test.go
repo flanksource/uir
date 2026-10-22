@@ -10,6 +10,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"golang.org/x/tools/go/packages"
 )
 
 const (
@@ -122,4 +123,23 @@ var _ = Describe("export shapes", func() {
 			"package api\n\nconst Limit = 11\n",
 			"Limit", false, false),
 	)
+
+	It("digests the files of a package whose exported API names a type an erroring import left invalid", func() {
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, "api.go", "package api\n\nimport \"example.org/broken\"\n\nfunc New() broken.Client { return broken.Client{} }\n", 0)
+		Expect(err).ToNot(HaveOccurred())
+		importer := &sourceImporter{fileSet: fileSet, sources: map[string]string{}, checked: map[string]*types.Package{}}
+		checked, _ := (&types.Config{Importer: importer, Error: func(error) {}}).Check(apiPackage, fileSet, []*ast.File{file}, nil)
+		shapes := &exportShapes{
+			resolver: newSymbolResolver(map[*types.Package]packageOrigin{checked: {Class: workspacePackage, ModulePath: apiPackage}}),
+			load:     &typedLoad{parsed: map[string]string{}}, loaded: map[*types.Package]*packages.Package{},
+		}
+		clean := &packages.Package{PkgPath: apiPackage, Types: checked, TypesInfo: &types.Info{}}
+		failed := &packages.Package{PkgPath: apiPackage, Types: checked, TypesInfo: &types.Info{}, Errors: []packages.Error{{Msg: "could not import example.org/broken"}}}
+		shape, err := shapes.workspace(clean)
+		Expect(err).ToNot(HaveOccurred())
+		unproven, err := shapes.workspace(failed)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(shape).To(Equal(unproven), "an error only in an import leaves the API as unproven as an error in the package")
+	})
 })

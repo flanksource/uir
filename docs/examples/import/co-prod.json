@@ -27,7 +27,7 @@
       "module_key": "Co/Prod",
       "package_path": "Co/Prod/records",
       "kind": "field",
-      "owner_id": "133430236d1a57229dcc2ce2a84abc87c26b7432a5a0c4592a1dde9ac215aaea",
+      "owner_id": "2e0bfa20664cf81d3d1a11db58c00954138d9620ef5e4ff51f0e6b716672308e",
       "name": "Amount",
       "visibility": "exported"
     },
@@ -46,11 +46,11 @@
       "content_hash": "78b3273881de9c9268b1f6e09cc8d5de856973a5f78abc5264e0edb2bc248586",
       "source": "<Record name=\"Policy\">\n  <Field name=\"Amount\"/>\n</Record>\n",
       "content": {
-        "version": 8,
+        "version": 9,
         "package_path": "Co/Prod/records",
         "symbols": [
           {
-            "id": "133430236d1a57229dcc2ce2a84abc87c26b7432a5a0c4592a1dde9ac215aaea",
+            "id": "2e0bfa20664cf81d3d1a11db58c00954138d9620ef5e4ff51f0e6b716672308e",
             "key": "v1:[\"record\",\"Co/Prod\",\"Co/Prod/records\",\"Policy\",\"\",\"\",\"\"]",
             "kind": "record",
             "visibility": "exported",
@@ -88,7 +88,7 @@
             "ordinal": 0
           },
           {
-            "id": "1889b837d9c7101587b8463785c61bc44c02fa9b090af716089017242e816ee8",
+            "id": "693da91c61609f752c65286f93030218fc63a24c8027dc95ab6aabc7a51bff9f",
             "key": "v1:[\"record_field\",\"Co/Prod\",\"Co/Prod/records\",\"Policy\",\"\",\"Amount\",\"\"]",
             "kind": "field",
             "visibility": "exported",
@@ -137,11 +137,11 @@
       "content_hash": "6598a4aa3d587fcb9f51dc56d7f490298514c53dacaa7084a126f126f9dc01b6",
       "source": "<Rule name=\"Calc\">\n  <Set field=\"Policy.Amount\" value=\"100\"/>\n</Rule>\n",
       "content": {
-        "version": 8,
+        "version": 9,
         "package_path": "Co/Prod/rules",
         "symbols": [
           {
-            "id": "50e1e3a5c7f08cc11cd8f55c496c32de5f5195dccff34c0b68028178612b5c21",
+            "id": "53cc928f059a0532c1edfc50d0bc981c1c138d10f167896c3ceb64b47db4a7b6",
             "key": "v1:[\"function\",\"Co/Prod\",\"Co/Prod/rules\",\"\",\"Calc\",\"\",\"\"]",
             "kind": "test.rule",
             "visibility": "exported",
@@ -181,7 +181,7 @@
         ],
         "occurrences": [
           {
-            "symbol": "1889b837d9c7101587b8463785c61bc44c02fa9b090af716089017242e816ee8",
+            "symbol": "693da91c61609f752c65286f93030218fc63a24c8027dc95ab6aabc7a51bff9f",
             "role": "write",
             "range": [
               2,
@@ -193,7 +193,7 @@
               33,
               46
             ],
-            "enclosing": "50e1e3a5c7f08cc11cd8f55c496c32de5f5195dccff34c0b68028178612b5c21"
+            "enclosing": "53cc928f059a0532c1edfc50d0bc981c1c138d10f167896c3ceb64b47db4a7b6"
           }
         ],
         "diagnostics": []
