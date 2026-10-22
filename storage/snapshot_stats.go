@@ -95,7 +95,7 @@ func DeriveSnapshotStatsOptions(ctx context.Context, database *gorm.DB, snapshot
 		return SnapshotStatsOptions{}, fmt.Errorf("load snapshot %s: %w", snapshotID, err)
 	}
 	if snapshot.BaseSnapshotID != nil {
-		if options.Base, err = EffectiveSources(ctx, database, *snapshot.BaseSnapshotID); err != nil {
+		if options.Base, err = EffectiveSources(ctx, database, EffectiveSourcesOptions{SnapshotID: *snapshot.BaseSnapshotID}); err != nil {
 			return SnapshotStatsOptions{}, fmt.Errorf("base of snapshot %s: %w", snapshotID, err)
 		}
 	}

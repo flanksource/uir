@@ -90,7 +90,7 @@ var _ = Describe("module root storage", func() {
 		} {
 			Expect(database.Create(&delta).Error).To(Succeed())
 		}
-		sources, err := storage.EffectiveSources(ctx, database, child.ID)
+		sources, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: child.ID})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(sources).To(Equal(map[string]storage.SourceRevision{"service.go": changed}))
 		mismatched := storage.SourceDelta{SnapshotID: child.ID, RootID: root.ID, PathKey: "renamed.go", RevisionID: &original.ID, Operation: storage.SourceSet}
