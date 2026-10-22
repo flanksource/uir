@@ -32,11 +32,11 @@ func SymbolFingerprint(hash string) (int64, error) {
 }
 
 // FoldDeclarations combines the fingerprints of every declaration of one canonical id in one snapshot.
-// One declaration keeps its fingerprints. Several happen only because every `func init` of a package
-// shares one canonical id (gavel TODO 34ea4d17): their distinct triples are sorted by public, private,
-// then content, and each layer's fingerprint is the first eight bytes of the SHA-256 of that layer's
-// big-endian fingerprints, in that order. The inits of a package share one shape, so editing one init's
-// body changes only the folded content fingerprint.
+// One declaration keeps its fingerprints. Go never declares one id twice (each `func init` has its own
+// discriminator), but a producer may declare one id in several files: their distinct triples are sorted
+// by public, private, then content, and each layer's fingerprint is the first eight bytes of the SHA-256
+// of that layer's big-endian fingerprints, in that order. Editing the body of one declaration that keeps
+// its shape changes only the folded content fingerprint.
 func FoldDeclarations(declarations []SymbolFingerprints) SymbolFingerprints {
 	distinct := slices.Clone(declarations)
 	slices.SortFunc(distinct, func(left, right SymbolFingerprints) int {

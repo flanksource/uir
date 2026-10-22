@@ -90,10 +90,22 @@ var _ = Describe("canonical symbol identity", func() {
 			Name: "Save", ParameterTypes: []string{"context.Context", "example.org/acme/store.Invoice"},
 		}
 		key := identity.CanonicalKey()
-		Expect(key).To(Equal("10:uir-symbol,1:1,16:example.org/acme,22:example.org/acme/store,6:method,2:ab,4:Save,1:2,15:context.Context,30:example.org/acme/store.Invoice,"))
+		Expect(key).To(Equal("10:uir-symbol,1:2,16:example.org/acme,22:example.org/acme/store,6:method,2:ab,4:Save,1:2,15:context.Context,30:example.org/acme/store.Invoice,1:0,0:,"))
 		digest := sha256.Sum256([]byte(key))
 		Expect(SymbolID(identity)).To(Equal(hex.EncodeToString(digest[:])))
 	})
+
+	DescribeTable("tells overloads apart by what distinguishes them and nothing else",
+		func(left, right Identity) {
+			Expect(left.CanonicalKey()).ToNot(Equal(right.CanonicalKey()))
+			Expect(SymbolID(left)).ToNot(Equal(SymbolID(right)))
+		},
+		Entry("result types", Identity{Kind: "func", Name: "Parse", ResultTypes: []string{"int"}}, Identity{Kind: "func", Name: "Parse", ResultTypes: []string{"string"}}),
+		Entry("no result against one result", Identity{Kind: "func", Name: "Parse"}, Identity{Kind: "func", Name: "Parse", ResultTypes: []string{"int"}}),
+		Entry("a parameter moved to the results", Identity{Kind: "func", Name: "Parse", ParameterTypes: []string{"int"}}, Identity{Kind: "func", Name: "Parse", ResultTypes: []string{"int"}}),
+		Entry("discriminator", Identity{Kind: "func", Name: "init", Discriminator: "a.go#0"}, Identity{Kind: "func", Name: "init", Discriminator: "a.go#1"}),
+		Entry("a discriminator against a result type of the same text", Identity{Kind: "func", Name: "init", Discriminator: "1:x"}, Identity{Kind: "func", Name: "init", ResultTypes: []string{"x"}}),
+	)
 
 	It("derives kind, owner, visibility, and ordered parameter types from the type checker", func() {
 		pkg, _, resolver := checkedStore()
