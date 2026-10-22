@@ -22,6 +22,7 @@ import (
 // a Publication names, whose LocalPath is then its URI and Kind storage.LocationExternal. Name is the
 // root's display name when publication registers it.
 type discoveredRoot struct {
+	AnalysisMode      storage.AnalysisMode
 	RootKey           string
 	Name              string
 	ParentRootKey     string
@@ -45,6 +46,7 @@ type discoveredRoot struct {
 }
 
 type discoveredFile struct {
+	retained     bool
 	AbsolutePath string
 	PathKey      string
 	PackagePath  string
@@ -52,6 +54,7 @@ type discoveredFile struct {
 	ContentHash  string
 	SizeBytes    int64
 	ModifiedAt   time.Time
+	GitPath      string
 }
 
 func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, options discoveryOptions) error {
@@ -77,6 +80,13 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 			return walkErr
 		}
 		if entry.IsDir() {
+			if root.AnalysisMode != "" && current != root.LocalPath {
+				if _, err := os.Stat(filepath.Join(current, "go.mod")); err == nil {
+					return filepath.SkipDir
+				} else if !os.IsNotExist(err) {
+					return err
+				}
+			}
 			if current != root.LocalPath && !visible.Contains(current) {
 				return filepath.SkipDir
 			}
@@ -137,7 +147,7 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 	}
 	root.ConfigurationHash = configurationHash(options.IncludeTests, environment.Variant)
 	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
-	if options.Source == nil {
+	if options.Source == nil && root.AnalysisMode == "" {
 		if err := observeCheckpointWorkspace(ctx, *root); err != nil {
 			return err
 		}

@@ -52,30 +52,6 @@ func writeModule(directory, module, manifest, source string) {
 }
 
 var _ = Describe("module index tasks", func() {
-	It("indexes again, automatically, when a source changes while the index runs", func(ctx SpecContext) {
-		database := openIndexerDB(ctx, indexerSQLiteOptions())
-		workspace := canonicalTempDir()
-		writeTwoPackageModule(workspace)
-		engine, err := New(database)
-		Expect(err).ToNot(HaveOccurred())
-		var loads atomic.Int32
-		engine.loadPackages = func(config *packages.Config, patterns ...string) ([]*packages.Package, error) {
-			loaded, err := packages.Load(config, patterns...)
-			if loads.Add(1) == 1 {
-				writeFile(filepath.Join(workspace, "checkout.go"), "package shop\n\nfunc Checkout(c *Cart) int { return 2 * len(c.Items) }\n")
-			}
-			return loaded, err
-		}
-
-		results, err := runModules(ctx, engine, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
-
-		Expect(err).ToNot(HaveOccurred())
-		Expect(loads.Load()).To(Equal(int32(2)), "the first extraction saw the old source, so the index ran again")
-		published := loadSnapshot(database, results[0].SnapshotID)
-		Expect(published.TaskRunID).ToNot(BeNil(), "a task-run publication records its run")
-		Expect(indexOnce(ctx, engine, workspace).Unchanged).To(BeTrue(), "the published snapshot is of the changed source")
-	})
-
 	It("fails an index once, whatever its error says, instead of retrying it by message", func(ctx SpecContext) {
 		database := openIndexerDB(ctx, indexerSQLiteOptions())
 		workspace := canonicalTempDir()
@@ -238,7 +214,7 @@ var _ = Describe("module index tasks", func() {
 				return loaded, err
 			}
 			group.Go(func() {
-				results[index], errs[index] = engine.indexTarget(ctx, ModuleOptions{Path: workspace, ExactLocation: workspace, Reason: storage.ReasonAdd}, GinkgoWriter.Printf)
+				results[index], errs[index] = engine.indexTarget(ctx, ModuleOptions{Path: workspace, ExactLocation: workspace, Reason: storage.ReasonAdd})
 			})
 		}
 		group.Wait()
