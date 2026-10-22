@@ -36,7 +36,11 @@ func (pipeline *Pipeline) ReadModuleSources(ctx context.Context, options ModuleS
 		return nil, err
 	}
 	scope := selection.scopes[0]
-	revisions, err := storage.EffectiveSources(ctx, pipeline.database, scope.snapshot.ID)
+	paths := make([]string, len(options.Paths))
+	for index, path := range options.Paths {
+		paths[index] = filepath.ToSlash(path)
+	}
+	revisions, err := storage.EffectiveSources(ctx, pipeline.database, storage.EffectiveSourcesOptions{SnapshotID: scope.snapshot.ID, Paths: paths})
 	if err != nil {
 		return nil, err
 	}
@@ -46,10 +50,10 @@ func (pipeline *Pipeline) ReadModuleSources(ctx context.Context, options ModuleS
 		if !found {
 			return nil, fmt.Errorf("source %q is not in snapshot %s", path, options.SnapshotID)
 		}
-		sources = append(sources, verifiedSource{path: path, hash: revision.ContentHash, snapshot: options.SnapshotID})
+		sources = append(sources, verifiedSource{path: path, hash: revision.ContentHash, snapshot: options.SnapshotID, revision: &revision})
 	}
 	contents := make([]ModuleSourceContent, 0, len(sources))
-	for index, read := range readVerifiedSources(ctx, pipeline.database, scope, sources) {
+	for index, read := range readVerifiedSources(ctx, pipeline.database, scope, sources, pipeline.options.gitReader) {
 		if read.err != nil {
 			return nil, read.err
 		}

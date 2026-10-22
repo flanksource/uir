@@ -36,7 +36,7 @@ func (counter *statementCounter) Trace(_ context.Context, _ time.Time, sql func(
 func countedEffectiveSources(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (map[string]storage.SourceRevision, []string) {
 	GinkgoHelper()
 	counter := &statementCounter{}
-	sources, err := storage.EffectiveSources(ctx, database.Session(&gorm.Session{Logger: counter}), snapshotID)
+	sources, err := storage.EffectiveSources(ctx, database.Session(&gorm.Session{Logger: counter}), storage.EffectiveSourcesOptions{SnapshotID: snapshotID})
 	Expect(err).ToNot(HaveOccurred())
 	return sources, counter.statements
 }
@@ -104,6 +104,41 @@ func linkedChain(database *gorm.DB, fixture moduleFixture) ([]storage.ModuleSnap
 }
 
 var _ = Describe("effective sources", func() {
+	DescribeTable("projects selected paths and literal prefixes before loading source revisions", func(ctx SpecContext, options func() storage.DBOptions) {
+		database := openDB(ctx, options())
+		fixture := newModuleFixture(database, "/workspace/projection")
+		base := publishedSnapshot(fixture.location, nil, "base", 0, fixture.now)
+		head := publishedSnapshot(fixture.location, &base.ID, "head", 0, fixture.now)
+		alpha := sourceRevision(fixture.root, "metadata/alpha.json", "old alpha")
+		updated := sourceRevision(fixture.root, alpha.PathKey, "new alpha")
+		deleted := sourceRevision(fixture.root, "metadata/deleted.json", "deleted")
+		unrelated := sourceRevision(fixture.root, "bodies/alpha.xml", "XML")
+		literal := sourceRevision(fixture.root, "meta_data/%literal.json", "literal")
+		createAll(database, &base, &head, &alpha, &updated, &deleted, &unrelated, &literal)
+		for _, delta := range []storage.SourceDelta{setDelta(base, &alpha), setDelta(base, &deleted), setDelta(base, &unrelated), setDelta(base, &literal), setDelta(head, &updated), deleteDelta(head, deleted.PathKey)} {
+			createAll(database, &delta)
+		}
+		for _, selection := range []struct {
+			paths  []string
+			prefix string
+			suffix string
+			want   map[string]storage.SourceRevision
+		}{
+			{paths: []string{alpha.PathKey, deleted.PathKey, "absent", alpha.PathKey}, want: map[string]storage.SourceRevision{alpha.PathKey: updated}},
+			{prefix: "metadata/", want: map[string]storage.SourceRevision{alpha.PathKey: updated}},
+			{prefix: "meta_data/%", want: map[string]storage.SourceRevision{literal.PathKey: literal}},
+			{suffix: "%literal.json", want: map[string]storage.SourceRevision{literal.PathKey: literal}},
+			{prefix: "metadata/", suffix: ".json", want: map[string]storage.SourceRevision{alpha.PathKey: updated}},
+			{paths: []string{}, want: map[string]storage.SourceRevision{}},
+		} {
+			actual, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: head.ID, Paths: selection.paths, Prefix: selection.prefix, Suffix: selection.suffix})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(actual).To(Equal(selection.want))
+		}
+		_, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: uuid.New(), Paths: []string{}})
+		Expect(err).To(MatchError(ContainSubstring("does not exist")))
+	}, Entry("SQLite", sqliteOptions("projection.db")), Entry("PostgreSQL", postgresOptions("uir_source_projection")))
+
 	DescribeTable("resolves a 1,000-link base chain with one chain query",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openDB(ctx, options())
@@ -150,10 +185,10 @@ var _ = Describe("effective sources", func() {
 				createAll(database, &delta)
 			}
 
-			sources, err := storage.EffectiveSources(ctx, database, branch.ID)
+			sources, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: branch.ID})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(sources).To(Equal(map[string]storage.SourceRevision{"alpha.go": alpha, "beta.go": betaV2, "gamma.go": gamma}))
-			sources, err = storage.EffectiveSources(ctx, database, second.ID)
+			sources, err = storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: second.ID})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(sources).To(Equal(map[string]storage.SourceRevision{"alpha.go": alpha, "beta.go": betaV2}), "the branch's files stay out of the head it bases on")
 		},
@@ -172,10 +207,10 @@ var _ = Describe("effective sources", func() {
 			createAll(database, &first, &second, &alpha, &delta)
 			Expect(database.Model(&storage.ModuleSnapshot{}).Where("id = ?", first.ID).Update("base_snapshot_id", second.ID).Error).To(Succeed())
 
-			_, err := storage.EffectiveSources(ctx, database, second.ID)
+			_, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: second.ID})
 			Expect(err).To(MatchError(ContainSubstring("exceeds 100000 base links")))
 			missing := uuid.New()
-			_, err = storage.EffectiveSources(ctx, database, missing)
+			_, err = storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: missing})
 			Expect(err).To(MatchError(ContainSubstring(fmt.Sprintf("snapshot %s does not exist", missing))))
 		},
 		Entry("SQLite", sqliteOptions("cycle.db")),

@@ -2,6 +2,7 @@ package query_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"gorm.io/gorm"
@@ -73,6 +76,28 @@ func countedSourcesRead(ctx context.Context, database *gorm.DB, snapshotID strin
 }
 
 var _ = Describe("reading many module sources", func() {
+	It("reads generated external sources without one SQL query per source", func(ctx SpecContext) {
+		database := openQueryDatabase(ctx, "sqlite")
+		publication := indexer.Publication{RootKey: sourcesModule, Name: "Sources", Location: indexer.ExternalLocation{URI: "example://sources"}}
+		for _, name := range sourcesPaths {
+			body := sourcesFiles[name]
+			publication.Documents = append(publication.Documents, indexer.PublishedDocument{PathKey: name, PackagePath: sourcesModule,
+				Source: body, ContentHash: fmt.Sprintf("%x", sha256.Sum256([]byte(body))),
+				Content: storage.DocumentContent{Version: storage.DocumentFormatVersion, PackagePath: sourcesModule,
+					Symbols: []storage.DocumentSymbol{}, Occurrences: []storage.DocumentOccurrence{}, Diagnostics: []storage.DocumentDiagnostic{}}})
+		}
+		result, err := indexer.Publish(ctx, database, publication)
+		Expect(err).NotTo(HaveOccurred())
+		_, oneStatements := countedSourcesRead(ctx, database, result.SnapshotID, sourcesPaths[:1])
+		all, allStatements := countedSourcesRead(ctx, database, result.SnapshotID, sourcesPaths)
+		Expect(allStatements).To(Equal(oneStatements))
+		for index, content := range all {
+			Expect(content.Path).To(Equal(sourcesPaths[index]))
+			Expect(content.Content).To(Equal(sourcesFiles[content.Path]))
+			Expect(content.Origin).To(Equal("snapshot"))
+		}
+	})
+
 	DescribeTable("returns each source's indexed bytes, as a single read does, from where they are recoverable",
 		func(ctx SpecContext, git bool, change func(checkout string), origin string) {
 			database := openQueryDatabase(ctx, "sqlite")

@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -39,6 +41,7 @@ ranked AS (
   SELECT d.path_key, d.root_id, d.revision_id, d.operation,
          ROW_NUMBER() OVER (PARTITION BY d.path_key ORDER BY c.depth) AS path_rank
   FROM %[1]s d JOIN chain c ON c.id = d.snapshot_id
+  %%s
 )
 SELECT t.depth AS tail_depth, t.base_id AS tail_base_id, r.root_count,
        e.path_key, e.root_id, e.revision_id, e.operation
@@ -74,23 +77,65 @@ type effectiveDeltaRow struct {
 	Operation  *SourceOperation
 }
 
-// EffectiveSources resolves a snapshot's path → source revision view: one recursive query takes the
-// newest delta per path across the base chain, tombstones drop their path, and the referenced
-// revisions are loaded in batches and checked against the delta's root and path.
-func EffectiveSources(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (map[string]SourceRevision, error) {
+// EffectiveSourcesOptions narrows source resolution before loading revisions.
+// Nil Paths selects every path; empty non-nil Paths selects none. Prefix is literal.
+type EffectiveSourcesOptions struct {
+	SnapshotID uuid.UUID
+	Paths      []string
+	Prefix     string
+	Suffix     string
+}
+
+// EffectiveSources resolves selected paths across the complete base chain, validates
+// the chain and loads only surviving revisions. Missing paths are omitted.
+func EffectiveSources(ctx context.Context, database *gorm.DB, options EffectiveSourcesOptions) (map[string]SourceRevision, error) {
+	snapshotID := options.SnapshotID
 	if database == nil {
 		return nil, fmt.Errorf("load effective sources for snapshot %s: database is required", snapshotID)
 	}
-	deltas, err := effectiveDeltas(ctx, database, snapshotID)
-	if err != nil {
-		return nil, err
+	options.Paths = slices.Clone(options.Paths)
+	slices.Sort(options.Paths)
+	options.Paths = slices.Compact(options.Paths)
+	var deltas []SourceDelta
+	for start := 0; ; start += revisionLookupBatch {
+		selection := options
+		if options.Paths != nil {
+			selection.Paths = options.Paths[start:min(start+revisionLookupBatch, len(options.Paths))]
+		}
+		batch, err := effectiveDeltas(ctx, database, selection)
+		if err != nil {
+			return nil, err
+		}
+		deltas = append(deltas, batch...)
+		if options.Paths == nil || start+revisionLookupBatch >= len(options.Paths) {
+			break
+		}
 	}
 	return loadDeltaRevisions(ctx, database, deltas)
 }
 
-func effectiveDeltas(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) ([]SourceDelta, error) {
+func effectiveDeltas(ctx context.Context, database *gorm.DB, options EffectiveSourcesOptions) ([]SourceDelta, error) {
+	snapshotID := options.SnapshotID
+	var predicates []string
+	args := []any{snapshotID, maxBaseChainDepth}
+	if options.Paths != nil {
+		predicates = append(predicates, "d.path_key IN ?")
+		args = append(args, options.Paths)
+	}
+	if options.Prefix != "" {
+		predicates = append(predicates, "substr(d.path_key, 1, length(?)) = ?")
+		args = append(args, options.Prefix, options.Prefix)
+	}
+	if options.Suffix != "" {
+		predicates = append(predicates, "substr(d.path_key, length(d.path_key) - length(?) + 1) = ?")
+		args = append(args, options.Suffix, options.Suffix)
+	}
+	where := ""
+	if len(predicates) > 0 {
+		where = "WHERE " + strings.Join(predicates, " AND ")
+	}
 	var rows []effectiveDeltaRow
-	if err := database.WithContext(ctx).Raw(effectiveDeltasSQL, snapshotID, maxBaseChainDepth).Scan(&rows).Error; err != nil {
+	if err := database.WithContext(ctx).Raw(fmt.Sprintf(effectiveDeltasSQL, where), args...).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load effective source deltas for snapshot %s: %w", snapshotID, err)
 	}
 	if len(rows) == 0 {
