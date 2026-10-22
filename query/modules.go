@@ -17,12 +17,13 @@ const (
 )
 
 type ModuleScopeOptions struct {
-	Structured StructuredOptions
-	Language   Language
-	RootKey    string
-	Location   string
-	SnapshotID string
-	Limit      int
+	Structured  StructuredOptions
+	Language    Language
+	RootKey     string
+	Location    string
+	SnapshotID  string
+	SnapshotIDs []string
+	Limit       int
 }
 
 type ModuleMatch struct {

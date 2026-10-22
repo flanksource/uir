@@ -41,7 +41,7 @@ func (pipeline *Pipeline) BrowseModuleHeads(ctx context.Context) ([]ModuleHeadFi
 	})
 	result := make([]ModuleHeadFiles, 0, len(scopes))
 	for _, scope := range scopes {
-		revisions, err := storage.EffectiveSources(ctx, pipeline.database, scope.snapshot.ID)
+		revisions, err := storage.EffectiveSources(ctx, pipeline.database, storage.EffectiveSourcesOptions{SnapshotID: scope.snapshot.ID})
 		if err != nil {
 			return nil, fmt.Errorf("load head files for %s at %s: %w", scope.root.RootKey, scope.location.CanonicalPath, err)
 		}
