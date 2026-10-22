@@ -413,7 +413,7 @@ UIR=$PWD/.tmp/bench/uir-optimized bash .tmp/bench/deep.sh commons ~/go/src/githu
 UIR=$PWD/.tmp/bench/uir-optimized bash .tmp/bench/queries.sh commons postgres github.com/flanksource/commons <first> <last>
 UIR=$PWD/.tmp/bench/uir-optimized bash .tmp/bench/repeat.sh commons postgres github.com/flanksource/commons <first> <last>
 bash .tmp/bench/explain.sh postgres github.com/flanksource/commons github.com/flanksource/commons/logger GetLogger
-.tmp/bench/uir-optimized add ~/go/src/github.com/flanksource/uir --no-workspace-uses --dsn .tmp/bench/uir-gowork.db   # go.work active
+.tmp/bench/uir-optimized add ~/go/src/github.com/flanksource/uir --dsn .tmp/bench/uir-gowork.db   # go.work active
 .tmp/bench/uir-optimized reindex ~/go/src/github.com/flanksource/uir --dsn .tmp/bench/uir-gowork.db
 ```
 

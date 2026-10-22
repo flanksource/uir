@@ -4,7 +4,7 @@
 
 ```sh
 uir add .
-uir add ./internal/service --no-workspace-uses
+uir add ./internal/service
 uir reindex .
 uir reindex ../service-feature --force
 ```

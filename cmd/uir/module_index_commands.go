@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/flanksource/clicky"
-	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/commons/logger"
 	"github.com/flanksource/gavel/linters"
 	"github.com/flanksource/gavel/models"
@@ -18,11 +17,10 @@ import (
 )
 
 type moduleAddOptions struct {
-	Path                 string `args:"true"`
-	IncludeTests         bool   `flag:"include-tests" help:"Index Go test files"`
-	Force                bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
-	IncludeWorkspaceUses bool   `flag:"include-workspace-uses" help:"Also add go.work use paths outside the requested directory"`
-	NoWorkspaceUses      bool   `flag:"no-workspace-uses" help:"Do not add go.work use paths outside the requested directory"`
+	Path         string `args:"true"`
+	IncludeTests bool   `flag:"include-tests" help:"Index Go test files"`
+	Force        bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
+	All          bool   `flag:"all" help:"Also add go.work use paths outside the requested directory"`
 }
 
 type moduleReindexOptions struct {
@@ -75,17 +73,12 @@ func registerModuleIndexCommands(root *cobra.Command) {
 }
 
 func registerAddCommand(root *cobra.Command) {
-	var add *cobra.Command
-	add = clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) (moduleIndexRun, error) {
+	add := clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) (moduleIndexRun, error) {
 		path := options.Path
 		if path == "" {
 			path = "."
 		}
-		pathOptions := addPathOptions{Path: path, IncludeWorkspaceUses: options.IncludeWorkspaceUses, NoWorkspaceUses: options.NoWorkspaceUses}
-		if entity.OperationSurfaceFromContext(ctx) == "cli" {
-			pathOptions.Input, pathOptions.Prompt = add.InOrStdin(), add.ErrOrStderr()
-		}
-		paths, err := addPaths(pathOptions)
+		paths, err := addPaths(addPathOptions{Path: path, All: options.All})
 		if err != nil {
 			return moduleIndexRun{}, err
 		}
