@@ -4,6 +4,7 @@ import (
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"gorm.io/gorm"
 )
 
 var _ = Describe("source blobs", func() {
@@ -37,4 +38,23 @@ var _ = Describe("source blobs", func() {
 		Entry("SQLite", sqliteOptions("source-blobs.db")),
 		Entry("PostgreSQL", postgresOptions("uir_source_blobs")),
 	)
+
+	DescribeTable("batches generated source reads and verifies every hash", func(ctx SpecContext, options func() storage.DBOptions) {
+		database := openDB(ctx, options())
+		createAll(database,
+			&storage.SourceBlob{ContentHash: digest(stored), Content: []byte(stored)},
+			&storage.SourceBlob{ContentHash: digest(""), Content: []byte{}},
+			&storage.SourceBlob{ContentHash: digest(tampered), Content: []byte(stored)},
+		)
+		counter := &statementCounter{}
+		contents, err := storage.ReadSourceBlobs(ctx, database.Session(&gorm.Session{Logger: counter}), []string{digest(stored), digest(""), digest(stored)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(contents).To(Equal(map[string][]byte{digest(stored): []byte(stored), digest(""): {}}))
+		Expect(counter.statements).To(HaveLen(1))
+		_, err = storage.ReadSourceBlobs(ctx, database, []string{digest(stored), digest(absent)})
+		Expect(err).To(MatchError(storage.ErrSourceBlobNotStored))
+		Expect(err).To(MatchError(ContainSubstring(digest(absent))))
+		_, err = storage.ReadSourceBlobs(ctx, database, []string{digest(stored), digest(tampered)})
+		Expect(err).To(MatchError(And(ContainSubstring(digest(tampered)), ContainSubstring(digest(stored)))))
+	}, Entry("SQLite", sqliteOptions("source-blob-batches.db")), Entry("PostgreSQL", postgresOptions("uir_source_blob_batches")))
 })
