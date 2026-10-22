@@ -98,7 +98,7 @@ func verifySource(ctx context.Context, database *gorm.DB, pipeline *query.Pipeli
 	if err != nil {
 		return err
 	}
-	sources, err := storage.EffectiveSources(ctx, database, id)
+	sources, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: id})
 	if err != nil {
 		return err
 	}

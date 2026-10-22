@@ -84,6 +84,7 @@ const (
 // counts are nil only on a row published before they were recorded, until the storage backfill
 // derives them; Stats reads them.
 type ModuleSnapshot struct {
+	AnalysisMode      AnalysisMode  `gorm:"column:analysis_mode"`
 	ID                uuid.UUID     `gorm:"column:id;primaryKey"`
 	RootID            uuid.UUID     `gorm:"column:root_id"`
 	LocationID        uuid.UUID     `gorm:"column:location_id"`
@@ -155,6 +156,7 @@ type SourceRevision struct {
 	ContentHash string    `gorm:"column:content_hash"`
 	PackagePath string    `gorm:"column:package_path"`
 	SizeBytes   int64     `gorm:"column:size_bytes"`
+	GitPath     string    `gorm:"column:git_path"`
 }
 
 func (SourceRevision) TableName() string { return "source_revisions" }

@@ -91,6 +91,11 @@ table "locations" {
 table "snapshots" {
   schema = schema.public
 
+  column "analysis_mode" {
+    type = text
+    default = ""
+  }
+
   column "id" {
     type = uuid
     null = false
@@ -252,6 +257,7 @@ table "snapshots" {
   index "snapshots_base_idx" { columns = [column.base_snapshot_id] }
   index "snapshots_root_revision_idx" { columns = [column.root_id, column.revision] }
   check "snapshots_worktree_state_check" { expr = "worktree_state IN ('clean', 'dirty', 'unknown')" }
+  check "snapshots_analysis_mode_check" { expr = "analysis_mode IN ('', 'syntax', 'typed')" }
   check "snapshots_revision_check" { expr = "(worktree_state = 'unknown') OR length(revision) > 0" }
   check "snapshots_context_hash_check" { expr = "length(context_hash) = 64" }
   check "snapshots_coverage_check" { expr = "coverage IN ('indexed', 'partial', 'syntax', 'excluded')" }

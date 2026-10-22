@@ -54,7 +54,7 @@ func ActiveDocuments(ctx context.Context, database *gorm.DB, snapshotID uuid.UUI
 	if database == nil {
 		return nil, fmt.Errorf("load active documents for snapshot %s: database is required", snapshotID)
 	}
-	sources, err := EffectiveSources(ctx, database, snapshotID)
+	sources, err := EffectiveSources(ctx, database, EffectiveSourcesOptions{SnapshotID: snapshotID})
 	if err != nil {
 		return nil, err
 	}

@@ -99,7 +99,7 @@ func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, options History
 		return prunePlan{}, fmt.Errorf("load module root: %w", err)
 	}
 	var snapshots []ModuleSnapshot
-	if err := tx.WithContext(ctx).Select("id", "root_id", "location_id", "base_snapshot_id", "ordinal", "reason").
+	if err := tx.WithContext(ctx).Select("id", "root_id", "location_id", "base_snapshot_id", "ordinal", "reason", "analysis_mode").
 		Where("root_id = ?", root.ID).Order("ordinal DESC").Find(&snapshots).Error; err != nil {
 		return prunePlan{}, fmt.Errorf("load snapshots: %w", err)
 	}
@@ -125,8 +125,12 @@ func planPrune(ctx context.Context, tx *gorm.DB, rootKey string, options History
 // until none is added, every snapshot a dependency of a surviving snapshot of any root targets.
 func keptSnapshots(ctx context.Context, tx *gorm.DB, root ModuleRoot, snapshots []ModuleSnapshot, options HistoryPruneOptions) (map[uuid.UUID]bool, error) {
 	kept := map[uuid.UUID]bool{}
-	for _, snapshot := range snapshots[:min(options.Keep, len(snapshots))] {
-		kept[snapshot.ID] = true
+	remaining := options.Keep
+	for _, snapshot := range snapshots {
+		if snapshot.AnalysisMode == "" && remaining > 0 {
+			kept[snapshot.ID] = true
+			remaining--
+		}
 	}
 	if options.PreserveHistorical {
 		for _, snapshot := range snapshots {
@@ -140,6 +144,13 @@ func keptSnapshots(ctx context.Context, tx *gorm.DB, root ModuleRoot, snapshots 
 		return nil, fmt.Errorf("load location heads: %w", err)
 	}
 	for _, head := range heads {
+		kept[head] = true
+	}
+	var analysis []uuid.UUID
+	if err := tx.WithContext(ctx).Model(&AnalysisHead{}).Where("location_id IN (?)", tx.Model(&ModuleLocation{}).Select("id").Where("root_id = ?", root.ID)).Pluck("snapshot_id", &analysis).Error; err != nil {
+		return nil, err
+	}
+	for _, head := range analysis {
 		kept[head] = true
 	}
 	for {
@@ -184,7 +195,7 @@ func (plan *prunePlan) readKept(ctx context.Context, tx *gorm.DB) error {
 		if snapshot.BaseSnapshotID == nil || !deleted[*snapshot.BaseSnapshotID] {
 			continue
 		}
-		sources, err := EffectiveSources(ctx, tx, snapshot.ID)
+		sources, err := EffectiveSources(ctx, tx, EffectiveSourcesOptions{SnapshotID: snapshot.ID})
 		if err != nil {
 			return err
 		}
