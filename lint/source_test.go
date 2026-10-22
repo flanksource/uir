@@ -49,25 +49,25 @@ var _ = Describe("Git-scoped lint", func() {
 		Expect(result.Groups).To(BeEmpty())
 	})
 
-	It("selects working changes and literal untracked names while preserving fileless diagnostics", func(ctx SpecContext) {
+	It("selects working changes and literal untracked names, scoping a coverage warning to its file like a finding", func(ctx SpecContext) {
 		root := sourceCheckout(ctx)
+		config := filepath.Join(root, ConfigName)
+		Expect(os.WriteFile(config, []byte(validConfig+"    - {id: uses, query: 'SELECT path FROM references(var:*)', message: '{{.path}}'}\n"), 0o600)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "other.go"), []byte("package linted\nvar _ = undefined\n"), 0o600)).To(Succeed())
-		sourceGit(ctx, root, "add", "other.go")
+		sourceGit(ctx, root, "add", "other.go", ConfigName)
 		sourceGit(ctx, root, "commit", "-qm", "existing coverage gap")
 		Expect(os.WriteFile(filepath.Join(root, "small.go"), []byte("package linted\nfunc Changed() {}\n"), 0o600)).To(Succeed())
 		name := "literal [name].go"
 		Expect(os.WriteFile(filepath.Join(root, name), []byte("package linted\nfunc Literal() {}\n"), 0o600)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(root, "ignored.go"), []byte("package linted\nfunc Ignored() {}\n"), 0o600)).To(Succeed())
-		request, err := Prepare(ctx, root, "", Options{Changed: true, GroupBy: "symbol", Exclude: []string{"small.go"}})
+		request, err := Prepare(ctx, root, config, Options{Changed: true, GroupBy: "symbol", Exclude: []string{"small.go"}})
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(request.Release)
 		result := request.Run(ctx, lintDatabase(ctx, "sqlite"))
 		Expect(result.Success).To(BeTrue(), result.Error)
-		Expect(result.Violations).To(ContainElement(HaveField("File", filepath.Join(root, name))))
-		Expect(result.Violations).To(ContainElement(HaveField("File", "")))
-		Expect(result.Violations).NotTo(ContainElement(HaveField("File", filepath.Join(root, "other.go"))))
+		Expect(result.Violations).To(ConsistOf(HaveField("File", filepath.Join(root, name))))
 		Expect(result.FileCount).To(Equal(1))
-		Expect(result.Groups).To(HaveLen(2))
+		Expect(result.Groups).To(HaveLen(1))
 	})
 
 	It("loads historical configuration and contents despite malformed current configuration", func(ctx SpecContext) {
@@ -113,10 +113,15 @@ var _ = Describe("Git-scoped lint", func() {
 		Expect(result.Success).To(BeTrue(), result.Error)
 		Expect(result.Violations).To(ConsistOf(
 			And(HaveField("File", filepath.Join(root, "small.go")), HaveField("Message", HaveValue(Equal("small.go is staged")))),
-			And(HaveField("File", filepath.Join(root, "nested", "nested.go")), HaveField("Message", HaveValue(Equal("nested.go is staged")))),
 		))
-		Expect(result.FileCount).To(Equal(2))
-		Expect(result.Groups).To(HaveLen(2))
+		Expect(result.FileCount).To(Equal(1))
+		Expect(result.Groups).To(HaveLen(1))
+		nested, err := Prepare(ctx, filepath.Join(root, "nested"), "", Options{Staged: true})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(nested.Release)
+		selected := nested.Run(ctx, lintDatabase(ctx, "sqlite"))
+		Expect(selected.Success).To(BeTrue(), selected.Error)
+		Expect(selected.Violations).To(ConsistOf(And(HaveField("File", filepath.Join(root, "nested", "nested.go")), HaveField("Message", HaveValue(Equal("nested.go is staged"))))))
 		Expect(os.ReadFile(filepath.Join(root, ".git", "index"))).To(Equal(before))
 	})
 
@@ -154,7 +159,7 @@ var _ = Describe("Git-scoped lint", func() {
 		sourceGit(ctx, root, "add", ConfigName, "removed/go.mod", "removed/removed.go")
 		sourceGit(ctx, root, "commit", "-qm", "add historical module")
 		Expect(os.RemoveAll(filepath.Join(root, "removed"))).To(Succeed())
-		request, err := Prepare(ctx, root, "", Options{Changed: true, Revision: "HEAD"})
+		request, err := Prepare(ctx, filepath.Join(root, "removed"), "", Options{Changed: true, Revision: "HEAD"})
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(request.Release)
 		result := request.Run(ctx, lintDatabase(ctx, "sqlite"))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -17,18 +18,20 @@ import (
 )
 
 type Options struct {
-	Rules    []string
-	Include  []string
-	Exclude  []string
-	NoIndex  bool
-	Snapshot string
-	GroupBy  string
-	Changed  bool
-	Staged   bool
-	Revision string
-	Source   *git.PreparedSource
-	Files    []string
-	WorkDir  string
+	Rules     []string
+	Include   []string
+	Exclude   []string
+	NoIndex   bool
+	Snapshot  string
+	GroupBy   string
+	Changed   bool
+	Staged    bool
+	Revision  string
+	Source    *git.PreparedSource
+	Files     []string
+	WorkDir   string
+	All       bool
+	Directory string
 }
 
 func Run(ctx context.Context, database *gorm.DB, config *Config, options Options) *Result {
@@ -68,21 +71,44 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 	if len(rules) == 0 || (options.Files != nil && len(options.Files) == 0) {
 		return nil
 	}
-	scopes, err := snapshots(ctx, database, config, options)
-	if err != nil {
-		return err
-	}
 	pipeline, err := query.NewPipeline(database)
 	if err != nil {
 		return err
 	}
 	coverage := map[string]bool{}
 	files := map[string]bool{}
-	for _, rule := range rules {
-		for _, scope := range scopes {
+	var sourceSets map[string]string
+	defer result.orderRules(rules)
+	for _, mode := range []storage.AnalysisMode{storage.AnalysisSyntax, storage.AnalysisTyped} {
+		selected := false
+		for _, rule := range rules {
+			selected = selected || rule.requirements.Mode == mode
+		}
+		if !selected {
+			continue
+		}
+		scope, err := snapshots(ctx, database, config, options, mode)
+		if err != nil {
+			return err
+		}
+		currentSets, err := analysisSourceSets(ctx, database, scope)
+		if err != nil {
+			return err
+		}
+		if sourceSets != nil && !maps.Equal(sourceSets, currentSets) {
+			return errors.New("project sources changed between syntax and typed analysis; rerun uir lint")
+		}
+		sourceSets = currentSets
+		for _, rule := range rules {
+			if rule.requirements.Mode != mode {
+				continue
+			}
 			queried, err := pipeline.VisitSQL(ctx, rule.Query, scope, func(row query.SQLRow) error {
 				if row.Match.Path != "" {
 					path, err := filepath.Rel(result.WorkDir, filepath.Join(row.Match.Location, row.Match.Path))
+					if options.All {
+						path = row.Match.Path
+					}
 					if err != nil {
 						return err
 					}
@@ -109,65 +135,32 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 				result.addFinding(finding, row.WitnessSymbol)
 				return nil
 			})
-			for _, gap := range queried.Coverage {
-				if gap.Coverage != string(storage.CoveragePartial) && gap.Coverage != string(storage.CoverageSyntax) {
-					continue
-				}
-				key := gap.SnapshotID + ":" + gap.PackagePath
-				if coverage[key] {
-					continue
-				}
-				coverage[key] = true
-				warning := models.NewViolationBuilder().WithMessage(fmt.Sprintf("%s: %s coverage in snapshot %s (%d diagnostics)", gap.PackagePath, gap.Coverage, gap.SnapshotID, gap.Diagnostics)).WithSource("uir").WithRuleFromLinter("uir", "uir/coverage").Build()
-				warning.Severity = models.SeverityWarning
-				result.addFinding(warning, nil)
-			}
+			err = errors.Join(err, result.addCoverage(queried.Coverage, coverage))
 			result.FileCount = len(files)
 			if err != nil {
-				return fmt.Errorf("rule %s, snapshot %s: %w", rule.ID, scope.SnapshotID, err)
+				return fmt.Errorf("rule %s: %w", rule.ID, err)
 			}
 		}
 	}
 	return nil
 }
 
-func snapshots(ctx context.Context, database *gorm.DB, config *Config, options Options) ([]query.ModuleScopeOptions, error) {
-	if options.Snapshot != "" {
-		return []query.ModuleScopeOptions{{SnapshotID: options.Snapshot}}, nil
-	}
-	engine, err := indexer.New(database)
-	if err != nil {
-		return nil, err
-	}
-	root := config.Root
-	var modules []indexer.ModuleResult
-	switch {
-	case options.Source != nil && options.Source.Info().Kind != git.SourceWorktree:
-		modules, err = engine.IndexSource(ctx, indexer.SourceOptions{Source: options.Source, Directory: root, IncludeTests: config.Lint.IncludeTests})
-	case options.NoIndex:
-		modules, err = engine.CheckModulesCurrent(ctx, root, indexer.CheckOptions{IncludeTests: config.Lint.IncludeTests, AllowIncomplete: true})
-	default:
-		var run *indexer.ModuleIndexRun
-		run, err = indexer.StartModulesTask(ctx, engine, []indexer.ModuleOptions{{Path: root, IncludeTests: config.Lint.IncludeTests, Reason: storage.ReasonReindex}})
-		if err == nil {
-			modules, err = run.Wait(ctx)
+// addCoverage adds the warning of every diagnostic of the packages in scope that are not fully
+// indexed, once each across rules and analysis modes: uir/index for a file indexed with a degraded
+// document, uir/coverage for a load or type error.
+func (result *Result) addCoverage(gaps []query.ModuleCoverage, seen map[string]bool) error {
+	for _, gap := range gaps {
+		warnings, err := indexer.CoverageViolations(gap.Location, gap.Diagnostics)
+		if err != nil {
+			return fmt.Errorf("package %s in snapshot %s: %w", gap.PackagePath, gap.SnapshotID, err)
+		}
+		for _, warning := range warnings {
+			key := fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%s", warning.Rule.Method, warning.File, warning.Line, warning.Column, *warning.Message)
+			if !seen[key] {
+				seen[key] = true
+				result.addFinding(warning, nil)
+			}
 		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	if len(modules) == 0 {
-		return nil, fmt.Errorf("no Go modules below %q", root)
-	}
-	scopes := make([]query.ModuleScopeOptions, 0, len(modules))
-	for _, module := range modules {
-		if module.Error != "" {
-			return nil, fmt.Errorf("index %s: %s", module.Location, module.Error)
-		}
-		if module.SnapshotID == "" {
-			return nil, fmt.Errorf("index %s returned no snapshot", module.Location)
-		}
-		scopes = append(scopes, query.ModuleScopeOptions{SnapshotID: module.SnapshotID})
-	}
-	return scopes, nil
+	return nil
 }
