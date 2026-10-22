@@ -71,6 +71,12 @@ var _ = Describe("the call graph of one file", func() {
 	}
 
 	Describe("standalone Go", func() {
+		It("selects the concrete function as the root when the file also declares interface signatures", func(ctx SpecContext) {
+			file := &query.GraphFile{Path: "worker.go", Content: []byte("package worker\ntype Reader interface { Read() }\nfunc Work() {}\n")}
+			result := standaloneGraph(ctx, query.GraphOptions{File: file})
+			Expect(graphLabels(result)).To(Equal([]string{"Work"}))
+		})
+
 		It("draws the file's calls with their guards and leaves out-of-file callees unresolved", func(ctx SpecContext) {
 			result := standaloneGraph(ctx, query.GraphOptions{File: ordersFile(), Selector: "Submit", Direction: graph.DirectionCallees, Depth: 2})
 

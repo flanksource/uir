@@ -36,6 +36,7 @@ type verifiedSource struct {
 	path     string
 	hash     string
 	snapshot string
+	revision *storage.SourceRevision
 }
 
 // sourceRead is one source's indexed bytes and where they came from, or why they could not be recovered.
@@ -48,20 +49,13 @@ type sourceRead struct {
 // readVerifiedSources returns the indexed bytes of each source of one scope and where they came from:
 // the local file while it still has the indexed hash, else the stored blob of a dirty or non-Git
 // snapshot, else the pinned Git blob, every Git blob through one git cat-file process. An external
-// location is a producer's URI, not a checkout, so its sources are only the blobs its publication
-// stored. Bytes with any other hash are never returned; a source that cannot be recovered carries the
+// location is a producer's URI, so its sources use explicit Git bindings or stored
+// blobs. Bytes with any other hash are never returned; a source that cannot be recovered carries the
 // error naming it, and the others are still read.
-func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleScope, sources []verifiedSource) []sourceRead {
+func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleScope, sources []verifiedSource, gitReader GitSourceReader) []sourceRead {
 	reads := make([]sourceRead, len(sources))
 	if scope.location.Kind == storage.LocationExternal {
-		for index, source := range sources {
-			content, err := storage.ReadSourceBlob(ctx, database, source.hash)
-			if err != nil {
-				err = fmt.Errorf("source %q of external snapshot %s: %w", source.path, source.snapshot, err)
-			}
-			reads[index] = sourceRead{content: content, origin: "snapshot", err: err}
-		}
-		return reads
+		return readExternalSources(ctx, database, scope, sources, gitReader)
 	}
 	resolvedRoot, gitDirectory, err := resolveModuleSourceLocation(scope.location.CanonicalPath)
 	if err != nil {

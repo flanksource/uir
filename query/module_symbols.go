@@ -20,6 +20,7 @@ type ModuleSymbol struct {
 	QueryName      string       `json:"query_name"`
 	Visibility     string       `json:"visibility"`
 	ParameterTypes storage.JSON `json:"parameter_types"`
+	DeclarationKey string       `json:"-"`
 }
 
 func (index *indexContext) moduleSymbols(ctx context.Context, rows []storage.Symbol) ([]ModuleSymbol, error) {

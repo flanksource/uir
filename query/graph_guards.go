@@ -321,7 +321,7 @@ func (reader *guardReader) load(ctx context.Context, keys []guardFileKey) error 
 	}
 	for _, snapshot := range order {
 		batch := batches[snapshot]
-		reads := readVerifiedSources(ctx, reader.database, batch.scope, batch.sources)
+		reads := readVerifiedSources(ctx, reader.database, batch.scope, batch.sources, nil)
 		if err := ctx.Err(); err != nil {
 			return err
 		}

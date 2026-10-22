@@ -24,6 +24,13 @@ type pipelineOptions struct {
 	documents int
 	slow      time.Duration
 	logf      func(format string, arguments ...any)
+	gitReader GitSourceReader
+}
+
+// WithGitSourceReader resolves explicit Git source bindings through the caller's
+// authenticated repository cache. Returned bytes are still hash-verified by UIR.
+func WithGitSourceReader(reader GitSourceReader) PipelineOption {
+	return func(options *pipelineOptions) { options.gitReader = reader }
 }
 
 // WithDocumentCache keeps up to size decoded documents, least recently used first out, across the

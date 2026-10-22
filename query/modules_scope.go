@@ -89,6 +89,25 @@ func (pipeline *Pipeline) MissingHeads(ctx context.Context) ([]MissingHead, erro
 // cache generation, since only a publication or registration changes it; a selection by location
 // reads the filesystem to canonicalize the path, so it is made every time.
 func (pipeline *Pipeline) moduleScopes(ctx context.Context, options ModuleScopeOptions, allHeads bool) (moduleScopeSelection, error) {
+	if len(options.SnapshotIDs) > 0 {
+		if options.SnapshotID != "" || options.RootKey != "" || options.Location != "" {
+			return moduleScopeSelection{}, errors.New("snapshot set cannot be combined with another scope")
+		}
+		selection := moduleScopeSelection{}
+		seen := map[string]bool{}
+		for _, id := range options.SnapshotIDs {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			part, err := pipeline.selectModuleScopes(ctx, ModuleScopeOptions{SnapshotID: id}, false)
+			if err != nil {
+				return selection, err
+			}
+			selection.scopes = append(selection.scopes, part.scopes...)
+		}
+		return selection, nil
+	}
 	generation, err := pipeline.generation(ctx)
 	if err != nil {
 		return moduleScopeSelection{}, err

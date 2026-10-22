@@ -111,7 +111,7 @@ func lowerGoFile(file GraphFile, packagePath string) (*loweredFile, error) {
 	enclosing := map[string]uir.Identifier{}
 	functions := map[string]uir.Identifier{}
 	for _, symbol := range document.Symbols {
-		if symbol.Kind != "func" && symbol.Kind != "method" {
+		if (symbol.Kind != "func" && symbol.Kind != "method") || symbol.ChildSlot == "" {
 			continue
 		}
 		lowered.declare(goFunction(file.Path, symbol))
