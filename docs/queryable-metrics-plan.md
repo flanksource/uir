@@ -49,7 +49,7 @@ Index the corpus into an isolated development database, then run the metric-only
 ```sh
 make binary
 mkdir -p .tmp/metrics-live
-.bin/uir --dsn .tmp/metrics-live/index.db add . --no-workspace-uses
+.bin/uir --dsn .tmp/metrics-live/index.db add .
 UIR_METRICS_BENCH_DSN="$PWD/.tmp/metrics-live/index.db" UIR_METRICS_BENCH_ROOT=github.com/flanksource/uir go test -tags metricbench ./query -run '^$' -bench BenchmarkStoredMetrics -benchtime=1x -count=20 -benchmem
 ```
 

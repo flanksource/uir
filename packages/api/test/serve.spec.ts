@@ -365,7 +365,7 @@ it("sends explicit add and reindex inputs, takes the started run id, and reports
   vi.stubGlobal("fetch", fetcher);
   await expect(addModules("/repo", true)).resolves.toEqual({ run_id: "run-1" });
   expect(fetcher.mock.calls[0]).toEqual(["/api/v1/modules/add", expect.objectContaining({
-    method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, "no-workspace-uses": true }),
+    method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true }),
   })]);
   await expect(reindexModules({ path: "/repo", includeTests: true, force: false })).rejects.toThrow("index failed");
   expect(fetcher.mock.calls[1]).toEqual(["/api/v1/modules/reindex", expect.objectContaining({

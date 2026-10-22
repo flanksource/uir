@@ -87,7 +87,7 @@ bump_go_sum() {
 }
 
 commit "commons copy"
-uir --format json add "$scratch" --no-workspace-uses >"$logs/00-add.json"
+uir --format json add "$scratch" >"$logs/00-add.json"
 
 for i in $(seq 1 20); do
   case $i in
