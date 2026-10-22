@@ -3,6 +3,15 @@ import { getQueryCatalog, runModuleQuery } from "../../../web/src/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("preserves intentional syntax coverage and declaration metrics from analysis snapshots", async () => {
+  const result = { operation: "set", total: 1, declarations: [], symbols: [], stages: [],
+    matches: [{ path: "work.go", line: 2, snapshot_id: "syntax-snapshot", coverage: "syntax" }],
+    coverage: [{ root_key: "example.org/app", location: "/workspace/app", snapshot_id: "syntax-snapshot", package_path: "example.org/app", coverage: "syntax", analysis_mode: "syntax", diagnostics: 0 }],
+    columns: [{ name: "params", field: "symbol.metrics.param_count", type: "integer" }], rows: [{ params: 4 }] };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { headers: { "Server-Timing": "total;dur=1" } })));
+  await expect(runModuleQuery("SELECT symbol.metrics.param_count AS params FROM func:*", "example.org/app", "syntax-snapshot", { language: "sql" })).resolves.toMatchObject({ data: result });
+});
+
 it("preserves file function and struct counts for consolidation queries", async () => {
   const sql = "SELECT path, file.functions, file.structs FROM files() WHERE file.lines < 150";
   const result = { operation: "set", total: 2, declarations: [], symbols: [], coverage: [], stages: [],
