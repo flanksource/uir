@@ -137,7 +137,9 @@ func isolateRoot(ctx context.Context, root discoveredRoot, includeTests bool, ma
 	}
 	root.ContentSetHash = contentSetHash(root.Files, manifestHashes)
 	root.ConfigurationHash = configurationHash(includeTests, root.Variant)
-	root.Dependencies, err = readDependencies(ctx, root)
+	if root.AnalysisMode == "" {
+		root.Dependencies, err = readDependencies(ctx, root)
+	}
 	return root, err
 }
 

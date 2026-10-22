@@ -12,7 +12,7 @@ const (
 	privateHashVersion       = "uir-private-hash-v1"
 	packageInputHashVersion  = "uir-package-input-v5"
 	contextHashVersion       = "uir-context-hash-v1"
-	contentSetHashVersion    = "uir-content-set-v1"
+	contentSetHashVersion    = "uir-content-set-v2"
 	configurationHashVersion = "uir-configuration-v1"
 
 	exportShapeVersion           = "uir-export-shape-v4"
@@ -33,6 +33,7 @@ func contentSetHash(files []discoveredFile, manifests []manifestFile) string {
 		digest.Text(file.PathKey)
 		digest.Text(file.PackagePath)
 		digest.Text(file.ContentHash)
+		digest.Text(file.GitPath)
 	}
 	digest.Count(len(manifests))
 	for _, manifest := range manifests {
