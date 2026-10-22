@@ -12,8 +12,8 @@ import (
 )
 
 // PublishOptions identifies a producer and selects whether publication advances its location head.
-// The zero value publishes a head. GitCommit identifies committed input; external source bytes
-// remain stored in blobs because producers may combine or transform Git files.
+// The zero value publishes a head. GitCommit identifies committed input. A document
+// with GitPath binds original bytes; other external sources are stored in blobs.
 type PublishOptions struct {
 	Historical bool   `json:"historical,omitempty"`
 	GitCommit  string `json:"git_commit,omitempty"`

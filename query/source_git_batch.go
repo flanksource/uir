@@ -126,8 +126,8 @@ func (git *gitSources) fail(indexes []int, reason func(verifiedSource) error) {
 
 // catFileBatch writes every object name to one git cat-file --batch process and returns its answers.
 func catFileBatch(ctx context.Context, repoRoot string, objects []string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "--batch")
-	command.Stdin = strings.NewReader(strings.Join(objects, "\n") + "\n")
+	command := exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "--batch", "-Z")
+	command.Stdin = strings.NewReader(strings.Join(objects, "\x00") + "\x00")
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
@@ -142,10 +142,10 @@ type gitStreamError struct{ message string }
 
 func (err *gitStreamError) Error() string { return err.message }
 
-// nextGitBlob consumes one "<oid> <type> <size>\n<content>\n" answer, or a one-line answer such as
+// nextGitBlob consumes one "<oid> <type> <size>\x00<content>\x00" answer, or a NUL-delimited answer such as
 // "<object> missing" that names why the object has no content.
 func nextGitBlob(output *[]byte, object string) ([]byte, error) {
-	header, rest, found := bytes.Cut(*output, []byte("\n"))
+	header, rest, found := bytes.Cut(*output, []byte{0})
 	if !found {
 		return nil, &gitStreamError{message: fmt.Sprintf("git cat-file --batch ended before answering for %s", object)}
 	}
@@ -155,11 +155,11 @@ func nextGitBlob(output *[]byte, object string) ([]byte, error) {
 		return nil, fmt.Errorf("git cat-file --batch answered %q", header)
 	}
 	size, err := strconv.Atoi(fields[2])
-	if err != nil {
+	if err != nil || size < 0 {
 		*output = rest
 		return nil, fmt.Errorf("git cat-file --batch answered %q", header)
 	}
-	if size+1 > len(rest) || rest[size] != '\n' {
+	if size >= len(rest) || rest[size] != 0 {
 		return nil, &gitStreamError{message: fmt.Sprintf("git cat-file --batch answered %q for %s without its %d bytes", header, object, size)}
 	}
 	*output = rest[size+1:]
