@@ -25,8 +25,21 @@ const ModuleIndexKind = "module-index"
 // indexAttempts bounds how often a task runs an index whose inputs changed under it.
 const indexAttempts = 3
 
+// indexRetryConfig retries an index only when its inputs changed under it, up to indexAttempts in all.
+// The backoff lets a burst of edits, such as a dependency bump rewriting go.mod, go.sum and go.work.sum
+// seconds apart, settle instead of using up every attempt; the jitter keeps concurrent runs from
+// retrying in step. A var so a spec can shorten the wait.
+var indexRetryConfig = clickytask.RetryConfig{
+	Retryable:     func(err error) bool { return errors.Is(err, ErrIndexInputsChanged) },
+	MaxRetries:    indexAttempts - 1,
+	BaseDelay:     2 * time.Second,
+	MaxDelay:      10 * time.Second,
+	BackoffFactor: 2,
+	JitterFactor:  0.5,
+}
+
 // noTaskRetries replaces clicky's default retry policy, which retries any error whose text mentions a
-// timeout or a connection. An index is retried only by indexTarget, and only when its inputs changed.
+// timeout or a connection, for tasks that never retry; a module index task retries with indexRetryConfig.
 var noTaskRetries = clickytask.WithRetryConfig(clickytask.RetryConfig{})
 
 type taskRunKey struct{}
@@ -211,7 +224,7 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 					if target.cached != nil {
 						return []ModuleResult{*target.cached}, Phase(ctx, "fingerprint-reuse", func(context.Context) error { return nil })
 					}
-					return indexer.indexTarget(ctx, target.options, progress.Warnf)
+					return indexer.indexTarget(ctx, target.options)
 				})
 			if err != nil {
 				return []ModuleResult{{RootKey: target.rootKey, Location: target.location, Error: err.Error()}}, err
@@ -224,7 +237,7 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 				}
 			}
 			return results, nil
-		}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), noTaskRetries)
+		}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), clickytask.WithRetryConfig(indexRetryConfig))
 		module.SetDescription(target.location)
 	}
 	return run, nil
@@ -285,23 +298,17 @@ func waitForRun(ctx context.Context, group *clickytask.Group) error {
 	return nil
 }
 
-// indexTarget indexes one module checkout, again while its inputs change under it, up to
-// indexAttempts times in all; any other outcome is returned at once. An attempt whose inputs changed
-// makes the run forget everything it remembered, so the next attempt indexes every dependency whose
-// inputs changed again instead of reusing its stale snapshot.
-func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions, warn func(string, ...any)) ([]ModuleResult, error) {
+// indexTarget indexes one module checkout once; the task running it retries an index whose inputs
+// changed under it, with indexRetryConfig. Such an attempt makes the run forget everything it
+// remembered, so the next attempt indexes every dependency whose inputs changed again instead of
+// reusing its stale snapshot.
+func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions) ([]ModuleResult, error) {
 	ctx, memo := ensureRunMemo(ctx)
-	for attempt := 1; ; attempt++ {
-		results, err := indexer.IndexModules(ctx, options)
-		if !errors.Is(err, ErrIndexInputsChanged) {
-			return results, err
-		}
-		if attempt == indexAttempts {
-			return nil, fmt.Errorf("index inputs changed in %d consecutive attempts: %w", indexAttempts, err)
-		}
+	results, err := indexer.IndexModules(ctx, options)
+	if errors.Is(err, ErrIndexInputsChanged) {
 		memo.forget()
-		warn("attempt %d: %v; indexing again", attempt, err)
 	}
+	return results, err
 }
 
 // indexStep runs index as a step of the task run in ctx, so work a module does on the way, such as a

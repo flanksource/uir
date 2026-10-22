@@ -4,12 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/storage"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"golang.org/x/tools/go/packages"
 	"gorm.io/gorm"
 )
 
@@ -422,6 +424,41 @@ var _ = Describe("typed extraction", func() {
 			Expect(err).To(MatchError(ErrIndexInputsChanged))
 			Expect(tableCounts(database)).To(Equal(before))
 			Expect(countRows(database, &storage.Symbol{}, "name = ?", "Half")).To(BeZero())
+		},
+		Entry("SQLite", indexerSQLiteOptions),
+		Entry("PostgreSQL", indexerPostgresOptions),
+	)
+
+	DescribeTable("retries a module task whose inputs changed while it indexed and publishes the changed source",
+		func(ctx SpecContext, options func() storage.DBOptions) {
+			saved := indexRetryConfig
+			indexRetryConfig.BaseDelay = 10 * time.Millisecond
+			DeferCleanup(func() { indexRetryConfig = saved })
+			database := openIndexerDB(ctx, options())
+			workspace := canonicalTempDir()
+			writeLedgerModule(workspace)
+			engine, err := New(database)
+			Expect(err).ToNot(HaveOccurred())
+			half := "func Half(a Amount) Amount { return Amount{Cents: a.Cents / 2, Currency: a.Currency} }\n"
+			var loads atomic.Int32
+			engine.loadPackages = func(config *packages.Config, patterns ...string) ([]*packages.Package, error) {
+				loaded, err := packages.Load(config, patterns...)
+				if loads.Add(1) == 1 {
+					writeFile(filepath.Join(workspace, "money", "money.go"), moneySource(moneyAmount, moneyAdd, moneyScale, moneyUnit, moneyZero, half))
+				}
+				return loaded, err
+			}
+
+			run, err := StartModulesTask(ctx, engine, []ModuleOptions{{Path: workspace, Reason: storage.ReasonAdd}})
+			Expect(err).ToNot(HaveOccurred())
+			results, err := run.Wait(ctx)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(loads.Load()).To(Equal(int32(2)), "the first attempt saw the old source, so the task ran again")
+			Expect(loadSnapshot(database, results[0].SnapshotID).TaskRunID).ToNot(BeNil(), "a task-run publication records its run")
+			Expect(countRows(database, &storage.Symbol{}, "name = ?", "Half")).To(Equal(int64(1)), "the published snapshot is of the rewritten source")
+			tasks, _ := runTasks(run.ID())
+			Expect(tasks).To(ContainElement(HaveField("Logs", ContainElement(HaveField("Message", ContainSubstring("Attempt 1 failed, retrying"))))))
 		},
 		Entry("SQLite", indexerSQLiteOptions),
 		Entry("PostgreSQL", indexerPostgresOptions),
