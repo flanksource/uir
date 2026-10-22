@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
@@ -144,8 +145,14 @@ var _ = Describe("root-level module commands", func() {
 			HaveField("Kind", "method"), HaveField("Owner", "Store"), HaveField("Name", "Save"), HaveField("Visibility", "exported"),
 			HaveField("ModuleKey", referencesRoot), HaveField("PackagePath", referencesRoot+"/store"),
 		)))
-		Expect(result.Coverage).To(ConsistOf(query.ModuleCoverage{
-			RootKey: referencesRoot, Location: match.Location, SnapshotID: match.SnapshotID, PackagePath: referencesRoot + "/broken", Coverage: "partial", Diagnostics: 1,
+		Expect(result.Coverage).To(HaveLen(1))
+		coverage := result.Coverage[0]
+		warnings, err := indexer.CoverageViolations(coverage.Location, coverage.Diagnostics)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(warnings).To(ConsistOf(HaveField("Rule.Method", indexer.RuleCoverage)))
+		coverage.Diagnostics = nil
+		Expect(coverage).To(Equal(query.ModuleCoverage{
+			RootKey: referencesRoot, Location: match.Location, SnapshotID: match.SnapshotID, PackagePath: referencesRoot + "/broken", Coverage: "partial",
 		}))
 		Expect(result.Stages).To(ContainElement(query.ResolutionStage{Name: "coverage", Value: "incomplete: 1 package is not fully indexed (1 partial)"}))
 	})
