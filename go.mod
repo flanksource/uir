@@ -4,15 +4,15 @@ go 1.26.1
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
-	github.com/flanksource/clicky v1.21.80
+	github.com/flanksource/clicky v1.21.82
 	github.com/flanksource/commons v1.60.1
 	github.com/flanksource/commons-db v0.1.61
 	github.com/flanksource/commons-db/cmd/query v0.1.61
 	github.com/flanksource/gavel v0.0.56
-	github.com/flanksource/sqlglot-go v1.0.3
+	github.com/flanksource/sqlglot-go v1.0.4
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
-	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936
+	github.com/google/pprof v0.0.0-20260507013755-92041b743c96
 	github.com/google/uuid v1.6.1-0.20241114170450-2d3c2a9cc518
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
@@ -23,7 +23,6 @@ require (
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/exp v0.0.0-20260527015227-08cc5374adb3
 	golang.org/x/mod v0.37.0
-	golang.org/x/term v0.44.0
 	golang.org/x/tools v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.31.2
@@ -147,8 +146,8 @@ require (
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
 	github.com/firebase/genkit/go v1.13.1 // indirect
 	github.com/flanksource/captain v0.0.70-0.20261014132911-cc3d9c2d4798 // indirect
-	github.com/flanksource/clicky/aichat v1.21.77 // indirect
-	github.com/flanksource/clicky/valkey v1.21.66 // indirect
+	github.com/flanksource/clicky/aichat v1.21.82 // indirect
+	github.com/flanksource/clicky/valkey v1.21.82 // indirect
 	github.com/flanksource/gomplate/v3 v3.24.90 // indirect
 	github.com/flanksource/is-healthy v1.0.92 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
@@ -287,7 +286,7 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/sftp v1.13.10 // indirect
-	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
+	github.com/planetscale/vtprotobuf v0.6.1-0.20250313105119-ba97887b0a25 // indirect
 	github.com/playwright-community/playwright-go v0.5700.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/pointlander/compress v1.1.1-0.20190518213731-ff44bd196cc3 // indirect
@@ -377,6 +376,7 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
+	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
@@ -393,6 +393,7 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
+	gorm.io/driver/sqlserver v1.6.4 // indirect
 	k8s.io/api v0.36.2 // indirect
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
 	k8s.io/apimachinery v0.36.2 // indirect
