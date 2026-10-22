@@ -18,6 +18,8 @@ type Request struct {
 
 func (options Options) Validate() error {
 	switch {
+	case options.All && (options.Changed || options.Staged || options.Snapshot != ""):
+		return errors.New("--all cannot be combined with --changed, --staged or --snapshot")
 	case options.Changed && options.Staged:
 		return errors.New("--changed and --staged cannot be combined")
 	case options.Revision != "" && !options.Changed:
@@ -61,6 +63,10 @@ func Prepare(ctx context.Context, directory, explicit string, options Options) (
 		return request, err
 	}
 	request.Options.WorkDir = request.Config.Root
+	request.Options.Directory = directory
+	if explicit != "" {
+		request.Options.Directory = request.Config.Root
+	}
 	if request.Options.Source != nil {
 		info := request.Options.Source.Info()
 		relative, err := filepath.Rel(info.Dir, request.Config.Root)

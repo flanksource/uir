@@ -27,6 +27,9 @@ var _ = Describe("Git-scoped lint command", func() {
 		Entry("historical no-index", []string{"--changed", "HEAD", "--no-index"}, "--no-index cannot"),
 		Entry("staged no-index", []string{"--staged", "--no-index"}, "--no-index cannot"),
 		Entry("snapshot selector", []string{"--changed", "--snapshot", "some-id"}, "--snapshot cannot"),
+		Entry("all changed", []string{"--all", "--changed"}, "--all cannot"),
+		Entry("all staged", []string{"--all", "--staged"}, "--all cannot"),
+		Entry("all snapshot", []string{"--all", "--snapshot", "some-id"}, "--all cannot"),
 	)
 
 	It("renders filtered staged findings and their groups as JSON and applies the final verdict", func(ctx SpecContext) {
