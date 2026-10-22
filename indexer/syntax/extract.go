@@ -28,6 +28,7 @@ type File struct {
 	fileSet     *token.FileSet
 	content     []byte
 	bindings    Bindings
+	inits       int
 }
 
 // Node is one extracted declaration: its diff facts, explorer projection, and UIR node.
@@ -77,6 +78,9 @@ func Extract(pathKey, packagePath string, content []byte) (File, error) {
 		switch declaration := declaration.(type) {
 		case *ast.GenDecl:
 			if err := indexed.addTypes(pathKey, declaration); err != nil {
+				return File{}, err
+			}
+			if err := indexed.addInterfaceDeclarations(pathKey, declaration); err != nil {
 				return File{}, err
 			}
 		case *ast.FuncDecl:
@@ -192,6 +196,10 @@ func (indexed *File) addFunction(pathKey string, declaration *ast.FuncDecl, impo
 		Package: indexed.PackagePath, Method: declaration.Name.Name,
 		Signature: functionSignature(indexed.fileSet, declaration.Type), NodeType: uir.NodeTypeMethod,
 	}
+	if declaration.Recv == nil && declaration.Name.Name == "init" {
+		identifier.Signature = fmt.Sprintf("%s#%d", path.Base(pathKey), indexed.inits)
+		indexed.inits++
+	}
 	if declaration.Recv != nil && len(declaration.Recv.List) > 0 {
 		identifier.Type = receiverName(declaration.Recv.List[0].Type)
 		if identifier.Type == "" {
@@ -294,6 +302,13 @@ func newNode(node uir.Node, slot string, ordinal int, parent string, facts Decla
 		Declaration: facts, Identifier: node.GetIdentifier(), ParentIdentity: parent, ChildSlot: slot,
 		Ordinal: ordinal, Payload: storage.JSON(payload), SemanticHash: node.Hash(), node: node,
 	}
+}
+
+// PackageInit reports whether identifier names a Go func init. Go lets a file declare any number of
+// them, so the signature slot of one holds its overload discriminator, "<file base name>#<n>" with n
+// its 0-based position among the file's inits, instead of a signature.
+func PackageInit(identifier uir.Identifier) bool {
+	return identifier.NodeType == uir.NodeTypeMethod && identifier.Type == "" && identifier.Method == "init"
 }
 
 func functionSignature(fileSet *token.FileSet, function *ast.FuncType) string {

@@ -219,6 +219,9 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 			for _, result := range results {
 				progress.Infof("root=%s location=%s snapshot=%s files=%d parsed=%d reused=%d unchanged=%t in %s",
 					result.RootKey, result.Location, result.SnapshotID, result.Files, result.ParsedFiles, result.ReusedFiles, result.Unchanged, time.Since(started).Round(time.Millisecond))
+				for _, warning := range result.Warnings {
+					progress.Warnf("%s:%d:%d %s %s", warning.File, warning.Line, warning.Column, warning.Rule.Method, *warning.Message)
+				}
 			}
 			return results, nil
 		}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), noTaskRetries)
