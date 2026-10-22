@@ -77,6 +77,9 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	}
 	if unchanged {
 		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, len(discovered.Files), true
+		if result.Warnings, err = snapshotWarnings(base.snapshot.Diagnostics); err != nil {
+			return ModuleResult{}, storage.ModuleLocation{}, err
+		}
 		return result, location, createSiblingShapes(ctx, database, base.snapshot, extraction.siblingShapes)
 	}
 	snapshot, err := publishSnapshot(ctx, database, snapshotPublication{
@@ -123,7 +126,7 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 		if membership.current, err = sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, membership.previous); err != nil {
 			return err
 		}
-		handles, err = publishDocuments(ctx, database, publication, &membership, result)
+		handles, err = publishDocuments(ctx, database, &publication, &membership, result)
 		PhaseCount(ctx, "parsed", int64(result.ParsedFiles))
 		PhaseCount(ctx, "reused", int64(result.ReusedFiles))
 		return err
@@ -133,6 +136,9 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	snapshot := publication.snapshot()
 	snapshot.TaskRunID = taskRunID(ctx)
 	if err := storage.CreateSnapshot(ctx, database, &snapshot); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
+	if result.Warnings, err = snapshotWarnings(snapshot.Diagnostics); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	if err := publishBlobsAndEdges(ctx, database, publication, snapshot); err != nil {
@@ -244,8 +250,11 @@ func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication sna
 // publishBlobsAndEdges stores the bytes of a snapshot that is not a clean commit, and its dependency
 // edges, or queues the edges when the caller publishes them once every snapshot of a cycle exists.
 func publishBlobsAndEdges(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot) error {
-	if snapshot.WorktreeState != storage.WorktreeClean {
+	if snapshot.WorktreeState != storage.WorktreeClean || snapshot.AnalysisMode != "" {
 		for _, file := range publication.extraction.root.Files {
+			if file.GitPath != "" || file.retained {
+				continue
+			}
 			blob := storage.SourceBlob{ContentHash: file.ContentHash, Content: file.Content}
 			if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&blob).Error; err != nil {
 				return fmt.Errorf("store source %q of snapshot %s: %w", file.PathKey, snapshot.ID, err)
@@ -269,7 +278,8 @@ func publishBlobsAndEdges(ctx context.Context, database *gorm.DB, publication sn
 func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 	discovered := publication.extraction.root
 	snapshot := storage.ModuleSnapshot{
-		ID: publication.snapshotID, RootID: publication.root.ID, LocationID: publication.location.ID,
+		AnalysisMode: discovered.AnalysisMode,
+		ID:           publication.snapshotID, RootID: publication.root.ID, LocationID: publication.location.ID,
 		Revision: discovered.Revision, GitCommit: discovered.GitCommit, ModuleVersion: discovered.ModuleVersion, WorktreeState: discovered.WorktreeState,
 		ContentSetHash: discovered.ContentSetHash, ConfigurationHash: discovered.ConfigurationHash,
 		ContextHash: publication.extraction.contextHash, Coverage: publication.extraction.coverage,
@@ -286,8 +296,10 @@ func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 		modified := discovered.LastModifiedAt
 		snapshot.LastModifiedAt = &modified
 	}
-	hash := dependencyHash(discovered.Dependencies)
-	snapshot.DependencySetHash = &hash
+	if discovered.AnalysisMode == "" {
+		hash := dependencyHash(discovered.Dependencies)
+		snapshot.DependencySetHash = &hash
+	}
 	if publication.base.snapshot.ID != uuid.Nil {
 		baseID := publication.base.snapshot.ID
 		snapshot.BaseSnapshotID = &baseID

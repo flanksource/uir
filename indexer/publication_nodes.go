@@ -179,24 +179,34 @@ func symbolKind(node uir.Node, owned bool) (string, error) {
 	return kind, nil
 }
 
-// nodeParameterTypes are a callable's parameter types, which tell its overloads apart: each parameter's
-// SQL type, else its field type, else its type reference.
-func nodeParameterTypes(node uir.Node) ([]string, error) {
+// nodeCallableTypes are a callable's parameter and result types, which tell its overloads apart: each
+// one's SQL type, else its field type, else its type reference.
+func nodeCallableTypes(node uir.Node) (parameters, results []string, err error) {
 	method, ok := node.(uir.MethodNode)
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
-	types := make([]string, len(method.Params))
-	for i, param := range method.Params {
+	if parameters, err = fieldTypes(method.Params, "parameter", method.Method); err != nil {
+		return nil, nil, err
+	}
+	if results, err = fieldTypes(method.Returns, "result", method.Method); err != nil {
+		return nil, nil, err
+	}
+	return parameters, results, nil
+}
+
+func fieldTypes(fields uir.ParamsDef, role, method string) ([]string, error) {
+	types := make([]string, len(fields))
+	for i, field := range fields {
 		switch {
-		case param.SQLType != "":
-			types[i] = param.SQLType
-		case param.FieldType != "":
-			types[i] = string(param.FieldType)
-		case param.TypeRef != nil && param.TypeRef.Name != "":
-			types[i] = param.TypeRef.Name
+		case field.SQLType != "":
+			types[i] = field.SQLType
+		case field.FieldType != "":
+			types[i] = string(field.FieldType)
+		case field.TypeRef != nil && field.TypeRef.Name != "":
+			types[i] = field.TypeRef.Name
 		default:
-			return nil, fmt.Errorf("parameter %q of %s has no type", param.Field, method.Method)
+			return nil, fmt.Errorf("%s %d %q of %s has no type", role, i, field.Field, method)
 		}
 	}
 	return types, nil
