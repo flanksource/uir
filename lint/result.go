@@ -21,11 +21,12 @@ type Result struct {
 type groupKey struct{ file, symbol string }
 
 type Group struct {
-	File       string             `json:"file,omitempty"`
-	SymbolID   string             `json:"symbol_id,omitempty"`
-	Symbol     string             `json:"symbol,omitempty"`
-	Violations []models.Violation `json:"violations"`
-	workDir    string
+	DeclarationKey string             `json:"declaration_key,omitempty"`
+	File           string             `json:"file,omitempty"`
+	SymbolID       string             `json:"symbol_id,omitempty"`
+	Symbol         string             `json:"symbol,omitempty"`
+	Violations     []models.Violation `json:"violations"`
+	workDir        string
 }
 
 func (result *Result) addFinding(finding models.Violation, symbol *query.ModuleSymbol) {
@@ -36,16 +37,23 @@ func (result *Result) addFinding(finding models.Violation, symbol *query.ModuleS
 	group := Group{File: finding.File, workDir: result.WorkDir}
 	if result.GroupBy == "symbol" && symbol != nil {
 		group.SymbolID, group.Symbol = symbol.ID, symbol.QueryName
+		group.DeclarationKey = symbol.DeclarationKey
 	}
 	if result.groups == nil {
 		result.groups = map[groupKey]int{}
 	}
 	key := groupKey{file: group.File, symbol: group.SymbolID}
+	if group.DeclarationKey != "" {
+		key.symbol = group.DeclarationKey
+	}
 	position, exists := result.groups[key]
 	if !exists {
 		position = len(result.Groups)
 		result.groups[key] = position
 		result.Groups = append(result.Groups, group)
+	}
+	if group.SymbolID != "" {
+		result.Groups[position].SymbolID = group.SymbolID
 	}
 	result.Groups[position].Violations = append(result.Groups[position].Violations, finding)
 }

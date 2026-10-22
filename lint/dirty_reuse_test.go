@@ -66,7 +66,7 @@ var _ = Describe("Dirty checkout lint reuse", func() {
 			Expect(database.Find(&snapshots).Error).To(Succeed())
 			Expect(snapshots).To(HaveLen(1))
 			if run == 0 {
-				Expect(loads).To(Equal(int64(1)))
+				Expect(loads).To(BeZero(), "metric rules must not load Go packages")
 				firstHead = snapshots[0]
 				Expect(firstHead.WorktreeState).To(Equal(storage.WorktreeDirty))
 			} else {
@@ -81,7 +81,7 @@ var _ = Describe("Dirty checkout lint reuse", func() {
 		Expect(report.Success).To(BeTrue(), report.Error)
 		Expect(report.Violations).NotTo(ContainElement(HaveField("File", sample)))
 		loads, _ := timings.Counter("typecheck", "calls")
-		Expect(loads).To(Equal(int64(1)), "changed source must be loaded")
+		Expect(loads).To(BeZero(), "changed syntax must not require Go package loading")
 		var snapshots []storage.ModuleSnapshot
 		Expect(database.Find(&snapshots).Error).To(Succeed())
 		Expect(snapshots).To(HaveLen(2))
