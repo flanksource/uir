@@ -222,7 +222,7 @@ func legacyMembership(ctx context.Context, database *gorm.DB, snapshot ModuleSna
 	if known, found := memberships[snapshot.ID]; found {
 		return known, nil
 	}
-	sources, err := EffectiveSources(ctx, database, snapshot.ID)
+	sources, err := EffectiveSources(ctx, database, EffectiveSourcesOptions{SnapshotID: snapshot.ID})
 	if err != nil {
 		return nil, err
 	}

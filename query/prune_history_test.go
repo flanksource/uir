@@ -102,7 +102,7 @@ type headState struct {
 
 func readHead(ctx context.Context, database *gorm.DB, head uuid.UUID) headState {
 	GinkgoHelper()
-	sources, err := storage.EffectiveSources(ctx, database, head)
+	sources, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: head})
 	Expect(err).ToNot(HaveOccurred())
 	symbols, err := storage.EffectiveSymbols(ctx, database, head)
 	Expect(err).ToNot(HaveOccurred())
