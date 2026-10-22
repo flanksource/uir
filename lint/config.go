@@ -2,10 +2,10 @@
 package lint
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -39,20 +39,15 @@ type Rule struct {
 }
 
 func Load(path string) (config *Config, err error) {
-	file, err := os.Open(path)
+	data, err := readConfig(path)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, file.Close())
-		if err != nil {
-			config = nil
-		}
-	}()
-	decoder := yaml.NewDecoder(file)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var document struct {
-		Version int `yaml:"version"`
+		Expires string `yaml:"_expires"`
+		Version int    `yaml:"version"`
 		Lint    struct {
 			IncludeTests *bool  `yaml:"include_tests"`
 			Rules        []Rule `yaml:"rules"`
@@ -75,6 +70,9 @@ func Load(path string) (config *Config, err error) {
 		return nil, err
 	}
 	config.Root = filepath.Dir(config.Path)
+	if filepath.Base(config.Root) == ConfigDirectoryName {
+		config.Root = filepath.Dir(config.Root)
+	}
 	if config.Version != 1 {
 		return nil, fmt.Errorf("%s: unsupported version %d", path, config.Version)
 	}
