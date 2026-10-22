@@ -67,10 +67,47 @@ func readGoEnvironmentWithWork(ctx context.Context, directory string, workOff bo
 	environment := goEnvironment{Variant: buildVariant{
 		GOOS: values["GOOS"], GOARCH: values["GOARCH"], CGOEnabled: values["CGO_ENABLED"], GoVersion: values["GOVERSION"], GoFlags: values["GOFLAGS"],
 	}}
-	if workFile := values["GOWORK"]; workFile != "" && workFile != "off" {
-		environment.WorkFile = workFile
+	workFile := values["GOWORK"]
+	if workFile == "" || workFile == "off" {
+		return environment, nil
 	}
+	used, err := workspaceUsesDirectory(workFile, directory)
+	if err != nil {
+		return goEnvironment{}, fmt.Errorf("read go env in %q: %w", directory, err)
+	}
+	if !used {
+		// The toolchain refuses to load a module its enclosing go.work does not use, so it builds alone.
+		environment, err := readGoEnvironmentWithWork(ctx, directory, true)
+		environment.Variant.GoWorkOff = true
+		return environment, err
+	}
+	environment.WorkFile = workFile
 	return environment, nil
+}
+
+// workspaceUsesDirectory reports whether a use of the go.work at workFile names the module at directory.
+func workspaceUsesDirectory(workFile, directory string) (bool, error) {
+	workspace, _, err := readWorkspace(workFile)
+	if err != nil {
+		return false, err
+	}
+	module, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		return false, fmt.Errorf("canonicalize module directory %q: %w", directory, err)
+	}
+	for _, use := range workspace.Use {
+		used, err := filepath.EvalSymlinks(rootedPath(filepath.Dir(workFile), use.Path))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("canonicalize go.work use %q: %w", use.Path, err)
+		}
+		if used == module {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // readManifests hashes the module's go.mod and go.sum under their module-relative paths and the
