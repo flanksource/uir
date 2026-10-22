@@ -319,8 +319,12 @@ github.com/flanksource/commons v1.60.1 h1:wSSZif0P7XvGLDq7/R4q5Ip3tgmBIg//eMo9dr
 github.com/flanksource/commons v1.60.1/go.mod h1:S39cViO2i/cx6qufygtG4kGD8qLNvS6abBuzlty+mMk=
 github.com/flanksource/commons-db v0.1.59 h1:eL/ZSwWKbRNgCwvK4qemEeAylc4JeY0GsM8pikgSjFI=
 github.com/flanksource/commons-db v0.1.59/go.mod h1:/vaQ8vYZAC4YxM47PxmexoINrBmhiBEonLlmRtJRb4Y=
+github.com/flanksource/commons-db v0.1.61 h1:1SPMLToLUMVCPgNVsyqpQEx+o+iJFe/PtYT2Ng7uIjA=
+github.com/flanksource/commons-db v0.1.61/go.mod h1:GO+KjECHjb4tUWoVnI1saqCMW517XtfsRaLkGKHpCNA=
 github.com/flanksource/commons-db/cmd/query v0.1.58 h1:hSHT5EG8lOvcXcd7Nd4PYdguOfURfVzEWD8Gxv2xYIk=
 github.com/flanksource/commons-db/cmd/query v0.1.58/go.mod h1:qK1NE/yGQqYcDhpAdGMHeXAOECvv/VVJVCQdYCejVRE=
+github.com/flanksource/commons-db/cmd/query v0.1.61 h1:FrO/tpQiKiq55Ef0c81t/Apn0+891oIkFoSNiwuHOUY=
+github.com/flanksource/commons-db/cmd/query v0.1.61/go.mod h1:yv0MFHjlQ10egPx5ZDGNSvCEmyAQ4P1bfwzenauWKZw=
 github.com/flanksource/deps v1.0.46 h1:+JCAghe8ELLm+xnMAk4AuTkavcAxd4IyvYukyk/5ypc=
 github.com/flanksource/deps v1.0.46/go.mod h1:z7SozLaUD4TLemXxJytW67wGjCeQVLm2V10tdSg3pA4=
 github.com/flanksource/gavel v0.0.56 h1:i0JZGNkwUoiuRBgnnrRV8RPa2Kxr0KMSpGiKPQlGmQM=

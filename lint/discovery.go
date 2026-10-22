@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,14 +36,30 @@ func Discover(options DiscoveryOptions) (*Config, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no %s configuration inside %s or its configured ancestors", ConfigName, directory)
 	}
-	config := &Config{Version: 1, Root: root}
+	config := &Config{Version: 1, Root: directory}
+	if root != "" {
+		config.Root = root
+	}
+	home := ""
+	if options.Boundary == "" {
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+	}
 	positions := map[string]int{}
 	for _, path := range paths {
 		layer, err := Load(path)
+		if errors.Is(err, errExpiredConfig) {
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		config.Path = layer.Path
+		if layer.Root != home && (root == "" || insideSource(layer.Root, root)) {
+			config.Root = layer.Root
+		}
 		if layer.includeTestsSet {
 			config.Lint.IncludeTests = layer.Lint.IncludeTests
 		}
@@ -55,19 +72,17 @@ func Discover(options DiscoveryOptions) (*Config, error) {
 			}
 		}
 	}
+	if config.Path == "" {
+		return nil, fmt.Errorf("no unexpired lint configuration inside %s or its configured ancestors", directory)
+	}
 	return config, nil
 }
 
 func configurationPaths(directory, boundary string) ([]string, string, error) {
-	var paths []string
+	var directories []string
 	gitRoot := boundary
 	for current := directory; ; current = filepath.Dir(current) {
-		path := filepath.Join(current, ConfigName)
-		if _, err := os.Stat(path); err == nil {
-			paths = append(paths, path)
-		} else if !os.IsNotExist(err) {
-			return nil, "", err
-		}
+		directories = append(directories, current)
 		if gitRoot == "" {
 			if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
 				gitRoot = current
@@ -79,30 +94,22 @@ func configurationPaths(directory, boundary string) ([]string, string, error) {
 			break
 		}
 	}
-	root := directory
-	if gitRoot != "" {
-		root = gitRoot
-	}
-	if len(paths) > 0 && (gitRoot == "" || insideSource(filepath.Dir(paths[0]), gitRoot)) {
-		root = filepath.Dir(paths[0])
-	}
-	slices.Reverse(paths)
+	slices.Reverse(directories)
 	if boundary == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, "", err
 		}
-		path := filepath.Join(home, ConfigName)
-		// Home is always the base layer, including when it is also an ancestor.
-		paths = slices.DeleteFunc(paths, func(candidate string) bool { return candidate == path })
-		if _, err := os.Stat(path); err == nil {
-			paths = append([]string{path}, paths...)
-			if root == home {
-				root = directory
-			}
-		} else if !os.IsNotExist(err) {
+		directories = slices.DeleteFunc(directories, func(candidate string) bool { return candidate == home })
+		directories = append([]string{home}, directories...)
+	}
+	var paths []string
+	for _, current := range directories {
+		layer, err := directoryConfigurations(current)
+		if err != nil {
 			return nil, "", err
 		}
+		paths = append(paths, layer...)
 	}
-	return paths, root, nil
+	return paths, gitRoot, nil
 }
