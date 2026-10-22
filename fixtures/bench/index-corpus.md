@@ -20,7 +20,7 @@ Gavel ignores a missing dotenv file, and an unset `UIR_DSN` would silently index
 
 ```bash
 test -n "$UIR_DSN" || { echo 'UIR_DSN is unset: run make fixture-corpus to write .tmp/uir-corpus.env' >&2; exit 78; }
-env -u GOWORK .bin/uir --format json add ../commons --no-workspace-uses
+env -u GOWORK .bin/uir --format json add ../commons
 ```
 
 - cel: dyn(json).exists(m, m.root_key == "github.com/flanksource/commons" && m.files > 0)
@@ -29,7 +29,7 @@ env -u GOWORK .bin/uir --format json add ../commons --no-workspace-uses
 
 ```bash
 test -n "$UIR_DSN" || { echo 'UIR_DSN is unset: run make fixture-corpus to write .tmp/uir-corpus.env' >&2; exit 78; }
-env -u GOWORK .bin/uir --format json add ../clicky --no-workspace-uses
+env -u GOWORK .bin/uir --format json add ../clicky
 ```
 
 - cel: dyn(json).exists(m, m.root_key == "github.com/flanksource/clicky" && m.files > 0)
@@ -38,7 +38,7 @@ env -u GOWORK .bin/uir --format json add ../clicky --no-workspace-uses
 
 ```bash
 test -n "$UIR_DSN" || { echo 'UIR_DSN is unset: run make fixture-corpus to write .tmp/uir-corpus.env' >&2; exit 78; }
-env -u GOWORK .bin/uir --format json add ../commons-db --no-workspace-uses
+env -u GOWORK .bin/uir --format json add ../commons-db
 ```
 
 - cel: dyn(json).exists(m, m.root_key == "github.com/flanksource/commons-db" && m.files > 0)
@@ -47,7 +47,7 @@ env -u GOWORK .bin/uir --format json add ../commons-db --no-workspace-uses
 
 ```bash
 test -n "$UIR_DSN" || { echo 'UIR_DSN is unset: run make fixture-corpus to write .tmp/uir-corpus.env' >&2; exit 78; }
-env -u GOWORK .bin/uir --format json add ../gavel --no-workspace-uses
+env -u GOWORK .bin/uir --format json add ../gavel
 ```
 
 - cel: dyn(json).exists(m, m.root_key == "github.com/flanksource/gavel" && m.files > 0)
@@ -56,7 +56,7 @@ env -u GOWORK .bin/uir --format json add ../gavel --no-workspace-uses
 
 ```bash
 test -n "$UIR_DSN" || { echo 'UIR_DSN is unset: run make fixture-corpus to write .tmp/uir-corpus.env' >&2; exit 78; }
-env -u GOWORK .bin/uir --format json add ../captain --no-workspace-uses
+env -u GOWORK .bin/uir --format json add ../captain
 ```
 
 - cel: dyn(json).exists(m, m.root_key == "github.com/flanksource/captain" && m.files > 0)

@@ -488,7 +488,7 @@ function isGraphResult(value: unknown): value is ModuleGraphResult {
 }
 
 export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexRun> {
-  return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, "no-workspace-uses": true }) });
+  return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests }) });
 }
 
 export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexRun> {
