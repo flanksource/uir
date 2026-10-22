@@ -214,7 +214,7 @@ func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, v
 	var snapshots []storage.ModuleSnapshot
 	if err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
 		Joins("JOIN modules AS root ON root.id = snapshot.root_id").
-		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ?", modulePath, version, storage.WorktreeClean).
+		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ? AND snapshot.analysis_mode = ''", modulePath, version, storage.WorktreeClean).
 		Order("snapshot.completed_at DESC").Find(&snapshots).Error; err != nil {
 		return storage.ModuleSnapshot{}, false, fmt.Errorf("find indexed version %s@%s: %w", modulePath, version, err)
 	}

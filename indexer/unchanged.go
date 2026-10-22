@@ -152,6 +152,9 @@ func owningModule[V any](modules map[string]V, importPath string) string {
 func diskModules(root discoveredRoot) (map[string]string, error) {
 	modules := map[string]string{}
 	goMod := filepath.Join(root.LocalPath, "go.mod")
+	if root.ModFile != "" {
+		goMod = root.ModFile
+	}
 	content, err := os.ReadFile(goMod)
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", goMod, err)

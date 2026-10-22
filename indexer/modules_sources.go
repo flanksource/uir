@@ -17,21 +17,24 @@ func sourceRevisions(ctx context.Context, database *gorm.DB, rootID uuid.UUID, f
 	current := make(map[string]storage.SourceRevision, len(files))
 	for _, file := range files {
 		prior := previous[file.PathKey]
-		if prior.ID != uuid.Nil && prior.ContentHash == file.ContentHash && prior.PackagePath == file.PackagePath {
+		if prior.ID != uuid.Nil && prior.ContentHash == file.ContentHash && prior.PackagePath == file.PackagePath && prior.GitPath == file.GitPath {
 			current[file.PathKey] = prior
 			continue
 		}
+		if file.retained {
+			return nil, fmt.Errorf("retained source %q no longer matches its base revision", file.PathKey)
+		}
 		revision := storage.SourceRevision{
 			ID: uuid.New(), RootID: rootID, PathKey: file.PathKey, ContentHash: file.ContentHash,
-			PackagePath: file.PackagePath, SizeBytes: file.SizeBytes,
+			PackagePath: file.PackagePath, SizeBytes: file.SizeBytes, GitPath: file.GitPath,
 		}
 		if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&revision).Error; err != nil {
 			return nil, fmt.Errorf("create source revision %q: %w", file.PathKey, err)
 		}
 		revision = storage.SourceRevision{}
 		if err := database.WithContext(ctx).Where(
-			"root_id = ? AND path_key = ? AND content_hash = ? AND package_path = ?",
-			rootID, file.PathKey, file.ContentHash, file.PackagePath,
+			"root_id = ? AND path_key = ? AND content_hash = ? AND package_path = ? AND git_path = ?",
+			rootID, file.PathKey, file.ContentHash, file.PackagePath, file.GitPath,
 		).First(&revision).Error; err != nil {
 			return nil, fmt.Errorf("load published source revision %q: %w", file.PathKey, err)
 		}
@@ -39,6 +42,9 @@ func sourceRevisions(ctx context.Context, database *gorm.DB, rootID uuid.UUID, f
 	}
 	metrics := make([]storage.SourceMetrics, 0, len(files))
 	for _, file := range files {
+		if file.retained {
+			continue
+		}
 		metrics = append(metrics, storage.SourceMetrics{SourceRevisionID: current[file.PathKey].ID, Version: storage.MetricsVersion, Lines: physicalLineCount(file.Content)})
 	}
 	return current, storage.StoreSourceMetrics(ctx, database, metrics)
