@@ -24,11 +24,13 @@ type RecordTable struct {
 	nodeBase
 	Description string `json:"description,omitempty"`
 	// RecordTypeTable or RecordTypeView.
-	RecordType  RecordType         `json:"recordType,omitempty"`
-	Columns     []RecordColumn     `json:"columns,omitempty"`
-	PrimaryKey  []string           `json:"primaryKey,omitempty"`
-	Indexes     []RecordIndex      `json:"indexes,omitempty"`
-	ForeignKeys []RecordForeignKey `json:"foreignKeys,omitempty"`
+	RecordType      RecordType         `json:"recordType,omitempty"`
+	Columns         []RecordColumn     `json:"columns,omitempty"`
+	PrimaryKey      []string           `json:"primaryKey,omitempty"`
+	Indexes         []RecordIndex      `json:"indexes,omitempty"`
+	ForeignKeys     []RecordForeignKey `json:"foreignKeys,omitempty"`
+	Checks          []SQLCheck         `json:"checks,omitempty"`
+	SQLDependencies []SQLDependency    `json:"sqlDependencies,omitempty"`
 	// RowCount is the catalogue's estimate, nil when it was not asked for. It is a
 	// statistic, so no fingerprint layer reads it.
 	RowCount *int64 `json:"rowCount,omitempty"`
@@ -69,10 +71,13 @@ type RecordColumn struct {
 	AutoIncrement bool `json:"autoIncrement,omitempty"`
 	Unique        bool `json:"unique,omitempty"`
 	// MaxLength is the character width; -1 means unbounded ("max"/text).
-	MaxLength    *int        `json:"maxLength,omitempty"`
-	Precision    *int        `json:"precision,omitempty"`
-	Scale        *int        `json:"scale,omitempty"`
-	DefaultValue *TypedValue `json:"defaultValue,omitempty"`
+	MaxLength    *int         `json:"maxLength,omitempty"`
+	Precision    *int         `json:"precision,omitempty"`
+	Scale        *int         `json:"scale,omitempty"`
+	DefaultValue *TypedValue  `json:"defaultValue,omitempty"`
+	Identity     *SQLIdentity `json:"identity,omitempty"`
+	SQLDefault   *SQLDefault  `json:"sqlDefault,omitempty"`
+	Collation    string       `json:"collation,omitempty"`
 	// Enum is the closed value set when the dialect declares one.
 	Enum []string `json:"enum,omitempty"`
 }
@@ -91,7 +96,9 @@ type RecordIndex struct {
 	// IndexType is the dialect's own kind, e.g. "BTREE", "CLUSTERED".
 	IndexType string `json:"indexType,omitempty"`
 	// Condition is the filter predicate of a partial/filtered index.
-	Condition string `json:"condition,omitempty"`
+	Condition  string   `json:"condition,omitempty"`
+	Descending []string `json:"descending,omitempty"`
+	Constraint bool     `json:"constraint,omitempty"`
 }
 
 // RecordForeignKey is a foreign-key constraint on a RecordTable, kept as

@@ -2276,6 +2276,12 @@
         "sourceCode": {
           "$ref": "#/$defs/SourceCode"
         },
+        "sqlDependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLDependency"
+          }
+        },
         "type": {
           "description": "The type, class, table, API group the node belongs to",
           "type": "string"
@@ -2854,6 +2860,9 @@
         "autoIncrement": {
           "type": "boolean"
         },
+        "collation": {
+          "type": "string"
+        },
         "comments": {
           "type": "array",
           "items": {
@@ -2880,6 +2889,9 @@
         "id": {
           "type": "string",
           "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/SQLIdentity"
         },
         "label": {
           "type": "string"
@@ -2934,6 +2946,9 @@
         },
         "sourceCode": {
           "$ref": "#/$defs/SourceCode"
+        },
+        "sqlDefault": {
+          "$ref": "#/$defs/SQLDefault"
         },
         "sqlType": {
           "description": "SQLType is the dialect type verbatim, e.g. \"uniqueidentifier\", \"nvarchar\", \"datetime2\".",
@@ -3191,6 +3206,15 @@
           "description": "Condition is the filter predicate of a partial/filtered index.",
           "type": "string"
         },
+        "constraint": {
+          "type": "boolean"
+        },
+        "descending": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "field": {
           "type": "string"
         },
@@ -3371,6 +3395,12 @@
             "$ref": "#/$defs/Annotation"
           }
         },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLCheck"
+          }
+        },
         "columns": {
           "type": "array",
           "items": {
@@ -3453,6 +3483,12 @@
         },
         "sourceCode": {
           "$ref": "#/$defs/SourceCode"
+        },
+        "sqlDependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLDependency"
+          }
         },
         "triggers": {
           "description": "Triggers defined against the table. Each carries its event and timing in Properties under TriggerEventProperty and TriggerTimingProperty, and its lowered body in Body.",
@@ -3697,6 +3733,83 @@
         },
         "value": {
           "$ref": "#/$defs/ExprStmt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLCatalog": {
+      "description": "SQLCatalog records the inspection contract. A missing or older version cannot establish that absent database members are safe to remove.",
+      "type": "object",
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "dialect": {
+          "type": "string"
+        },
+        "schemas": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLCheck": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLDefault": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLDependency": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLIdentity": {
+      "type": "object",
+      "properties": {
+        "increment": {
+          "type": "integer"
+        },
+        "seed": {
+          "type": "integer"
         }
       },
       "additionalProperties": false
@@ -5050,6 +5163,9 @@
           "items": {
             "$ref": "#/$defs/ASTRecord"
           }
+        },
+        "sqlCatalog": {
+          "$ref": "#/$defs/SQLCatalog"
         },
         "tables": {
           "type": "array",
