@@ -10,9 +10,13 @@ import (
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-// DocumentFormatVersion versions documents.content. Format 8 adds resolved variable types;
+// DocumentFormatVersion versions documents.content. Format 9 gives every symbol of a document its own
+// key (each Go func init is keyed by its discriminator); format 8 adds resolved variable types;
 // format 6 moved implements into snapshot-level facts (EffectiveImplements).
-const DocumentFormatVersion = 8
+const DocumentFormatVersion = 9
+
+// uniqueKeysFormat is the first document format whose symbol keys are unique within a document.
+const uniqueKeysFormat = 9
 
 // snapshotImplementsFormat is the first document format whose symbols carry no implements entries.
 const snapshotImplementsFormat = 6
@@ -181,7 +185,12 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 			return fmt.Errorf("diagnostic %d: %w", index, err)
 		}
 	}
-	for _, symbol := range content.Symbols {
+	declared := make(map[string]int, len(content.Symbols))
+	for index, symbol := range content.Symbols {
+		if first, found := declared[symbol.Key]; found && content.Version >= uniqueKeysFormat {
+			return fmt.Errorf("symbol %d: key is already declared by symbol %d (%s)", index, first, symbol.Key)
+		}
+		declared[symbol.Key] = index
 		if symbol.DeclaredType != nil && (content.Version < 8 || symbol.Kind != "var" || symbol.ID == nil || *symbol.DeclaredType == "" || document.Coverage == CoverageSyntax) {
 			return fmt.Errorf("symbol %s: declared_type requires a proven variable, a nonempty canonical type and document format 8 or newer", symbol.Key)
 		}

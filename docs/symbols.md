@@ -36,20 +36,22 @@ UIR has four related, non-interchangeable forms: a structured `Identifier`, rend
 | `IdentityKey()` | Versioned encoding of every structured identifier component; stable lookup key within a logical module root. |
 | `semantic_hash` | Hash of semantic node content for change/diff detection, not identity. |
 
-`IdentityKey()` version 1 is `v1:` followed by a compact JSON array in this order: node type, module, package, type, method, field, signature. Empty components remain, so punctuation inside one component cannot collide with separators elsewhere:
+`IdentityKey()` version 1 is `v1:` followed by a compact JSON array in this order: node type, module, package, type, method, field, signature. Empty components remain, so punctuation inside one component cannot collide with separators elsewhere. The Go extractor leaves the module empty and writes a function's signature as gofmt prints its type without the `func` keyword, so `func (s *InvoiceService) Approve(id InvoiceID) error` is keyed:
 
 ```text
-v1:["method","example.org/service","example.org/service/invoices","InvoiceService","Approve","","(InvoiceID)->error"]
+v1:["method","","example.org/service/invoices","InvoiceService","Approve","","(id InvoiceID) error"]
 ```
+
+Go lets a package declare `func init()` any number of times, several per file, so the signature slot of an `init` holds its overload discriminator instead: the file's base name and the `init`'s 0-based position among that file's `init`s, for example `v1:["method","","example.org/service/invoices","","init","","ast.go#1"]` for the second `init` of `ast.go`. Nothing can reference an `init`, so renaming or reordering files changing the key is harmless.
 
 A module root's `root_key` comes from `go.mod`. The same identity key can occur in two roots, two source files, or two checkouts. The current `SourceRevision` is keyed by root, path, content hash, and package path, and its document by root, path, and package input hash. Each document symbol entry carries the identity key as `key` and retains the structured identifier, parent identity, slot/order, payload, semantic hash, optional field detail, and name and extent ranges. The browser's node ID combines revision ID and identity key for selection; it is not a global declaration UUID or an SQL foreign key.
 
 ## Canonical symbols
 
-When a package type-checks, its documents are typed (`indexed`, or `partial` when the package has type errors) and every declaration and every identifier use that names a package-level object carries a canonical symbol id. The id is the SHA-256 of a length-delimited encoding of `(identity_version, module_key, package_path, kind, owner_id, name, ordered parameter types)`, stored as `symbols.canonical_key`; for example `Store.Save(ctx context.Context, inv Invoice) error` in `example.org/service/invoices` encodes as:
+When a package type-checks, its documents are typed (`indexed`, or `partial` when the package has type errors) and every declaration and every identifier use that names a package-level object carries a canonical symbol id. The id is the SHA-256 of a length-delimited encoding of `(identity_version, module_key, package_path, kind, owner_id, name, ordered parameter types, ordered result types, discriminator)`, stored as `symbols.canonical_key`; for example `Store.Save(ctx context.Context, inv Invoice) error` in `example.org/service/invoices` encodes as:
 
 ```text
-10:uir-symbol,1:1,19:example.org/service,28:example.org/service/invoices,6:method,64:<id of Store>,4:Save,1:2,15:context.Context,36:example.org/service/invoices.Invoice,
+10:uir-symbol,1:2,19:example.org/service,28:example.org/service/invoices,6:method,64:<id of Store>,4:Save,1:2,15:context.Context,36:example.org/service/invoices.Invoice,1:0,0:,
 ```
 
 | Part | Value |
@@ -58,6 +60,8 @@ When a package type-checks, its documents are typed (`indexed`, or `partial` whe
 | `kind` | `package`, `type`, `func`, `method`, `field`, `var`, `const`, or `builtin` (universe objects such as `len`, `int`, `error`, `nil`). |
 | `owner_id` | A method's receiver type or interface; a field's struct type, or the field or variable whose literal struct type declares it. |
 | Parameter types | Fully qualified named types, composite types spelled out, type parameters by ordinal (`$0`), the variadic parameter as `...T`. Parameter names, results, and field types are not identity. |
+| Result types | Empty for Go, which has no overloading, so a result change keeps the id. A non-Go producer's callables carry their return types here, so overloads that differ only in what they return stay apart. |
+| Discriminator | Tells apart declarations a language lets a scope repeat with everything else equal. Go sets it only for `func init`, to the same `<file>#<n>` its identity key carries. |
 
 `indexer.SymbolID(indexer.Identity{...})` computes an id and `Identity.CanonicalKey()` its key; Go extraction uses them, and a [non-Go producer](module-indexing.md#publishing-from-a-non-go-producer) calls them for the ids its documents carry, with its root key as `module_key` and its own kinds.
 
