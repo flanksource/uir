@@ -41,7 +41,7 @@ func lintCheckout() *Config {
 }
 
 var _ = Describe("SQL lint execution", func() {
-	It("indexes local dependencies as context without linting them as project targets", func(ctx SpecContext) {
+	It("keeps analysis in the selected module while preserving project-relative file filters", func(ctx SpecContext) {
 		database := lintDatabase(ctx, "sqlite")
 		workspace := GinkgoT().TempDir()
 		project, app, library := filepath.Join(workspace, "project"), filepath.Join(workspace, "project", "app"), filepath.Join(workspace, "library")
@@ -59,15 +59,15 @@ var _ = Describe("SQL lint execution", func() {
 		}
 		config, err := Load(filepath.Join(project, ConfigName))
 		Expect(err).NotTo(HaveOccurred())
-		report := Run(ctx, database, config, Options{})
+		report := Run(ctx, database, config, Options{Directory: app})
 		Expect(report.Success).To(BeTrue(), report.Error)
 		Expect(report.Violations).To(HaveLen(1))
 		Expect(report.Violations[0].File).To(Equal(filepath.Join(app, "main.go")))
-		Expect(Run(ctx, database, config, Options{NoIndex: true}).Success).To(BeTrue())
-		included := Run(ctx, database, config, Options{NoIndex: true, Include: []string{"app/*.go"}})
+		Expect(Run(ctx, database, config, Options{NoIndex: true, Directory: app}).Success).To(BeTrue())
+		included := Run(ctx, database, config, Options{NoIndex: true, Directory: app, Include: []string{"app/*.go"}})
 		Expect(included.Success).To(BeTrue(), included.Error)
 		Expect(included.Violations).To(HaveLen(1))
-		excluded := Run(ctx, database, config, Options{NoIndex: true, Exclude: []string{"app/**"}})
+		excluded := Run(ctx, database, config, Options{NoIndex: true, Directory: app, Exclude: []string{"app/**"}})
 		Expect(excluded.Success).To(BeTrue(), excluded.Error)
 		Expect(excluded.Violations).To(BeEmpty())
 	})
@@ -108,7 +108,7 @@ var _ = Describe("SQL lint execution", func() {
 		Expect(first.Violations[0].Message).To(HaveValue(Equal("small.go is small")))
 		engine, err := indexer.New(database)
 		Expect(err).NotTo(HaveOccurred())
-		head, err := engine.CheckCurrent(ctx, root, indexer.CheckOptions{})
+		head, err := engine.Analyze(ctx, indexer.AnalysisOptions{Directory: root, Mode: storage.AnalysisSyntax, NoIndex: true})
 		Expect(err).NotTo(HaveOccurred())
 		var before int64
 		Expect(database.Model(&storage.ModuleSnapshot{}).Count(&before).Error).To(Succeed())
@@ -143,10 +143,16 @@ var _ = Describe("SQL lint execution", func() {
 		database := lintDatabase(ctx, "sqlite")
 		config := lintCheckout()
 		Expect(os.WriteFile(filepath.Join(filepath.Dir(config.Path), "broken.go"), []byte("package linted\nvar _ = missing\n"), 0o600)).To(Succeed())
+		Expect(os.WriteFile(config.Path, []byte("version: 1\nlint:\n  rules:\n    - {id: uses, query: 'SELECT path FROM references(var:*)', message: '{{.path}}'}\n"), 0o600)).To(Succeed())
+		var err error
+		config, err = Load(config.Path)
+		Expect(err).NotTo(HaveOccurred())
+		broken, err := filepath.EvalSymlinks(filepath.Join(config.Root, "broken.go"))
+		Expect(err).NotTo(HaveOccurred())
 		for _, options := range []Options{{}, {NoIndex: true}, {NoIndex: true, Exclude: []string{"**"}}} {
 			report := Run(ctx, database, config, options)
 			Expect(report.Success).To(BeTrue(), report.Error)
-			Expect(report.Violations).To(ContainElement(And(HaveField("File", ""), HaveField("Severity", BeEquivalentTo("warning")), HaveField("Rule.Method", "uir/coverage"))))
+			Expect(report.Violations).To(ContainElement(And(HaveField("File", broken), HaveField("Line", 2), HaveField("Severity", BeEquivalentTo("warning")), HaveField("Rule.Method", "uir/coverage"))))
 		}
 	})
 })
