@@ -13,14 +13,16 @@ import (
 
 // ModuleCoverage is one package in a queried snapshot whose facts are not fully proven: `partial`
 // (type errors; only proven facts recorded), `syntax` (no type information, no postings), or
-// `excluded` (not extracted).
+// `excluded` (not extracted). Diagnostics are the package's persisted diagnostics, a JSON array of
+// {path, range, rule, message}; indexer.CoverageViolations turns them into lint warnings.
 type ModuleCoverage struct {
-	RootKey     string `json:"root_key"`
-	Location    string `json:"location"`
-	SnapshotID  string `json:"snapshot_id"`
-	PackagePath string `json:"package_path"`
-	Coverage    string `json:"coverage"`
-	Diagnostics int    `json:"diagnostics"`
+	AnalysisMode storage.AnalysisMode `json:"analysis_mode,omitempty"`
+	RootKey      string               `json:"root_key"`
+	Location     string               `json:"location"`
+	SnapshotID   string               `json:"snapshot_id"`
+	PackagePath  string               `json:"package_path"`
+	Coverage     string               `json:"coverage"`
+	Diagnostics  json.RawMessage      `json:"diagnostics"`
 }
 
 var coverageOrder = []storage.Coverage{storage.CoveragePartial, storage.CoverageSyntax, storage.CoverageExcluded}
@@ -48,8 +50,9 @@ func (pipeline *Pipeline) scopeCoverage(ctx context.Context, scopes []moduleScop
 			return nil, fmt.Errorf("decode diagnostics of package %s in snapshot %s: %w", row.PackagePath, row.SnapshotID, err)
 		}
 		coverage = append(coverage, ModuleCoverage{
-			RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath, SnapshotID: row.SnapshotID.String(),
-			PackagePath: row.PackagePath, Coverage: string(row.Coverage), Diagnostics: len(diagnostics),
+			AnalysisMode: scope.snapshot.AnalysisMode,
+			RootKey:      scope.root.RootKey, Location: scope.location.CanonicalPath, SnapshotID: row.SnapshotID.String(),
+			PackagePath: row.PackagePath, Coverage: string(row.Coverage), Diagnostics: json.RawMessage(row.Diagnostics),
 		})
 	}
 	sort.Slice(coverage, func(i, j int) bool {
