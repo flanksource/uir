@@ -1,6 +1,7 @@
 package uir
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,14 @@ func tableLayers(t RecordTable) layers {
 	c.add(NodesOf(t.Indexes), unordered, true)
 	c.add(NodesOf(t.ForeignKeys), unordered, true)
 	c.add(NodesOf(t.Triggers), unordered, true)
+	if dependencies := sqlDependenciesText(t.SQLDependencies); dependencies != "" {
+		c.private = append(c.private, dependencies)
+	}
+	checks := slices.Clone(t.Checks)
+	slices.SortFunc(checks, func(a, b SQLCheck) int { return strings.Compare(a.Name, b.Name) })
+	if len(checks) > 0 {
+		c.private = append(c.private, "checks="+canonicalJSON(checks))
+	}
 	definition := ""
 	if t.Definition != nil {
 		definition = t.Definition.Hash()
@@ -44,6 +53,15 @@ func columnLayers(col RecordColumn) layers {
 	if col.DefaultValue != nil {
 		private += " default=" + canonicalJSON(*col.DefaultValue)
 	}
+	if col.Identity != nil {
+		private += " identity=" + canonicalJSON(col.Identity)
+	}
+	if col.SQLDefault != nil {
+		private += " sql-default=" + canonicalJSON(col.SQLDefault)
+	}
+	if col.Collation != "" {
+		private += " collation=" + strconv.Quote(col.Collation)
+	}
 	if len(col.Enum) > 0 {
 		private += " enum=" + canonicalJSON(col.Enum)
 	}
@@ -60,6 +78,12 @@ func indexLayers(i RecordIndex) layers {
 		private += " include (" + strings.Join(i.Included, ", ") + ")"
 	}
 	private += flagText(i.Unique, "unique") + flagText(i.Primary, "primary") + flagText(i.Clustered, "clustered")
+	private += flagText(i.Constraint, "constraint")
+	if len(i.Descending) > 0 {
+		descending := slices.Clone(i.Descending)
+		slices.Sort(descending)
+		private += " descending=" + canonicalJSON(descending)
+	}
 	if i.IndexType != "" {
 		private += " using " + i.IndexType
 	}
@@ -67,6 +91,20 @@ func indexLayers(i RecordIndex) layers {
 		private += " where " + i.Condition
 	}
 	return leafLayers(ShapeKind(i), "", private, "")
+}
+
+func sqlDependenciesText(input []SQLDependency) string {
+	if len(input) == 0 {
+		return ""
+	}
+	dependencies := slices.Clone(input)
+	slices.SortFunc(dependencies, func(a, b SQLDependency) int {
+		if a.Schema != b.Schema {
+			return strings.Compare(a.Schema, b.Schema)
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return " sql-dependencies=" + canonicalJSON(dependencies)
 }
 
 // foreignKeyLayers: a foreign key is a private member, like an index.
