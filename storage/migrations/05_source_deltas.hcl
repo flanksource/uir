@@ -21,6 +21,11 @@ table "source_revisions" {
     type = text
     null = false
   }
+  column "git_path" {
+    type    = text
+    null    = false
+    default = ""
+  }
   column "size_bytes" {
     type = bigint
     null = false
@@ -35,7 +40,7 @@ table "source_revisions" {
   }
   unique "source_revisions_root_id_path_key_id_key" { columns = [column.root_id, column.path_key, column.id] }
   unique "source_revisions_root_id_path_key_content_hash_package_path_key" {
-    columns = [column.root_id, column.path_key, column.content_hash, column.package_path]
+    columns = [column.root_id, column.path_key, column.content_hash, column.package_path, column.git_path]
   }
   check "source_revisions_path_key_check" { expr = "length(path_key) > 0" }
   check "source_revisions_content_hash_check" { expr = "length(content_hash) = 64" }

@@ -47,6 +47,12 @@ func publishExternal(ctx context.Context, database *gorm.DB, publication Publica
 	if err != nil {
 		return ModuleResult{}, fmt.Errorf("%w: %w", ErrInvalidPublication, err)
 	}
+	if publication.Delta != nil {
+		extraction, err = publication.deltaExtraction(ctx, database, extraction)
+		if err != nil {
+			return ModuleResult{}, fmt.Errorf("%w: %w", ErrInvalidPublication, err)
+		}
+	}
 	catalog, err := storage.LoadDomainCatalog(ctx, database)
 	if err != nil {
 		return ModuleResult{}, err
@@ -105,7 +111,7 @@ func (publication Publication) extraction(kinds symbolhandle.Kinds, rows map[str
 	sort.Slice(files, func(i, j int) bool { return files[i].PathKey < files[j].PathKey })
 	extraction := moduleExtraction{
 		root: discoveredRoot{
-			RootKey: publication.RootKey, Name: publication.Name, LocalPath: publication.Location.URI, Kind: storage.LocationExternal,
+			RootKey: publication.RootKey, Name: publication.Name, LocalPath: publication.Location.URI, Kind: storage.LocationExternal, RepositoryURI: publication.Location.RepositoryURI,
 			Revision: publication.Revision, GitCommit: publication.Options.GitCommit, WorktreeState: storage.WorktreeUnknown, LastModifiedAt: startedAt,
 			ContentSetHash: contentSetHash(files, nil), ConfigurationHash: configuration, Files: files,
 		},
@@ -136,7 +142,7 @@ func (publication Publication) extraction(kinds symbolhandle.Kinds, rows map[str
 func (document PublishedDocument) file() discoveredFile {
 	return discoveredFile{
 		PathKey: document.PathKey, PackagePath: document.PackagePath, Content: []byte(document.Source),
-		ContentHash: document.ContentHash, SizeBytes: int64(len(document.Source)),
+		ContentHash: document.ContentHash, SizeBytes: int64(len(document.Source)), GitPath: document.GitPath,
 	}
 }
 
