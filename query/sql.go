@@ -113,6 +113,22 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 		return ModuleQueryResult{}, err
 	}
 	result := ModuleQueryResult{Operation: OperationSet, Matches: []ModuleMatch{}, Coverage: coverage, Stages: []ResolutionStage{{Name: "parse", Value: "sql"}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, selectionCoverageStage(selection, coverage)}}
+	syntaxAnalysis := false
+	for _, scope := range selection.scopes {
+		syntaxAnalysis = syntaxAnalysis || scope.snapshot.AnalysisMode == storage.AnalysisSyntax
+	}
+	if syntaxAnalysis {
+		requirements, err := AnalyzeSQLRows(input)
+		if err != nil {
+			return result, err
+		}
+		if requirements.Mode != storage.AnalysisSyntax {
+			return result, errors.New("query requires typed facts; selected snapshot contains syntax analysis")
+		}
+		if !rows.fileSource {
+			return session.sqlSyntaxRows(ctx, parsed, selection.scopes, rows, limit, result)
+		}
+	}
 	if rows.fileSource {
 		rows.predicate, err = rows.bindPredicate(ctx, nil, parsed.Where)
 		if err != nil {
@@ -180,6 +196,11 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 	records, err := index.sqlRecords(ctx, value, enclosing)
 	if err != nil {
 		return ModuleQueryResult{}, err
+	}
+	if visit != nil {
+		if err := index.sqlWitnessKeys(ctx, records); err != nil {
+			return result, err
+		}
 	}
 	sortSQLRecords(records)
 	if !index.declarationProjection {

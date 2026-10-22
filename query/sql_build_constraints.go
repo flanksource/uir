@@ -64,7 +64,7 @@ func (pipeline *Pipeline) sqlFileBuildConstraints(ctx context.Context, scope mod
 	}
 	var reads []sourceRead
 	if len(sources) > 0 {
-		reads = readVerifiedSources(ctx, pipeline.database, scope, sources)
+		reads = readVerifiedSources(ctx, pipeline.database, scope, sources, pipeline.options.gitReader)
 	}
 	for index, read := range reads {
 		source := sources[index]
