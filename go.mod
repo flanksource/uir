@@ -4,12 +4,12 @@ go 1.26.1
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
-	github.com/flanksource/clicky v1.21.82
-	github.com/flanksource/commons v1.60.1
+	github.com/flanksource/clicky v1.21.83-0.20261023035132-78910d3a489c
+	github.com/flanksource/commons v1.60.2-0.20261023035157-e894a9b2a6db
 	github.com/flanksource/commons-db v0.1.61
 	github.com/flanksource/commons-db/cmd/query v0.1.61
 	github.com/flanksource/gavel v0.0.56
-	github.com/flanksource/sqlglot-go v1.0.4
+	github.com/flanksource/sqlglot-go v1.0.5-0.20261022195735-0ab250d620a9
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260507013755-92041b743c96
