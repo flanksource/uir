@@ -379,20 +379,54 @@ function SnapshotStore({ id }: { id: string }) {
   </Block>;
 }
 
-const sources: Array<{ key: string; Icon?: IconComponent; glyph?: string; name: string }> = [
+type SourceSpec = { key: string; Icon?: IconComponent; glyph?: string; name: string; detail?: string };
+
+const sources: SourceSpec[] = [
   { key: 'go', Icon: Go, name: 'Go' },
   { key: 'python', Icon: Python, name: 'Python' },
   { key: 'java', Icon: Java, name: 'Java' },
-  { key: 'sql', Icon: Postgres, name: 'SQL catalogue' },
+  { key: 'sql', Icon: Postgres, name: 'SQL schema', detail: 'functions + callgraph' },
   { key: 'k8s', Icon: K8S, name: 'Kubernetes' },
   { key: 'oipa', glyph: '</>', name: 'OIPA XML' },
 ];
 
-function Source({ id, Icon, glyph, name }: { id: string; Icon?: IconComponent; glyph?: string; name: string }) {
+function Source({ id, Icon, glyph, name, detail }: { id: string } & Omit<SourceSpec, 'key'>) {
   return <div id={id} className="flex items-center gap-2 rounded-md border bg-white px-2.5 py-1" style={{ borderColor: COLORS.primary, width: '150px' }}>
-    {Icon ? <Icon className="h-4 w-4" /> : <span className={`w-4 text-center font-bold ${mono}`} style={{ color: COLORS.accent }}>{glyph}</span>}
-    <span className="text-[9pt] font-semibold" style={{ color: COLORS.accent }}>{name}</span>
+    {Icon ? <Icon className="h-4 w-4 shrink-0" /> : <span className={`w-4 text-center font-bold ${mono}`} style={{ color: COLORS.accent }}>{glyph}</span>}
+    <div className="flex min-w-0 flex-col">
+      <span className="text-[9pt] font-semibold" style={{ color: COLORS.accent }}>{name}</span>
+      {detail && <span className="whitespace-nowrap text-[7.5pt] leading-tight" style={{ color: COLORS.muted }}>{detail}</span>}
+    </div>
   </div>;
+}
+
+const PREFERS_REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+function usePrefersReducedMotion(): boolean {
+  return React.useSyncExternalStore(
+    (notify) => {
+      const query = window.matchMedia(PREFERS_REDUCED_MOTION);
+      query.addEventListener('change', notify);
+      return () => query.removeEventListener('change', notify);
+    },
+    () => window.matchMedia(PREFERS_REDUCED_MOTION).matches,
+    () => true,
+  );
+}
+
+/*
+ * One dot per ~PULSE_PERIOD px of connector, travelling from the source into UIR. It is a dash pattern
+ * (a zero-length round-capped dash) animated by Arrow, so the dots follow whatever path the connector takes.
+ * Speeds differ slightly per source so the six lanes do not pulse in lockstep.
+ */
+const PULSE_PERIOD = 90;
+
+function IntoUirPulse({ from, to, index, endOffsetY }: { from: string; to: string; index: number; endOffsetY: number }) {
+  const cyclesPerSecond = 0.7 + ((index * 5) % 6) * 0.06;
+  return <Arrow variant="primary" from={from} to={to} path="straight" startAnchor="right" showHead={false}
+    endAnchor={{ position: 'left', offset: { y: endOffsetY } }} strokeWidth={8} color={COLORS.accent}
+    dashness={{ strokeLen: 0.1, nonStrokeLen: PULSE_PERIOD, animation: cyclesPerSecond }}
+    arrowBodyProps={{ strokeLinecap: 'round', 'data-uir-pulse': '' }} />;
 }
 
 const outputs: Array<{ key: string; command: string; visual: React.ReactNode; caption: string }> = [
@@ -416,13 +450,13 @@ function Output({ id, command, visual, caption }: {
 }
 
 export function OutOfUIR() {
+  const reducedMotion = usePrefersReducedMotion();
   return <Diagram className="relative">
     {(id) => <>
       <div className="flex flex-col items-center gap-20 px-6 py-8">
         <div className="grid w-full items-center" style={{ gridTemplateColumns: '1fr auto 1fr', columnGap: '96px' }}>
           <div className="flex flex-col items-end gap-1.5">
-            {sources.map((source) => <Source key={source.key} id={id(`source-${source.key}`)} Icon={source.Icon}
-              glyph={source.glyph} name={source.name} />)}
+            {sources.map(({ key, ...source }) => <Source key={key} id={id(`source-${key}`)} {...source} />)}
           </div>
           <UirHub id={id('uir')} compact />
           <div className="flex justify-start"><SnapshotStore id={id('store')} /></div>
@@ -433,7 +467,10 @@ export function OutOfUIR() {
         </div>
       </div>
       {sources.map((source, index) => <Arrow key={source.key} variant="primary" from={id(`source-${source.key}`)} to={id('uir')}
-        path="straight" startAnchor="right" endAnchor={{ position: 'left', offset: { y: (index - 2.5) * 14 } }} />)}
+        path="straight" startAnchor="right" endAnchor={{ position: 'left', offset: { y: (index - 2.5) * 14 } }}
+        dashness={reducedMotion ? { strokeLen: 10, nonStrokeLen: 5 } : undefined} />)}
+      {!reducedMotion && sources.map((source, index) => <IntoUirPulse key={`pulse-${source.key}`}
+        from={id(`source-${source.key}`)} to={id('uir')} index={index} endOffsetY={(index - 2.5) * 14} />)}
       <Arrow variant="secondary" from={id('uir')} to={id('store')} path="straight" startAnchor="right" endAnchor="left"
         labels={{ middle: <NodePill>persisted as</NodePill> }} />
       {outputs.map((output, index) => <Arrow key={output.key} variant="primary" from={id('uir')} to={id(output.key)}
