@@ -12,6 +12,7 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
+	"github.com/flanksource/clicky/extensions"
 	"github.com/flanksource/clicky/shutdown"
 	clickytask "github.com/flanksource/clicky/task"
 	"github.com/flanksource/commons/properties"
@@ -116,6 +117,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	}
 	clicky.MarkLocalOnly(versionCommand)
 	root.AddCommand(versionCommand)
+	extensions.CobraExtensions(root).Interactive()
 	return root
 }
 
