@@ -6,9 +6,9 @@ require (
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/flanksource/clicky v1.21.83-0.20261023035132-78910d3a489c
 	github.com/flanksource/commons v1.60.2-0.20261023035157-e894a9b2a6db
-	github.com/flanksource/commons-db v0.1.61
-	github.com/flanksource/commons-db/cmd/query v0.1.61
-	github.com/flanksource/gavel v0.0.56
+	github.com/flanksource/commons-db v0.1.62
+	github.com/flanksource/commons-db/cmd/query v0.1.62
+	github.com/flanksource/gavel v0.0.57
 	github.com/flanksource/sqlglot-go v1.0.5-0.20261022195735-0ab250d620a9
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
@@ -145,9 +145,11 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
 	github.com/firebase/genkit/go v1.13.1 // indirect
-	github.com/flanksource/captain v0.0.70-0.20261014132911-cc3d9c2d4798 // indirect
-	github.com/flanksource/clicky/aichat v1.21.82 // indirect
-	github.com/flanksource/clicky/valkey v1.21.82 // indirect
+	github.com/flanksource/captain v0.0.72-0.20261023035220-26c09a9de22f // indirect
+	github.com/flanksource/clicky/aichat v1.21.83-0.20261023035132-78910d3a489c // indirect
+	github.com/flanksource/clicky/valkey v1.21.83-0.20261023035132-78910d3a489c // indirect
+	github.com/flanksource/commons-db/recordstore v0.1.62 // indirect
+	github.com/flanksource/commons-db/tracing v0.1.62 // indirect
 	github.com/flanksource/gomplate/v3 v3.24.90 // indirect
 	github.com/flanksource/is-healthy v1.0.92 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
@@ -187,7 +189,6 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/go-test/deep v1.1.1 // indirect
 	github.com/go-xmlfmt/xmlfmt v1.1.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
@@ -202,6 +203,7 @@ require (
 	github.com/google/dotprompt/go v0.0.0-20260708220100-73beb993ac95 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
+	github.com/google/gops v0.3.29 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
@@ -250,6 +252,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20251013123823-9fd1530e3ec3 // indirect
 	github.com/mark3labs/mcp-go v0.56.0 // indirect
+	github.com/maruel/panicparse/v2 v2.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
