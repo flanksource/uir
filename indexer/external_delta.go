@@ -17,10 +17,14 @@ func (publication Publication) deltaExtraction(ctx context.Context, database *go
 	if err != nil {
 		return moduleExtraction{}, err
 	}
+	if len(publication.Documents) == 0 && len(publication.Delta.DeletedPaths) == 0 {
+		return carriedExtraction(extraction, base)
+	}
 	active, err := storage.ActiveDocuments(ctx, database, base.ID, storage.ActiveDocumentOptions{})
 	if err != nil {
 		return moduleExtraction{}, err
 	}
+	extraction.baseActive, extraction.baseActiveOf = active, base.ID
 	removed, affected, err := publication.deltaPaths(active)
 	if err != nil {
 		return moduleExtraction{}, err
@@ -40,20 +44,8 @@ func (publication Publication) deltaExtraction(ctx context.Context, database *go
 		extraction.documents[name] = extractedDocument{reused: true, base: document.Document, inputHash: document.Document.InputHash,
 			coverage: document.Document.Coverage, symbolCount: document.Document.SymbolCount, occurrenceCount: document.Document.OccurrenceCount}
 	}
-	var coverage []storage.PackageCoverage
-	if err := database.WithContext(ctx).Where("snapshot_id = ?", base.ID).Find(&coverage).Error; err != nil {
+	if extraction.packages, err = retainedPackages(ctx, database, base, affected, extraction.packages); err != nil {
 		return moduleExtraction{}, err
-	}
-	for _, row := range coverage {
-		if affected[row.PackagePath] {
-			continue
-		}
-		var diagnostics []packageDiagnostic
-		if err := json.Unmarshal(row.Diagnostics, &diagnostics); err != nil {
-			return moduleExtraction{}, fmt.Errorf("decode base package %q diagnostics: %w", row.PackagePath, err)
-		}
-		extraction.packages = append(extraction.packages, extractedPackage{path: row.PackagePath, inputHash: row.InputHash,
-			exportShapeHash: row.ExportShapeHash, coverage: row.Coverage, fileCount: row.FileCount, diagnostics: diagnostics})
 	}
 	sort.Slice(extraction.root.Files, func(i, j int) bool { return extraction.root.Files[i].PathKey < extraction.root.Files[j].PathKey })
 	sort.Slice(extraction.packages, func(i, j int) bool { return extraction.packages[i].path < extraction.packages[j].path })
@@ -65,6 +57,39 @@ func (publication Publication) deltaExtraction(ctx context.Context, database *go
 	extraction.contextHash = contextHash(extraction.root.ConfigurationHash, hashes)
 	extraction.diagnostics, err = snapshotDiagnostics(extraction.packages)
 	return extraction, err
+}
+
+// retainedPackages adds to packages the base's coverage of every package the delta leaves unaffected.
+func retainedPackages(ctx context.Context, database *gorm.DB, base storage.ModuleSnapshot, affected map[string]bool, packages []extractedPackage) ([]extractedPackage, error) {
+	var coverage []storage.PackageCoverage
+	if err := database.WithContext(ctx).Where("snapshot_id = ?", base.ID).Find(&coverage).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range coverage {
+		if affected[row.PackagePath] {
+			continue
+		}
+		var diagnostics []packageDiagnostic
+		if err := json.Unmarshal(row.Diagnostics, &diagnostics); err != nil {
+			return nil, fmt.Errorf("decode base package %q diagnostics: %w", row.PackagePath, err)
+		}
+		packages = append(packages, extractedPackage{path: row.PackagePath, inputHash: row.InputHash,
+			exportShapeHash: row.ExportShapeHash, coverage: row.Coverage, fileCount: row.FileCount, diagnostics: diagnostics})
+	}
+	return packages, nil
+}
+
+// carriedExtraction is the extraction of a delta that changes nothing: it serves exactly the base's
+// sources and documents under the base's content set, context, and diagnostics, so publication
+// carries the base forward instead of binding every file again.
+func carriedExtraction(extraction moduleExtraction, base storage.ModuleSnapshot) (moduleExtraction, error) {
+	stats, err := base.Stats()
+	if err != nil {
+		return moduleExtraction{}, fmt.Errorf("carry delta base forward: %w", err)
+	}
+	extraction.carried = &carriedBase{snapshot: base, stats: stats}
+	extraction.root.ContentSetHash, extraction.contextHash, extraction.diagnostics = base.ContentSetHash, base.ContextHash, base.Diagnostics
+	return extraction, nil
 }
 
 func (publication Publication) deltaBase(ctx context.Context, database *gorm.DB, extraction moduleExtraction) (storage.ModuleSnapshot, error) {
