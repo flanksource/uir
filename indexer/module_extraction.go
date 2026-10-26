@@ -43,6 +43,26 @@ type moduleExtraction struct {
 	siblingShapes map[string]siblingRecord
 	// implements are the snapshot's implements facts; a producer without types has none.
 	implements []implementsFact
+	// baseActive is the active documents of snapshot baseActiveOf, read while extracting a delta, so
+	// publication binds against them without reading them again.
+	baseActive   map[string]storage.ActiveDocument
+	baseActiveOf uuid.UUID
+	// carried is set for a delta that changes nothing: publication carries its base forward.
+	carried *carriedBase
+}
+
+// carriedBase is the base snapshot an empty delta carries forward, with its recorded stats.
+type carriedBase struct {
+	snapshot storage.ModuleSnapshot
+	stats    storage.SnapshotStats
+}
+
+// fileCount is how many files the extraction's snapshot serves.
+func (extraction moduleExtraction) fileCount() int {
+	if extraction.carried != nil {
+		return int(extraction.carried.stats.FileCount)
+	}
+	return len(extraction.root.Files)
 }
 
 // extractedPackage is one package_coverage row.

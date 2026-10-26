@@ -32,7 +32,7 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
-	result := ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(discovered.Files)}
+	result := ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: extraction.fileCount()}
 	base, err := loadModuleBase(ctx, database, root, location)
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
@@ -60,7 +60,7 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 		}
 		if found {
 			result.SnapshotID, result.HeadVersion = existing.ID.String(), base.head.Version
-			result.ReusedFiles, result.Unchanged = len(discovered.Files), true
+			result.ReusedFiles, result.Unchanged = extraction.fileCount(), true
 			return result, location, nil
 		}
 	}
@@ -76,7 +76,7 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 		unchanged = true
 	}
 	if unchanged {
-		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, len(discovered.Files), true
+		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, extraction.fileCount(), true
 		if result.Warnings, err = snapshotWarnings(base.snapshot.Diagnostics); err != nil {
 			return ModuleResult{}, storage.ModuleLocation{}, err
 		}
@@ -117,7 +117,10 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if publication.extraction.indexStartedAt.IsZero() {
 		return storage.ModuleSnapshot{}, fmt.Errorf("publish module %q: extraction has no start time", publication.root.RootKey)
 	}
-	membership, err := baseMembership(ctx, database, publication.base.snapshot)
+	if publication.extraction.carried != nil {
+		return publishCarried(ctx, database, publication, result)
+	}
+	membership, err := baseMembership(ctx, database, publication.base.snapshot, publication.extraction)
 	if err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
@@ -147,17 +150,22 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err := publishSnapshotRows(ctx, database, publication, snapshot, membership, handles); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if publication.preserveHead {
-		result.HeadVersion = publication.base.head.Version
-		return snapshot, nil
-	}
-	if err := Phase(ctx, "advance-head", func(ctx context.Context) (err error) {
-		result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot)
-		return err
-	}); err != nil {
+	if err := publication.advance(ctx, database, snapshot, result); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// advance moves the location head to the published snapshot, unless the publication preserves it.
+func (publication snapshotPublication) advance(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, result *ModuleResult) error {
+	if publication.preserveHead {
+		result.HeadVersion = publication.base.head.Version
+		return nil
+	}
+	return Phase(ctx, "advance-head", func(ctx context.Context) (err error) {
+		result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot)
+		return err
+	})
 }
 
 // snapshotMembership is what a publication binds against its base: the base's active documents and
@@ -170,15 +178,19 @@ type snapshotMembership struct {
 	bindings map[string]int64
 }
 
-// baseMembership loads the base snapshot's active documents, without content, and its effective sources.
-func baseMembership(ctx context.Context, database *gorm.DB, base storage.ModuleSnapshot) (snapshotMembership, error) {
+// baseMembership loads the base snapshot's active documents, without content, and its effective
+// sources, or takes the documents the extraction already read of that base.
+func baseMembership(ctx context.Context, database *gorm.DB, base storage.ModuleSnapshot, extraction moduleExtraction) (snapshotMembership, error) {
 	membership := snapshotMembership{base: map[string]storage.ActiveDocument{}, previous: map[string]storage.SourceRevision{}}
 	if base.ID == uuid.Nil {
 		return membership, nil
 	}
 	err := Phase(ctx, "base-documents", func(ctx context.Context) (err error) {
-		if membership.base, err = storage.ActiveDocuments(ctx, database, base.ID, storage.ActiveDocumentOptions{}); err != nil {
-			return err
+		membership.base = extraction.baseActive
+		if extraction.baseActiveOf != base.ID {
+			if membership.base, err = storage.ActiveDocuments(ctx, database, base.ID, storage.ActiveDocumentOptions{}); err != nil {
+				return err
+			}
 		}
 		for path, active := range membership.base {
 			membership.previous[path] = active.Source
