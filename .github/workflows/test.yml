@@ -97,7 +97,10 @@ jobs:
 
       - name: Smoke test image
         run: |
-          docker run --rm uir:ci --version | rg '^uir version ci \(git: ${{ github.sha }}, built: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$'
+          version_output=$(docker run --rm uir:ci --version)
+          version_pattern="^uir version ci \(git: ${{ github.sha }}, built: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$"
+          printf '%s\n' "$version_output"
+          [[ $version_output =~ $version_pattern ]]
 
   release:
     needs: [go, python, image]
