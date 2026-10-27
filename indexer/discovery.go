@@ -145,6 +145,7 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 	if options.Source == nil && root.WorktreeState == storage.WorktreeDirty {
 		root.Revision = dirtyRevision(root.GitCommit, root.LastModifiedAt)
 	}
+	environment.Variant.BuildTags = options.Tags
 	root.ConfigurationHash = configurationHash(options.IncludeTests, environment.Variant)
 	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
 	if options.Source == nil && root.AnalysisMode == "" {

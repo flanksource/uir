@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/flanksource/uir/internal/buildconstraint"
 )
 
-// buildVariant is the single build configuration a snapshot is indexed under. BuildTags is empty
-// until tags become selectable; it is hashed as a list so adding tags keeps the encoding.
+// buildVariant is the single build configuration a snapshot is indexed under.
 type buildVariant struct {
 	GOOS       string
 	GOARCH     string
@@ -30,6 +32,17 @@ type buildVariant struct {
 type goEnvironment struct {
 	Variant  buildVariant
 	WorkFile string
+}
+
+func normalizeBuildTags(tags []string) ([]string, error) {
+	for _, tag := range tags {
+		if err := buildconstraint.ValidateTag(tag); err != nil {
+			return nil, fmt.Errorf("--tags: %w", err)
+		}
+	}
+	tags = slices.Clone(tags)
+	slices.Sort(tags)
+	return slices.Compact(tags), nil
 }
 
 // manifestFile is a dependency manifest hashed into the content set but never stored as a source.

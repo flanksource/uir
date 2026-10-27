@@ -19,6 +19,7 @@ import (
 
 type Options struct {
 	Rules     []string
+	Tags      []string
 	Include   []string
 	Exclude   []string
 	NoIndex   bool

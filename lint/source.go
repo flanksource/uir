@@ -18,6 +18,8 @@ type Request struct {
 
 func (options Options) Validate() error {
 	switch {
+	case options.Snapshot != "" && len(options.Tags) > 0:
+		return errors.New("--tags cannot change the build configuration of an immutable --snapshot")
 	case options.All && (options.Changed || options.Staged || options.Snapshot != ""):
 		return errors.New("--all cannot be combined with --changed, --staged or --snapshot")
 	case options.Changed && options.Staged:

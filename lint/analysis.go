@@ -45,7 +45,7 @@ func snapshots(ctx context.Context, database *gorm.DB, config *Config, options O
 			scope.SnapshotIDs = append(scope.SnapshotIDs, head.SnapshotID.String())
 			continue
 		}
-		result, err := engine.Analyze(ctx, indexer.AnalysisOptions{Directory: location.CanonicalPath, Mode: mode, IncludeTests: config.Lint.IncludeTests, NoIndex: options.NoIndex, Source: options.Source})
+		result, err := engine.Analyze(ctx, indexer.AnalysisOptions{Directory: location.CanonicalPath, Mode: mode, Tags: options.Tags, IncludeTests: config.Lint.IncludeTests, NoIndex: options.NoIndex, Source: options.Source})
 		if err != nil {
 			return scope, fmt.Errorf("analyze %s: %w", location.CanonicalPath, err)
 		}

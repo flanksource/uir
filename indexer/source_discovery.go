@@ -10,6 +10,7 @@ import (
 
 type discoveryOptions struct {
 	IncludeTests bool
+	Tags         []string
 	Source       *git.SourceInfo
 }
 
