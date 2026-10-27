@@ -125,6 +125,7 @@ func isolateRoot(ctx context.Context, root discoveredRoot, includeTests bool, ma
 	if err != nil {
 		return root, err
 	}
+	environment.Variant.BuildTags = root.Variant.BuildTags
 	root.Variant = environment.Variant
 	root.Variant.GoWorkOff = true
 	root.WorkFile = ""
