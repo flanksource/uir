@@ -20,7 +20,10 @@ uir lint --changed
 uir lint --changed HEAD~3..HEAD
 uir lint --changed main...HEAD --group-by symbol
 uir lint --staged
+uir lint --tags integration,feature
 ```
+
+`--tags` accepts repeated or comma-separated Go build tags. Tags select files for syntax analysis and typed loading and participate in analysis freshness checks; changing tags requires fresh analysis before `--no-index` can reuse it. Explicit snapshots already fix their build configuration and reject `--tags`. When running through Gavel, `gavel lint uir --generated=false --tags integration,feature` also suppresses generated-file findings while retaining generated source for type resolution.
 
 Configuration discovery merges home configuration first, then configuration from the filesystem root down to the current directory, including ancestors above the Git root. Each directory loads `.uir.yaml` followed by the `.yaml` and `.yml` files directly inside `.uir.d/` in filename order. Home configuration includes both `~/.uir.yaml` and `~/.uir.d/` and is loaded once. Hidden files and other extensions inside `.uir.d/` are ignored. Each fragment uses the same complete version 1 document shape as `.uir.yaml`. Rules merge by `id`: a later file replaces the complete rule definition, while other inherited rules remain in their original order. `lint.include_tests` inherits when omitted; an explicit `true` or `false` overrides it. Every unexpired discovered file is validated, including overridden rules. `--config` selects one explicit file without inheritance.
 

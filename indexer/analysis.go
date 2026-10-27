@@ -17,6 +17,7 @@ type AnalysisOptions struct {
 	Directory    string
 	Mode         storage.AnalysisMode
 	IncludeTests bool
+	Tags         []string
 	NoIndex      bool
 	Source       *git.PreparedSource
 }
@@ -82,7 +83,11 @@ func discoverAnalysis(ctx context.Context, options AnalysisOptions) (discoveredR
 		return discoveredRoot{}, fmt.Errorf("no enclosing Go module for %q", path)
 	}
 	root := discoveredRoot{RootKey: module, Name: filepath.Base(module), LocalPath: directory, Kind: "module", AnalysisMode: options.Mode}
-	discovery := discoveryOptions{IncludeTests: options.IncludeTests}
+	tags, err := normalizeBuildTags(options.Tags)
+	if err != nil {
+		return root, err
+	}
+	discovery := discoveryOptions{IncludeTests: options.IncludeTests, Tags: tags}
 	if options.Source != nil && options.Source.Info().Kind != git.SourceWorktree {
 		info := options.Source.Info()
 		if !pathWithin(directory, info.Dir) {
