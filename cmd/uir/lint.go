@@ -15,6 +15,7 @@ import (
 type lintOptions struct {
 	Config   string   `flag:"config" help:"Use a single config file (default: merge home and ancestor .uir.yaml files)"`
 	Rules    []string `flag:"rule" help:"Run only these exact rule IDs"`
+	Tags     []string `flag:"tags" help:"Build tags for source selection (repeat or comma-separate)"`
 	Include  []string `flag:"include" help:"Report file globs relative to the project, or each module with --all (repeat or comma-separate)"`
 	Exclude  []string `flag:"exclude" help:"Exclude exact rule IDs or file globs (project-relative, or module-relative with --all; exclusions win)"`
 	NoIndex  bool     `flag:"no-index" help:"Require fresh stored analysis without refreshing"`
@@ -32,7 +33,7 @@ func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 		if err != nil {
 			return nil, err
 		}
-		request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{All: options.All, Rules: options.Rules, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision})
+		request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{All: options.All, Rules: options.Rules, Tags: options.Tags, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision})
 		if err != nil {
 			return lintFailure(err), err
 		}
