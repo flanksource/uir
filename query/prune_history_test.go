@@ -188,7 +188,7 @@ var _ = Describe("pruning a root's history", func() {
 		Entry("SQLite", "sqlite"), Entry("PostgreSQL", "postgres"),
 	)
 
-	DescribeTable("keeps a pipeline's queries right when a pruned symbol is published again under another handle",
+	DescribeTable("keeps a pipeline's queries right when a pruned symbol is published again under a reused handle",
 		func(ctx SpecContext, backend string) {
 			database := openQueryDatabase(ctx, backend)
 			scope := query.ModuleScopeOptions{RootKey: insRoot}
@@ -205,7 +205,7 @@ var _ = Describe("pruning a root's history", func() {
 			publish(ctx, database, insuranceRevision("r3", true))
 			republished, err := storage.SymbolHandles(ctx, database, []string{indexer.SymbolID(legacyRule)})
 			Expect(err).ToNot(HaveOccurred())
-			Expect(republished).ToNot(Equal(handles), "Legacy came back under another handle")
+			Expect(republished).To(Equal(handles), "the bucket's freed tail handle is reused")
 
 			legacy := runQuery(ctx, pipeline, "func:Legacy", scope).Matches
 			Expect(legacy).To(HaveLen(1))
