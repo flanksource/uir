@@ -359,7 +359,7 @@ func (reader *guardReader) keep(key guardFileKey, file *guardFile, err error) {
 
 // unreadablePaths are the files whose guards could not be derived, sorted.
 func (reader *guardReader) unreadablePaths() []string {
-	paths := make([]string, 0, len(reader.unreadable))
+	var paths []string
 	for path := range reader.unreadable {
 		paths = append(paths, path)
 	}
