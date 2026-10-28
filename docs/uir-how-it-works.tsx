@@ -165,7 +165,8 @@ const MODEL_GLYPHS: Readonly<Record<string, React.ReactNode>> = {
 function ModelPill({ item }: { item: string }) {
   const glyph = MODEL_GLYPHS[item];
   if (!glyph) throw new Error(`no glyph for model element ${item}`);
-  return <NodePill><span className="inline-flex items-center gap-1.5">{glyph}{item}</span></NodePill>;
+  // A white chip with no border: the hub body already carries the tint and the primary border.
+  return <span className="inline-flex items-center gap-1.5 rounded bg-white px-2 py-1 text-[10px]" style={{ color: COLORS.muted }}>{glyph}{item}</span>;
 }
 
 function UirHub({ id, compact = false }: { id: string; compact?: boolean }) {
@@ -347,8 +348,9 @@ function BrowserWindow() {
 
 function SnapshotChain() {
   const snapshot = (ordinal: number, head = false) =>
-    <span key={ordinal} className={`rounded border px-1.5 py-0.5 ${mono}`}
-      style={{ borderColor: COLORS.primary, backgroundColor: head ? COLORS.primary : 'white', color: head ? 'white' : COLORS.accent }}>
+    // Only the head is outlined and filled; earlier snapshots sit on a light tint inside the white panel.
+    <span key={ordinal} className={`rounded px-1.5 py-0.5 ${mono} ${head ? 'border' : ''}`}
+      style={head ? { borderColor: COLORS.primary, backgroundColor: COLORS.primary, color: 'white' } : { backgroundColor: COLORS.background, color: COLORS.accent }}>
       #{ordinal}{head ? ' head' : ''}
     </span>;
   const base = (key: string) => <span key={key} className={mono} style={{ color: COLORS.muted }}>←</span>;
