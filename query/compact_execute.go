@@ -56,6 +56,8 @@ func expressionOperation(expression *Expr) Operation {
 			return OperationInheritors
 		case expression.Relation == ":methods":
 			return OperationMethods
+		case expression.Relation == ":uses":
+			return OperationUses
 		case expression.Relation == "~w":
 			return OperationIncoming
 		case strings.HasPrefix(expression.Relation, "<<"):
