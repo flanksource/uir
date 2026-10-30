@@ -83,6 +83,14 @@ func sqlPropertyFields(source *sqlSource, kinds symbolhandle.Kinds, catalog stor
 			fields[field] = kind
 		}
 	}
+	for kind, metrics := range catalog.Metrics {
+		if !slices.Contains(selected, kind) {
+			continue
+		}
+		for name := range metrics {
+			fields["symbol.metrics."+name] = "integer"
+		}
+	}
 	for _, kind := range catalog.Relationships {
 		if len(source.options.via) > 0 && !slices.Contains(source.options.via, kind.Name) {
 			continue

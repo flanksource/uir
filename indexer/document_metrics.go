@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
@@ -34,6 +36,7 @@ func publishDeclarationMetrics(ctx context.Context, database *gorm.DB, publicati
 		return fmt.Errorf("read metrics of document %s: %w", publication.document.ID, err)
 	}
 	rows := make([]storage.DeclarationMetrics, 0, len(content.Symbols))
+	var measures []storage.DeclarationMeasure
 	for _, symbol := range content.Symbols {
 		row := storage.DeclarationMetrics{DocumentOrdinal: publication.document.Ordinal, SymbolKey: symbol.Key, Version: storage.MetricsVersion,
 			NameLine: symbol.Name[0], NameColumn: symbol.Name[1], NameEndLine: symbol.Name[2], NameEndColumn: symbol.Name[3]}
@@ -47,7 +50,17 @@ func publishDeclarationMetrics(ctx context.Context, database *gorm.DB, publicati
 		if symbol.Metrics != nil {
 			row.ParamCount, row.BodyLines = &symbol.Metrics.ParamCount, symbol.Metrics.BodyLines
 		}
+		if len(symbol.Measures) > 0 && row.SymbolHandle == nil {
+			return fmt.Errorf("document %s declaration %q records measures without a canonical id", publication.document.ID, symbol.Key)
+		}
+		for _, name := range slices.Sorted(maps.Keys(symbol.Measures)) {
+			measures = append(measures, storage.DeclarationMeasure{DocumentOrdinal: publication.document.Ordinal, SymbolKey: symbol.Key, Name: name,
+				SymbolHandle: *row.SymbolHandle, Value: symbol.Measures[name]})
+		}
 		rows = append(rows, row)
 	}
-	return storage.StoreDeclarationMetrics(ctx, database, rows)
+	if err := storage.StoreDeclarationMetrics(ctx, database, rows); err != nil {
+		return err
+	}
+	return storage.StoreDeclarationMeasures(ctx, database, measures)
 }

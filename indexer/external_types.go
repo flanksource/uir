@@ -17,7 +17,7 @@ import (
 // ExternalIndexerVersion versions how Publish turns a publication into documents and hashes: it enters
 // the configuration hash of every external snapshot and is the indexer version of every external
 // document.
-const ExternalIndexerVersion = "external-v7"
+const ExternalIndexerVersion = "external-v8"
 
 const (
 	externalConfigurationVersion = "uir-external-configuration-v1"
@@ -61,11 +61,14 @@ type ExternalLocation struct {
 }
 
 // KindDeclaration is a custom symbol kind the publication uses, registered before its documents are
-// validated; see storage.RegisterKind.
+// validated; see storage.RegisterKind. Metrics names the non-negative integer metrics every declaration
+// of the kind records in its document symbol's measures; a later declaration may add metrics but never
+// remove or redescribe one.
 type KindDeclaration struct {
-	Schema   storage.JSON          `json:"schema,omitempty"`
-	Name     string                `json:"name"`
-	Category symbolhandle.Category `json:"category"`
+	Schema   storage.JSON                  `json:"schema,omitempty"`
+	Metrics  map[string]storage.MetricSpec `json:"metrics,omitempty"`
+	Name     string                        `json:"name"`
+	Category symbolhandle.Category         `json:"category"`
 }
 
 // PublishedSymbol is one symbol's identity, whose id is SymbolID(Identity), and its visibility,
@@ -111,6 +114,11 @@ func (publication Publication) validate() error {
 		}
 		if kinds[kind.Name] {
 			return fmt.Errorf("kind %q is declared twice", kind.Name)
+		}
+		for name := range kind.Metrics {
+			if err := storage.ValidateMetricName(name); err != nil {
+				return fmt.Errorf("kind %q: %w", kind.Name, err)
+			}
 		}
 		kinds[kind.Name] = true
 	}

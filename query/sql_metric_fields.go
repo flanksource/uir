@@ -1,6 +1,8 @@
 package query
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/flanksource/uir/query/sqlsyntax"
@@ -13,6 +15,22 @@ func (rows *sqlRows) needsMetrics() bool {
 		}
 	}
 	return false
+}
+
+func (rows *sqlRows) needsCallableMetrics() bool {
+	return rows.required["symbol.metrics.param_count"] || rows.required["symbol.metrics.body_lines"]
+}
+
+// requiredMeasures are the producer metrics the query requests: every symbol.metrics field but the
+// callable ones.
+func (rows *sqlRows) requiredMeasures() []string {
+	var names []string
+	for _, field := range slices.Sorted(maps.Keys(rows.required)) {
+		if name, found := strings.CutPrefix(field, "symbol.metrics."); found && name != "param_count" && name != "body_lines" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func (rows *sqlRows) needsProperties() bool {

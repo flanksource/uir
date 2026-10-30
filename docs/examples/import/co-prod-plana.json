@@ -68,7 +68,7 @@
       "content_hash": "a0dbca9dbaae3c8dfa31bb3cf2f1a1ba2dfcca84197e0fea340b9dbdb9e1bfa3",
       "source": "<Rule name=\"Apply\">\n  <Call rule=\"Calc\"/>\n  <Read field=\"Policy.Amount\"/>\n  <Set field=\"Entry.Premium\" value=\"Policy.Amount\"/>\n</Rule>\n",
       "content": {
-        "version": 9,
+        "version": 10,
         "package_path": "Co/Prod/PlanA/rules",
         "symbols": [
           {
@@ -176,7 +176,7 @@
       "content_hash": "0e429448efa230d9d7e257c07e5939bec1597e577e636b4af65610f216269f44",
       "source": "<Screen name=\"Entry\">\n  <Field name=\"Premium\"/>\n</Screen>\n",
       "content": {
-        "version": 9,
+        "version": 10,
         "package_path": "Co/Prod/PlanA/screens",
         "symbols": [
           {
