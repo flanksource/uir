@@ -1,7 +1,9 @@
 package query_test
 
 import (
+	"errors"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/flanksource/uir/query"
@@ -51,6 +53,50 @@ var _ = Describe("compact indexed queries", func() {
 		Expect(runQuery(ctx, pipeline, "kind:type & pkg:example.org/shop:store", scope).Symbols).To(Equal(runQuery(ctx, pipeline, "type:* & pkg:example.org/shop:store", scope).Symbols))
 		_, err = pipeline.RunModules(ctx, "kind:acme.rule", scope)
 		Expect(err).To(MatchError(ContainSubstring(`symbol kind "acme.rule" is not registered`)))
+	})
+	It("lists what a declaration's body reads, writes and calls, each row naming the symbol used", func(ctx SpecContext) {
+		database := openQueryDatabase(ctx, "sqlite")
+		primary, _ := shopWorkspace()
+		indexCheckout(ctx, database, primary)
+		pipeline, err := query.NewPipeline(database)
+		Expect(err).ToNot(HaveOccurred())
+		scope := query.ModuleScopeOptions{RootKey: shopModule, Location: primary}
+		used := func(expression string) map[string][]string {
+			GinkgoHelper()
+			roles := map[string][]string{}
+			for _, match := range runQuery(ctx, pipeline, expression, scope).Matches {
+				Expect(match.Relation).To(Equal(":uses"))
+				Expect(match.SourceName).To(HavePrefix(shopModule), "every row is sourced from the declaration whose body it is in")
+				used := match.Identifier
+				name := used.GetName()
+				if used.Type != "" && used.Type != name {
+					name = used.Type + "." + name
+				}
+				name = path.Base(used.Package) + "." + name
+				roles[name] = append(roles[name], match.Role)
+			}
+			return roles
+		}
+		const store = "store."
+
+		run := used("func:Run :uses")
+		Expect(run).To(HaveKeyWithValue(store+"Store.Save", []string{"call"}))
+		Expect(run).To(HaveKeyWithValue(store+"Persist", []string{"call"}))
+		Expect(run).To(HaveKey(store + "Store"))
+		Expect(runQuery(ctx, pipeline, "func:Run :uses", scope).Operation).To(Equal(query.OperationUses))
+		Expect(used("func:Store.Save :uses ~w")).To(Equal(map[string][]string{store + "Store.count": {"write"}}))
+		Expect(used("func:Run :uses func:Store.Save")).To(Equal(map[string][]string{store + "Store.Save": {"call"}}))
+		Expect(used("func:Run :uses pkg:example.org/shop:app")).To(BeEmpty(), "Run uses nothing its own package declares")
+		Expect(used("func:Run :uses pkg:example.org/shop:store")).To(And(HaveKey(store+"Store.Save"), HaveKey(store+"Persist")))
+		Expect(used("struct:Store :uses")).ToNot(HaveKey(store+"Store.count"), "a field the type declares is part of it, not used by it")
+
+		saved := runQuery(ctx, pipeline, "func:Store.Save :uses ~w", scope).Matches
+		Expect(saved).To(HaveLen(1))
+		Expect([]any{saved[0].Path, *saved[0].Line, saved[0].Identifier.Field, saved[0].EnclosingID}).To(
+			Equal([]any{"store/store.go", 11, "count", saved[0].SourceID}), "positioned at the write in Save's body, identifying the field written")
+		_, err = pipeline.RunModules(ctx, "app.Missing :uses", scope)
+		var unresolved *query.UnresolvedSymbolError
+		Expect(errors.As(err, &unresolved)).To(BeTrue(), "an unknown target is an error, never an empty result")
 	})
 	It("resolves an Entity:Field reference to the fields its owner declares", func(ctx SpecContext) {
 		const module = entitiesModule

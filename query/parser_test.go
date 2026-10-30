@@ -49,7 +49,7 @@ var _ = Describe("compact PEG query grammar", func() {
 	},
 		Entry("empty", ""),
 		Entry("old syntax", `references of node where name = "Save"`),
-		Entry("unknown relation", "store.Save :uses"),
+		Entry("unknown relation", "store.Save :usedby"),
 		Entry("missing filter value", "store.Save < -f"),
 		Entry("unbounded depth", "store.Save <<9"),
 		Entry("invalid wildcard", "store.S**ve <"),
