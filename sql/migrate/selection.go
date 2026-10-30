@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
+	"github.com/flanksource/sqlglot-go/sqlglot"
 )
 
 func overlay(reference, target model.Schema, selections []Selection) (model.Schema, error) {
@@ -47,7 +48,7 @@ func overlay(reference, target model.Schema, selections []Selection) (model.Sche
 			return desired, fmt.Errorf("selection %s: %w", s.ID(), err)
 		}
 	}
-	return desired, nil
+	return desired, requireTableTypes(desired, reference)
 }
 
 func apply(desired *model.Schema, reference model.Schema, selection Selection) error {
@@ -81,6 +82,8 @@ func apply(desired *model.Schema, reference model.Schema, selection Selection) e
 			return replaceTriggers(desired, reference, s.Object)
 		}
 		return err
+	case "table-type", "sequence":
+		return replaceCatalogObject(desired, reference, s)
 	case "column", "index", "foreign-key", "check":
 		if s.Member == "" {
 			return fmt.Errorf("member name is required")
@@ -94,6 +97,84 @@ func apply(desired *model.Schema, reference model.Schema, selection Selection) e
 	default:
 		return fmt.Errorf("unsupported selection kind %q", s.Kind)
 	}
+}
+
+func replaceCatalogObject(desired *model.Schema, reference model.Schema, s Selection) (err error) {
+	if s.Member != "" {
+		return fmt.Errorf("%s selection cannot name a member", s.Kind)
+	}
+	if s.Kind == "sequence" {
+		desired.Sequences, err = replace(desired.Sequences, reference.Sequences, s.Object, func(q model.Sequence) model.Name { return q.Name })
+	} else {
+		desired.TableTypes, err = replace(desired.TableTypes, reference.TableTypes, s.Object, func(t model.TableType) model.Name { return t.Name })
+	}
+	return err
+}
+
+// requireTableTypes fails when a desired routine takes a table-valued
+// parameter whose type the desired schema lacks, naming the type to select.
+// The type is never added implicitly: that would widen the selection.
+func requireTableTypes(desired, reference model.Schema) error {
+	for _, d := range desired.Definitions {
+		if (d.Kind != "PROCEDURE" && d.Kind != "FUNCTION") || !strings.Contains(strings.ToUpper(d.SQL), "READONLY") {
+			continue
+		}
+		types, err := tableTypeParams(d)
+		if err != nil {
+			return err
+		}
+		for _, name := range types {
+			if findTableType(desired.TableTypes, name) >= 0 {
+				continue
+			}
+			hint := "the reference lacks it too"
+			if at := findTableType(reference.TableTypes, name); at >= 0 {
+				hint = "select " + Selection{Kind: "table-type", Object: reference.TableTypes[at].Name}.ID()
+			}
+			return fmt.Errorf("%s %s.%s takes table type %s.%s, which the desired schema lacks; %s",
+				strings.ToLower(d.Kind), d.Name.Schema, d.Name.Name, name.Schema, name.Name, hint)
+		}
+	}
+	return nil
+}
+
+// tableTypeParams names the types of a routine's READONLY parameters; an
+// unqualified type resolves in the routine's schema.
+func tableTypeParams(d model.Definition) ([]model.Name, error) {
+	script, err := sqlglot.ParseScript(d.SQL, "tsql")
+	if err != nil || !script.Complete || script.Tree == nil {
+		return nil, fmt.Errorf("%s %s.%s: parse definition: %v %v", strings.ToLower(d.Kind), d.Name.Schema, d.Name.Name, err, script.Diagnostics)
+	}
+	routine, err := sqlglot.RoutineOf(script.Tree)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s.%s: %w", strings.ToLower(d.Kind), d.Name.Schema, d.Name.Name, err)
+	}
+	var out []model.Name
+	for _, p := range routine.Params {
+		if !p.ReadOnly {
+			continue
+		}
+		spec, err := sqlglot.DataTypeSpecOf(p.Type, "tsql")
+		if err != nil {
+			return nil, fmt.Errorf("%s %s.%s parameter %s: %w", strings.ToLower(d.Kind), d.Name.Schema, d.Name.Name, p.Name, err)
+		}
+		parts := strings.Split(spec.Name, ".")
+		for i := range parts {
+			parts[i] = strings.Trim(parts[i], "[]")
+		}
+		name := model.Name{Schema: d.Name.Schema, Name: parts[len(parts)-1]}
+		if len(parts) == 2 {
+			name.Schema = parts[0]
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+func findTableType(types []model.TableType, name model.Name) int {
+	return slices.IndexFunc(types, func(t model.TableType) bool {
+		return strings.EqualFold(t.Name.Schema, name.Schema) && strings.EqualFold(t.Name.Name, name.Name)
+	})
 }
 
 func replaceMember(target *model.Table, reference model.Table, s Selection) (err error) {

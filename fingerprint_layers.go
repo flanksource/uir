@@ -55,7 +55,7 @@ func methodLayers(m MethodNode) layers {
 		content = m.Body.Hash()
 	}
 	return leafLayers(ShapeKind(m), methodFacts(m, LayerPublic),
-		methodFacts(m, LayerPrivate)+declarationText(m.Properties)+sqlDependenciesText(m.SQLDependencies), content)
+		methodFacts(m, LayerPrivate)+declarationText(m.Properties)+sqlDependenciesText(m.SQLDependencies)+sqlModuleText(m.SQLQuotedIdentifierOff, m.SQLRuntimeDependencies), content)
 }
 
 // methodFacts renders a signature; parameters carry their private facts (such as
