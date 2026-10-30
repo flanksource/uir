@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"go/types"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"time"
 
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
+	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +24,8 @@ import (
 type moduleExtraction struct {
 	root           discoveredRoot
 	reusedHead     uuid.UUID
+	baseSnapshotID uuid.UUID
+	requestedBase  uuid.UUID
 	indexerVersion string
 	indexStartedAt time.Time
 	contextHash    string
@@ -28,11 +33,36 @@ type moduleExtraction struct {
 	documents      map[string]extractedDocument
 	symbols        map[string]storage.Symbol
 	coverage       storage.Coverage
-	diagnostics    storage.JSON
+	// coverageDeterministic is whether extracting the same commit, configuration and dependency set
+	// again must reach coverage again (typedLoad.deterministicCoverage).
+	coverageDeterministic bool
+	diagnostics           storage.JSON
 	// siblingShapes is every workspace sibling package the load read, keyed by package path, with the
 	// shape a direct import presented and the digest of its sources; the map is nil when one import
 	// path presented two shapes, so the snapshot records none.
 	siblingShapes map[string]siblingRecord
+	// implements are the snapshot's implements facts; a producer without types has none.
+	implements []implementsFact
+	// baseActive is the active documents of snapshot baseActiveOf, read while extracting a delta, so
+	// publication binds against them without reading them again.
+	baseActive   map[string]storage.ActiveDocument
+	baseActiveOf uuid.UUID
+	// carried is set for a delta that changes nothing: publication carries its base forward.
+	carried *carriedBase
+}
+
+// carriedBase is the base snapshot an empty delta carries forward, with its recorded stats.
+type carriedBase struct {
+	snapshot storage.ModuleSnapshot
+	stats    storage.SnapshotStats
+}
+
+// fileCount is how many files the extraction's snapshot serves.
+func (extraction moduleExtraction) fileCount() int {
+	if extraction.carried != nil {
+		return int(extraction.carried.stats.FileCount)
+	}
+	return len(extraction.root.Files)
 }
 
 // extractedPackage is one package_coverage row.
@@ -46,8 +76,12 @@ type extractedPackage struct {
 }
 
 // extractedDocument is one file's document with the symbol rows and postings it needs, and the
-// fingerprints of every canonical symbol it declares.
+// fingerprints of every canonical symbol it declares. A reused document is the base snapshot's stored
+// one, base, for a package whose input hash equals the base's: it carries no content, postings or
+// definitions, since publication neither writes it nor compares its symbols.
 type extractedDocument struct {
+	reused          bool
+	base            storage.Document
 	inputHash       string
 	coverage        storage.Coverage
 	content         storage.JSON
@@ -65,12 +99,25 @@ type extractedPosting struct {
 	occurrences int
 }
 
-// extractModule type-checks the root, hashes each package's inputs, and renders every document.
-func extractModule(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (moduleExtraction, error) {
+// extractOptions is what extractModule type-checks and which stored documents it may reuse.
+type extractOptions struct {
+	loadPackages packageLoader
+	root         discoveredRoot
+	includeTests bool
+	// base is the active documents of the snapshot the result will be published on, by package path.
+	// A package whose input hash equals its base's keeps the base's documents instead of rendering.
+	base         map[string]basePackage
+	baseSnapshot storage.ModuleSnapshot
+}
+
+// extractModule type-checks the root, hashes each package's inputs, and renders every document whose
+// package's inputs differ from the base's.
+func extractModule(ctx context.Context, options extractOptions) (moduleExtraction, error) {
 	startedAt := time.Now().UTC()
+	root := options.root
 	var load typedLoad
 	err := Phase(ctx, "typecheck", func(ctx context.Context) (err error) {
-		load, err = loadTyped(ctx, loadPackages, root, includeTests)
+		load, err = loadTyped(ctx, options.loadPackages, root, options.includeTests)
 		PhaseCount(ctx, "packages", int64(len(load.origins)))
 		PhaseCount(ctx, "files", int64(len(load.files)))
 		PhaseCount(ctx, "parsed", int64(len(load.parsed)))
@@ -91,74 +138,91 @@ func extractModule(ctx context.Context, loadPackages packageLoader, root discove
 	}
 	var extraction moduleExtraction
 	err = Phase(ctx, "extract", func(ctx context.Context) (err error) {
-		extraction, err = extractTypedLoad(ctx, &load, startedAt)
+		extraction, err = extractTypedLoad(ctx, &load, options.base, startedAt)
 		return err
 	})
 	return extraction, err
 }
 
-// extractTypedLoad hashes each package's inputs of a type-checked root and renders every document.
-func extractTypedLoad(ctx context.Context, load *typedLoad, startedAt time.Time) (moduleExtraction, error) {
+// packageExtraction is the state extractPackage shares across one root's packages. typed are the
+// packages that type-checked, whose declared types the implements pass relates.
+type packageExtraction struct {
+	load        *typedLoad
+	shapes      *exportShapes
+	builder     *documentBuilder
+	extraction  *moduleExtraction
+	base        map[string]basePackage
+	rendered    int
+	inputHashes map[string]string
+	coverages   []storage.Coverage
+	typed       []packageState
+}
+
+// extractTypedLoad hashes each package's inputs of a type-checked root, renders every document of a
+// package whose input hash differs from base's, and computes the snapshot's implements facts.
+func extractTypedLoad(ctx context.Context, load *typedLoad, base map[string]basePackage, startedAt time.Time) (moduleExtraction, error) {
 	root := load.root
 	resolver := newSymbolResolver(load.origins)
 	extraction := moduleExtraction{
 		root: root, indexerVersion: IndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{}, siblingShapes: map[string]siblingRecord{},
 	}
-	inputHashes := map[string]string{}
-	var coverages []storage.Coverage
-	if err := Phase(ctx, "render-documents", func(ctx context.Context) error {
-		shapes, builder := newExportShapes(resolver, load), newDocumentBuilder(resolver)
-		grouped := map[string][]discoveredFile{}
-		for _, file := range root.Files {
-			grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
-		}
-		for _, packagePath := range sortedKeys(grouped) {
-			extracted, err := extractPackage(load, shapes, builder, &extraction, packagePath, grouped[packagePath])
-			if err != nil {
-				return fmt.Errorf("extract package %q: %w", packagePath, err)
-			}
-			inputHashes[packagePath] = extracted.inputHash
-			coverages = append(coverages, extracted.coverage)
-			extraction.packages = append(extraction.packages, extracted)
-		}
-		if err := shapes.recordSiblingSources(extraction.siblingShapes); err != nil {
-			return err
-		}
-		PhaseCount(ctx, "packages", int64(len(extraction.packages)))
-		PhaseCount(ctx, "documents", int64(len(extraction.documents)))
-		return nil
+	extractor := &packageExtraction{
+		load: load, shapes: newExportShapes(resolver, load), builder: newDocumentBuilder(resolver), extraction: &extraction, base: base, inputHashes: map[string]string{},
+	}
+	if err := Phase(ctx, "render-documents", extractor.extractPackages); err != nil {
+		return moduleExtraction{}, err
+	}
+	if err := Phase(ctx, "implements", func(ctx context.Context) (err error) {
+		extraction.implements, err = snapshotImplements(load, resolver, extractor.shapes, extractor.typed)
+		PhaseCount(ctx, "facts", int64(len(extraction.implements)))
+		return err
 	}); err != nil {
 		return moduleExtraction{}, err
 	}
 	extraction.symbols = resolver.rows
-	extraction.contextHash = contextHash(root.ConfigurationHash, inputHashes)
-	extraction.coverage = weakestCoverage(coverages)
+	extraction.contextHash = contextHash(root.ConfigurationHash, extractor.inputHashes)
+	extraction.coverage = weakestCoverage(extractor.coverages)
+	extraction.coverageDeterministic = load.deterministicCoverage()
 	var err error
 	if extraction.diagnostics, err = snapshotDiagnostics(extraction.packages); err != nil {
-		return moduleExtraction{}, err
-	}
-	if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
-		PhaseCount(ctx, "symbols", int64(len(resolver.rows)))
-		for path, document := range extraction.documents {
-			if document, err = withSymbolFacts(document, resolver.rows); err != nil {
-				return fmt.Errorf("document for %q: %w", path, err)
-			}
-			extraction.documents[path] = document
-		}
-		return nil
-	}); err != nil {
 		return moduleExtraction{}, err
 	}
 	return extraction, nil
 }
 
-func extractPackage(load *typedLoad, shapes *exportShapes, builder *documentBuilder, extraction *moduleExtraction, packagePath string, files []discoveredFile) (extractedPackage, error) {
-	state, err := load.classifyPackage(files)
-	if err != nil {
-		return extractedPackage{}, err
+// extractPackages extracts the root's packages in path order and records its sibling sources.
+func (extractor *packageExtraction) extractPackages(ctx context.Context) error {
+	extraction := extractor.extraction
+	grouped := map[string][]discoveredFile{}
+	for _, file := range extractor.load.root.Files {
+		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
 	}
+	for _, packagePath := range sortedKeys(grouped) {
+		extracted, err := extractor.extractPackage(ctx, packagePath, grouped[packagePath])
+		if err != nil {
+			return fmt.Errorf("extract package %q: %w", packagePath, err)
+		}
+		extractor.inputHashes[packagePath] = extracted.inputHash
+		extractor.coverages = append(extractor.coverages, extracted.coverage)
+		extraction.packages = append(extraction.packages, extracted)
+	}
+	if err := extractor.shapes.recordSiblingSources(extraction.siblingShapes); err != nil {
+		return err
+	}
+	PhaseCount(ctx, "packages", int64(len(extraction.packages)))
+	PhaseCount(ctx, "documents", int64(len(extraction.documents)))
+	PhaseCount(ctx, "rendered", int64(extractor.rendered))
+	return nil
+}
+
+func (extractor *packageExtraction) extractPackage(ctx context.Context, packagePath string, files []discoveredFile) (extractedPackage, error) {
+	load, shapes, extraction := extractor.load, extractor.shapes, extractor.extraction
+	state := load.classifyPackage(files)
 	if load.root.Historical && state.coverage == storage.CoveragePartial {
 		state.coverage = storage.CoverageSyntax
+	}
+	if state.coverage == storage.CoverageIndexed || state.coverage == storage.CoveragePartial {
+		extractor.typed = append(extractor.typed, state)
 	}
 	imports, err := shapes.importsOf(state.variants)
 	if err != nil {
@@ -184,21 +248,78 @@ func extractPackage(load *typedLoad, shapes *exportShapes, builder *documentBuil
 		}
 		extracted.exportShapeHash = &shape
 	}
+	if base, found := extractor.base[packagePath]; found && base.inputHash == extracted.inputHash && base.coverage == extracted.coverage && reflect.DeepEqual(base.diagnostics, extracted.diagnostics) {
+		return extracted, reuseBaseDocuments(extraction, base, files)
+	}
 	for _, file := range files {
-		content, coverage, err := renderDocument(builder, state, file, fileDiagnostics(extracted.diagnostics, file.PathKey))
+		diagnostics := fileDiagnostics(extracted.diagnostics, file.PathKey)
+		document, err := extractor.extractDocument(ctx, state, file, extracted.inputHash, diagnostics)
+		if failure := asDocumentError(err); failure != nil {
+			var degraded degradedDocument
+			failed := extractedDocument{inputHash: extracted.inputHash, coverage: state.coverage}
+			if degraded, err = degradeDocument(file, failed, diagnostics, unwrittenCheck(file)); err == nil {
+				document = degraded.document
+				extracted.degrade(failure, degraded.note)
+			}
+		}
 		if err != nil {
 			return extractedPackage{}, err
 		}
-		encoded, err := json.Marshal(content)
-		if err != nil {
-			return extractedPackage{}, fmt.Errorf("encode document for %q: %w", file.PathKey, err)
-		}
-		extraction.documents[file.PathKey] = extractedDocument{
-			inputHash: extracted.inputHash, coverage: coverage, content: storage.JSON(encoded),
-			symbolCount: len(content.Symbols), occurrenceCount: len(content.Occurrences),
-		}
+		extraction.documents[file.PathKey] = document
+		extractor.rendered++
 	}
 	return extracted, nil
+}
+
+// unwrittenCheck runs publication's checks of a Go document before its file has a stored revision, so
+// extraction degrades a file to a document publication will accept.
+func unwrittenCheck(file discoveredFile) func(extractedDocument) error {
+	revision := storage.SourceRevision{PathKey: file.PathKey, PackagePath: file.PackagePath}
+	return func(candidate extractedDocument) error {
+		_, err := renderedDocument(IndexerVersion, file, revision, candidate, symbolhandle.Builtins())
+		return err
+	}
+}
+
+// extractDocument renders one file's document under its package's state and derives its symbol facts.
+// Every failure is the file's own, a DocumentError.
+func (extractor *packageExtraction) extractDocument(ctx context.Context, state packageState, file discoveredFile, inputHash string, diagnostics []storage.DocumentDiagnostic) (extractedDocument, error) {
+	content, coverage, err := renderDocument(extractor.builder, state, file, diagnostics)
+	if err != nil {
+		return extractedDocument{}, &DocumentError{Path: file.PathKey, Err: err}
+	}
+	document := extractedDocument{
+		inputHash: inputHash, coverage: coverage,
+		symbolCount: len(content.Symbols), occurrenceCount: len(content.Occurrences),
+	}
+	if err := Phase(ctx, "symbol-facts", func(ctx context.Context) (err error) {
+		document, err = withSymbolFacts(document, content, extractor.builder.resolver.rows)
+		PhaseCount(ctx, "symbols", int64(len(document.symbolIDs)))
+		return err
+	}); err != nil {
+		return extractedDocument{}, &DocumentError{Path: file.PathKey, Err: err}
+	}
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		return extractedDocument{}, &DocumentError{Path: file.PathKey, Err: fmt.Errorf("encode document: %w", err)}
+	}
+	document.content = storage.JSON(encoded)
+	return document, nil
+}
+
+// reuseBaseDocuments keeps the base's bound document for every file of a package whose input hash
+// equals the base's. The input hash covers the package's files, so the base binds a document for each.
+func reuseBaseDocuments(extraction *moduleExtraction, base basePackage, files []discoveredFile) error {
+	for _, file := range files {
+		stored, found := base.documents[file.PathKey]
+		if !found {
+			return fmt.Errorf("base package %q under input hash %s has no document for %q", file.PackagePath, base.inputHash, file.PathKey)
+		}
+		extraction.documents[file.PathKey] = extractedDocument{
+			inputHash: base.inputHash, coverage: stored.Coverage, symbolCount: stored.SymbolCount, occurrenceCount: stored.OccurrenceCount, reused: true, base: stored,
+		}
+	}
+	return nil
 }
 
 // renderDocument is a file's document under its package's coverage: excluded files are empty and
@@ -211,11 +332,11 @@ func renderDocument(builder *documentBuilder, state packageState, file discovere
 		}, storage.CoverageExcluded, nil
 	}
 	if state.coverage == storage.CoverageSyntax {
-		indexed, err := extractGoFile(file.PathKey, file.PackagePath, file.Content)
+		indexed, err := syntax.Extract(file.PathKey, file.PackagePath, file.Content)
 		if err != nil {
 			return storage.DocumentContent{}, "", err
 		}
-		content := indexed.syntaxDocument()
+		content := indexed.Document()
 		content.Diagnostics = diagnostics
 		return content, storage.CoverageSyntax, nil
 	}
@@ -224,16 +345,12 @@ func renderDocument(builder *documentBuilder, state packageState, file discovere
 }
 
 // withSymbolFacts verifies a typed document against the symbol rows it names and derives its
-// postings: definition from symbols, reference from every occurrence with a symbol, and implements
-// from each implements entry, none for builtins. It also collects the rows the document needs,
+// postings: definition from symbols, reference from every occurrence with a symbol, and embeds from
+// each embeds entry, none for builtins. It also collects the rows the document needs,
 // owners included, so publication can write them first.
-func withSymbolFacts(document extractedDocument, rows map[string]storage.Symbol) (extractedDocument, error) {
-	if document.coverage != storage.CoverageIndexed && document.coverage != storage.CoveragePartial {
+func withSymbolFacts(document extractedDocument, content storage.DocumentContent, rows map[string]storage.Symbol) (extractedDocument, error) {
+	if document.reused || document.coverage != storage.CoverageIndexed && document.coverage != storage.CoveragePartial {
 		return document, nil
-	}
-	var content storage.DocumentContent
-	if err := json.Unmarshal(document.content, &content); err != nil {
-		return extractedDocument{}, err
 	}
 	counts, needed, err := countSymbolFacts(content, rows)
 	if err != nil {
@@ -290,11 +407,6 @@ func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.S
 		}
 		if row := rows[*symbol.ID]; row.Kind != symbol.Kind || row.Visibility != symbol.Visibility {
 			return nil, nil, fmt.Errorf("symbol %s is a %s %s entry but a %s %s row", *symbol.ID, symbol.Visibility, symbol.Kind, row.Visibility, row.Kind)
-		}
-		for _, implemented := range symbol.Implements {
-			if err := count(implemented, storage.RoleImplements); err != nil {
-				return nil, nil, err
-			}
 		}
 		for _, embedded := range symbol.Embeds {
 			if err := count(embedded, storage.RoleEmbeds); err != nil {

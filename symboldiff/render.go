@@ -4,93 +4,127 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
+	"github.com/flanksource/clicky/api/icons"
 	"github.com/flanksource/uir"
 )
 
-const (
-	nameWidth       = 20
-	classWidth      = 9
-	shapeDiffIndent = "      "
-)
+type changeTheme struct {
+	icon  icons.Icon
+	style string
+}
 
-var classStyles = map[Class]string{
-	ClassAdded: "text-green-600", ClassRemoved: "text-red-600", ClassSignature: "text-yellow-600",
-	ClassStructure: "text-orange-600", ClassBody: "text-blue-600", ClassMoved: "text-cyan-600",
+var classThemes = map[Class]changeTheme{
+	ClassAdded:     {icon: icons.Add, style: uir.StyleDiffAdded},
+	ClassRemoved:   {icon: icons.Delete, style: uir.StyleDiffRemoved},
+	ClassSignature: {icon: icons.Edit, style: uir.StyleDiffSignature},
+	ClassStructure: {icon: icons.Refactor, style: uir.StyleDiffStructure},
+	ClassBody:      {icon: icons.Code, style: uir.StyleDiffBody},
+	ClassMoved:     {icon: icons.Rename, style: uir.StyleDiffMoved},
+}
+
+var fileThemes = map[FileStatus]changeTheme{
+	FileAdded:    classThemes[ClassAdded],
+	FileRemoved:  classThemes[ClassRemoved],
+	FileModified: classThemes[ClassSignature],
 }
 
 func (count *LineCount) String() string {
 	return fmt.Sprintf("+%d -%d", count.Added, count.Removed)
 }
 
-// Pretty renders the diff: package, file, and symbol rows with their line counts, and a shape diff
-// under each signature row. Its plain form is the "-"/"+" text of docs/diff.md; ANSI, markdown, and
-// HTML carry token marks.
+func lineCountText(count *LineCount) api.Text {
+	return api.Text{}.Append(fmt.Sprintf("+%d", count.Added), uir.StyleDiffAddedCount).
+		Append(" ").Append(fmt.Sprintf("-%d", count.Removed), uir.StyleDiffRemovedCount)
+}
+
+// Pretty renders the diff as a package, file, symbol, and shape tree.
 func (result Result) Pretty() api.Text {
-	text := api.Text{}.Append(result.RootKey+" "+result.From.Commit+".."+result.To.Commit, uir.StyleBold).Append("\n")
+	children := make([]api.TextTree, 0, len(result.Packages)+1)
 	if result.LinesError != "" {
-		text = text.Append("line counts unavailable: "+result.LinesError, "text-red-600").Append("\n")
+		children = append(children, clicky.Tree(api.Text{}.Add(icons.Warning).Append(" line counts unavailable: "+result.LinesError, uir.StyleWarning)))
 	}
 	for _, pkg := range result.Packages {
-		line := pkg.Path
-		if result.Stat && pkg.Lines != nil {
-			line += "  " + pkg.Lines.String()
-		}
-		text = text.Append(line, uir.StyleBold).Append("\n")
-		for _, file := range pkg.Files {
-			text = text.Add(file.pretty(result.Stat))
-		}
+		children = append(children, pkg.tree(result.Stat))
 	}
-	return text
+	label := api.Text{}.Append(result.RootKey+" "+result.From.Commit+".."+result.To.Commit, uir.StyleBold)
+	return api.Text{}.Add(clicky.Tree(label, children...)).Append("\n")
 }
 
-func (file FileDiff) pretty(stat bool) api.Text {
-	line := "  " + file.Path + " (" + string(file.Status) + ")" + markerSuffix(file.Coverage)
+func (pkg PackageDiff) tree(stat bool) api.TextTree {
+	label := api.Text{}.Add(icons.Package).Append(" ").Append(pkg.Path, uir.StyleBold)
+	if stat && pkg.Lines != nil {
+		label = label.Append("  ").Add(lineCountText(pkg.Lines))
+	}
+	if pkg.HiddenFiles == 1 {
+		label = label.Append("  (1 hidden file)", uir.StyleMuted)
+	} else if pkg.HiddenFiles > 1 {
+		label = label.Append(fmt.Sprintf("  (%d hidden files)", pkg.HiddenFiles), uir.StyleMuted)
+	}
+	children := make([]api.TextTree, 0, len(pkg.Files))
+	for _, file := range pkg.Files {
+		children = append(children, file.tree(stat))
+	}
+	return clicky.Tree(label, children...)
+}
+
+func (file FileDiff) tree(stat bool) api.TextTree {
+	theme, ok := fileThemes[file.Status]
+	if !ok {
+		panic(fmt.Sprintf("unknown file diff status %q for %s", file.Status, file.Path))
+	}
+	label := api.Text{}.Add(theme.icon.WithStyle(theme.style)).Append(" ").Append(file.Path, uir.StyleFileName).
+		Append(" (").Append(string(file.Status), theme.style).Append(")").Append(markerSuffix(file.Coverage))
 	switch {
 	case stat && file.Lines != nil:
-		line += "  " + file.Lines.String()
-	case stat:
-		line += "  lines unavailable: " + file.LinesError
+		label = label.Append("  ").Add(lineCountText(file.Lines))
+	case stat && file.LinesError != "":
+		label = label.Append("  lines unavailable: "+file.LinesError, uir.StyleWarning)
 	}
 	if file.HiddenRows == 1 {
-		line += "  (1 hidden row)"
+		label = label.Append("  (1 hidden row)", uir.StyleMuted)
 	} else if file.HiddenRows > 1 {
-		line += fmt.Sprintf("  (%d hidden rows)", file.HiddenRows)
+		label = label.Append(fmt.Sprintf("  (%d hidden rows)", file.HiddenRows), uir.StyleMuted)
 	}
-	text := api.Text{}.Append(line).Append("\n")
+	children := make([]api.TextTree, 0, len(file.Rows)+1)
 	for _, row := range file.Rows {
-		text = text.Add(row.pretty(stat))
+		children = append(children, row.tree(stat))
 	}
 	if stat && file.FileScope != nil {
-		text = text.Append(strings.TrimRight(rowPrefix("(file scope)")+strings.Repeat(" ", classWidth)+" "+file.FileScope.String(), " ")).Append("\n")
+		children = append(children, clicky.Tree(api.Text{}.Append("(file scope)", uir.StyleMuted).
+			Append("  ").Add(lineCountText(file.FileScope))))
 	}
-	return text
+	return clicky.Tree(label, children...)
 }
 
-func (row Row) pretty(stat bool) api.Text {
-	suffix := ""
-	if stat && row.Lines != nil {
-		suffix += " " + row.Lines.String()
+func (row Row) tree(stat bool) api.TextTree {
+	theme, ok := classThemes[row.Class]
+	if !ok {
+		panic(fmt.Sprintf("unknown symbol diff class %q for %s", row.Class, row.DisplayName()))
 	}
-	suffix += markerSuffix(row.Coverage)
-	if row.Class == ClassMoved || (row.PathBefore != "" && row.PathAfter != "" && row.PathBefore != row.PathAfter) {
-		suffix += "  from " + row.PathBefore
+	label := api.Text{}.Add(theme.icon.WithStyle(theme.style)).Append(" ").Append(row.DisplayName(), uir.StyleName).
+		Append("  ").Append(string(row.Class), theme.style)
+	if stat && row.Lines != nil {
+		label = label.Append("  ").Add(lineCountText(row.Lines))
+	}
+	label = label.Append(markerSuffix(row.Coverage))
+	switch {
+	case row.MovedAway:
+		label = label.Append("  to "+row.PathAfter, uir.StyleDim)
+	case row.Class == ClassMoved || (row.PathBefore != "" && row.PathAfter != "" && row.PathBefore != row.PathAfter):
+		label = label.Append("  from "+row.PathBefore, uir.StyleDim)
 	}
 	if row.Note != "" {
-		suffix += "  (" + row.Note + ")"
+		label = label.Append("  ("+row.Note+")", uir.StyleDim)
 	}
 	if shape := row.singleShape(); shape != "" {
-		suffix += "  " + shape
+		label = label.Append("  " + shape)
 	}
-	class := string(row.Class)
-	if suffix != "" {
-		class = fmt.Sprintf("%-*s", classWidth, class)
-	}
-	text := api.Text{}.Append(rowPrefix(row.DisplayName())).Append(class, classStyles[row.Class]).Append(strings.TrimRight(suffix, " ")).Append("\n")
 	if len(row.ShapeDiff) > 0 {
-		text = text.Add(indentedShapeDiff{diff: row.ShapeDiff, indent: shapeDiffIndent})
+		return clicky.Tree(label, clicky.Tree(indentedShapeDiff{diff: row.ShapeDiff}))
 	}
-	return text
+	return clicky.Tree(label)
 }
 
 // singleShape is the one-line shape an added or removed row shows when it has no shape diff.
@@ -109,10 +143,6 @@ func (row Row) singleShape() string {
 		return first + " …"
 	}
 	return shape
-}
-
-func rowPrefix(name string) string {
-	return fmt.Sprintf("    %-*s ", nameWidth, name)
 }
 
 func markerSuffix(markers []string) string {

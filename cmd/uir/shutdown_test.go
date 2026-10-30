@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -81,8 +82,7 @@ var _ = Describe("UIR command shutdown", func() {
 			Expect(err).To(Succeed(), stderr.String())
 		case <-time.After(10 * time.Second):
 			_ = command.Process.Kill()
-			<-finished
-			Fail("UIR did not exit within 10 seconds of Ctrl+C")
+			Fail(fmt.Sprintf("UIR did not exit within 10 seconds of Ctrl+C (wait: %v): %s", <-finished, stderr.String()))
 		}
 		contents, err := os.ReadFile(marker)
 		Expect(err).To(Succeed())

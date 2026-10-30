@@ -12,6 +12,7 @@ import (
 // which is inside a PackageNode, which is inside a ModuleNode.
 // It serves as the entry point for representing code structure in a language-agnostic way.
 type UIR struct {
+	SQLCatalog *SQLCatalog `json:"sqlCatalog,omitempty"`
 	nilNode
 	Modules   []ModuleNode    `json:"modules,omitempty"`
 	Packages  []PackageNode   `json:"packages,omitempty"`

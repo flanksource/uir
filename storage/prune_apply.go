@@ -43,26 +43,31 @@ func (plan prunePlan) apply(ctx context.Context, tx *gorm.DB, result *PruneResul
 	return advancePruneEpoch(ctx, tx)
 }
 
-// rebaseSnapshot makes a kept snapshot whose base is deleted stand alone: one set delta per path and
-// symbol it serves replaces its own deltas, it loses its base, and its stats are recorded again against
-// no base. The handles its old symbol deltas named become orphan candidates.
+// rebaseSnapshot makes a kept snapshot whose base is deleted stand alone: one set delta per path,
+// document binding, and symbol it serves replaces its own deltas, and it loses its base. Its recorded
+// publication stats remain unchanged. The handles its old symbol deltas named become orphan candidates.
 func rebaseSnapshot(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased rebasedSnapshot, candidates map[int64]bool) error {
 	snapshot := rebased.snapshot
-	var handles []int64
-	if err := tx.WithContext(ctx).Model(&SymbolDelta{}).Where("snapshot_ordinal = ?", snapshot.Ordinal).Pluck("symbol_handle", &handles).Error; err != nil {
-		return fmt.Errorf("load symbol deltas of snapshot %s: %w", snapshot.ID, err)
-	}
-	for _, handle := range handles {
-		candidates[handle] = true
+	for _, source := range snapshotHandles {
+		if err := collectHandles(ctx, tx, source, "snapshot_ordinal", []int64{snapshot.Ordinal}, candidates); err != nil {
+			return err
+		}
 	}
 	if err := tx.WithContext(ctx).Where("snapshot_id = ?", snapshot.ID).Delete(&SourceDelta{}).Error; err != nil {
 		return fmt.Errorf("delete source deltas of snapshot %s: %w", snapshot.ID, err)
 	}
-	if err := tx.WithContext(ctx).Where("snapshot_ordinal = ?", snapshot.Ordinal).Delete(&SymbolDelta{}).Error; err != nil {
-		return fmt.Errorf("delete symbol deltas of snapshot %s: %w", snapshot.ID, err)
+	for _, model := range []any{&SymbolDelta{}, &ImplementsDelta{}, &DocumentDelta{}} {
+		if err := tx.WithContext(ctx).Where("snapshot_ordinal = ?", snapshot.Ordinal).Delete(model).Error; err != nil {
+			return fmt.Errorf("delete the %T rows of snapshot %s: %w", model, snapshot.ID, err)
+		}
 	}
 	if err := createRebasedDeltas(ctx, tx, root, rebased); err != nil {
 		return err
+	}
+	if _, err := CreateDocumentDeltas(ctx, tx, DocumentDeltaOptions{
+		SnapshotOrdinal: snapshot.Ordinal, RootID: root.ID, Base: map[string]int64{}, Current: rebased.documents,
+	}); err != nil {
+		return fmt.Errorf("write the document deltas of rebased snapshot %s: %w", snapshot.ID, err)
 	}
 	updated := tx.WithContext(ctx).Model(&ModuleSnapshot{}).Where("id = ?", snapshot.ID).Update("base_snapshot_id", nil)
 	if updated.Error != nil {
@@ -71,7 +76,7 @@ func rebaseSnapshot(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased r
 	if updated.RowsAffected != 1 {
 		return fmt.Errorf("clear the base of snapshot %s: updated %d rows", snapshot.ID, updated.RowsAffected)
 	}
-	return recordDerivedSnapshotStats(ctx, tx, snapshot.ID)
+	return nil
 }
 
 func createRebasedDeltas(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased rebasedSnapshot) error {
@@ -103,6 +108,15 @@ func createRebasedDeltas(ctx context.Context, tx *gorm.DB, root ModuleRoot, reba
 			return fmt.Errorf("write the symbol deltas of rebased snapshot %s: %w", snapshot.ID, err)
 		}
 	}
+	implements := make([]ImplementsDelta, len(rebased.implements))
+	for i, pair := range rebased.implements {
+		implements[i] = ImplementsDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: root.Ordinal, TypeHandle: pair.Type, InterfaceHandle: pair.Interface, Operation: SourceSet}
+	}
+	if len(implements) > 0 {
+		if err := tx.WithContext(ctx).CreateInBatches(&implements, createBatch).Error; err != nil {
+			return fmt.Errorf("write the implements deltas of rebased snapshot %s: %w", snapshot.ID, err)
+		}
+	}
 	return nil
 }
 
@@ -114,8 +128,10 @@ func (plan prunePlan) deleteSnapshots(ctx context.Context, tx *gorm.DB, candidat
 		for _, snapshot := range batch {
 			ids, ordinals = append(ids, snapshot.ID), append(ordinals, snapshot.Ordinal)
 		}
-		if err := collectHandles(ctx, tx, "symbol_deltas", "snapshot_ordinal", ordinals, candidates); err != nil {
-			return err
+		for _, source := range snapshotHandles {
+			if err := collectHandles(ctx, tx, source, "snapshot_ordinal", ordinals, candidates); err != nil {
+				return err
+			}
 		}
 		deleted := tx.WithContext(ctx).Where("id IN ?", ids).Delete(&ModuleSnapshot{})
 		if deleted.Error != nil {
@@ -146,7 +162,7 @@ func (plan prunePlan) deleteDocuments(ctx context.Context, tx *gorm.DB, candidat
 		}
 	}
 	return inBatches(dead, func(batch []int64) error {
-		if err := collectHandles(ctx, tx, "symbol_postings", "document_ordinal", batch, candidates); err != nil {
+		if err := collectHandles(ctx, tx, postingHandles, "document_ordinal", batch, candidates); err != nil {
 			return err
 		}
 		postings := tx.WithContext(ctx).Where("document_ordinal IN ?", batch).Delete(&SymbolPosting{})
@@ -162,11 +178,23 @@ func (plan prunePlan) deleteDocuments(ctx context.Context, tx *gorm.DB, candidat
 	})
 }
 
-// collectHandles adds to candidates the symbol handles the rows of table whose column is in values name.
-func collectHandles(ctx context.Context, tx *gorm.DB, table, column string, values []int64, candidates map[int64]bool) error {
+// handleColumn is a column that names a symbol handle, which keeps the symbol from being an orphan.
+type handleColumn struct{ table, handle string }
+
+var (
+	postingHandles             = handleColumn{"symbol_postings", "symbol_handle"}
+	symbolDeltaHandles         = handleColumn{"symbol_deltas", "symbol_handle"}
+	implementsTypeHandles      = handleColumn{"implements_deltas", "type_handle"}
+	implementsInterfaceHandles = handleColumn{"implements_deltas", "interface_handle"}
+	// snapshotHandles are the handle columns of rows keyed by snapshot ordinal.
+	snapshotHandles = []handleColumn{symbolDeltaHandles, implementsTypeHandles, implementsInterfaceHandles}
+)
+
+// collectHandles adds to candidates the symbol handles source names in the rows whose column is in values.
+func collectHandles(ctx context.Context, tx *gorm.DB, source handleColumn, column string, values []int64, candidates map[int64]bool) error {
 	var handles []int64
-	if err := tx.WithContext(ctx).Table(table).Distinct("symbol_handle").Where(column+" IN ?", values).Pluck("symbol_handle", &handles).Error; err != nil {
-		return fmt.Errorf("load the symbol handles of %s: %w", table, err)
+	if err := tx.WithContext(ctx).Table(source.table).Distinct(source.handle).Where(column+" IN ?", values).Pluck(source.handle, &handles).Error; err != nil {
+		return fmt.Errorf("load the symbol handles of %s.%s: %w", source.table, source.handle, err)
 	}
 	for _, handle := range handles {
 		candidates[handle] = true

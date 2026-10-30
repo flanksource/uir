@@ -153,6 +153,15 @@ func ensureModuleLocation(ctx context.Context, database *gorm.DB, discovered dis
 	if err := database.WithContext(ctx).Where("root_id = ? AND canonical_path = ?", root.ID, discovered.LocalPath).First(&location).Error; err != nil {
 		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("load module location: %w", err)
 	}
+	if discovered.Kind == storage.LocationExternal {
+		previousURI := ""
+		if location.RepositoryURI != nil {
+			previousURI = *location.RepositoryURI
+		}
+		if previousURI != discovered.RepositoryURI {
+			return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("external location %q already binds repository %q, cannot bind %q", discovered.LocalPath, previousURI, discovered.RepositoryURI)
+		}
+	}
 	primary := storage.ModulePrimary{RootID: root.ID, LocationID: location.ID}
 	if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&primary).Error; err != nil {
 		return storage.ModuleRoot{}, storage.ModuleLocation{}, fmt.Errorf("set primary module location: %w", err)

@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 )
 
@@ -113,7 +114,7 @@ func (builder *documentBuilder) occurrences(source typedSource) ([]storage.Docum
 
 func (builder *documentBuilder) importOccurrence(source typedSource, spec *ast.ImportSpec) (storage.DocumentOccurrence, error) {
 	span := source.span(spec.Path.Pos(), spec.Path.End())
-	occurrence := storage.DocumentOccurrence{Role: "import", Range: source.lines.rangeOf(span), Bytes: span, Note: noteUnresolvedImport}
+	occurrence := storage.DocumentOccurrence{Role: "import", Range: source.lines.RangeOf(span), Bytes: span, Note: noteUnresolvedImport}
 	path, err := strconv.Unquote(spec.Path.Value)
 	if err != nil {
 		return storage.DocumentOccurrence{}, fmt.Errorf("read import %s: %w", spec.Path.Value, err)
@@ -184,7 +185,7 @@ func useRole(object types.Object, called, written bool) string {
 // call-graph queries read, with its target spelled as a structured identifier.
 func (builder *documentBuilder) occurrence(source typedSource, ident *ast.Ident, role string, object types.Object, call *ast.CallExpr) (storage.DocumentOccurrence, error) {
 	span := source.span(ident.Pos(), ident.End())
-	occurrence := storage.DocumentOccurrence{Role: role, Range: source.lines.rangeOf(span), Bytes: span, Note: noteUnresolved}
+	occurrence := storage.DocumentOccurrence{Role: role, Range: source.lines.RangeOf(span), Bytes: span, Note: noteUnresolved}
 	if object != nil {
 		resolved, err := builder.resolver.resolve(object)
 		if err != nil {
@@ -195,7 +196,7 @@ func (builder *documentBuilder) occurrence(source typedSource, ident *ast.Ident,
 	if call == nil {
 		return occurrence, nil
 	}
-	text, err := formatNode(source.pkg.Fset, call.Fun)
+	text, err := syntax.FormatNode(source.pkg.Fset, call.Fun)
 	if err != nil {
 		return storage.DocumentOccurrence{}, fmt.Errorf("format call %s: %w", ident.Name, err)
 	}

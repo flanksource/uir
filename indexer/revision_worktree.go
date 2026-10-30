@@ -85,11 +85,13 @@ func checkoutRevision(ctx context.Context, options RevisionOptions) (revisionChe
 // discoverRevisionRoot discovers the module options names in the checked-out commit as a historical
 // root.
 func discoverRevisionRoot(ctx context.Context, checkout revisionCheckout, options RevisionOptions) (discoveredRoot, error) {
+	// The original repository is watched; this immutable scratch worktree is removed after indexing.
+	ctx = context.WithValue(ctx, checkpointContextKey{}, (*indexCheckpoint)(nil))
 	modulePath, err := filepath.EvalSymlinks(filepath.Join(checkout.scratch.worktree, checkout.relative))
 	if err != nil {
 		return discoveredRoot{}, fmt.Errorf("canonicalize historical module at %q: %w", checkout.relative, err)
 	}
-	roots, err := discoverModules(ctx, modulePath, options.IncludeTests)
+	roots, err := discoverModules(ctx, modulePath, discoveryOptions{IncludeTests: options.IncludeTests})
 	if err != nil {
 		return discoveredRoot{}, err
 	}
@@ -115,10 +117,15 @@ func historicalRoot(ctx context.Context, root discoveredRoot, options RevisionOp
 	root.Revision = root.GitCommit
 	root.Historical = true
 	root.ModuleVersion = options.Version
+	return isolateRoot(ctx, root, options.IncludeTests, manifests)
+}
+
+func isolateRoot(ctx context.Context, root discoveredRoot, includeTests bool, manifests string) (discoveredRoot, error) {
 	environment, err := readGoEnvironmentWithWork(ctx, root.LocalPath, true)
 	if err != nil {
 		return root, err
 	}
+	environment.Variant.BuildTags = root.Variant.BuildTags
 	root.Variant = environment.Variant
 	root.Variant.GoWorkOff = true
 	root.WorkFile = ""
@@ -130,8 +137,10 @@ func historicalRoot(ctx context.Context, root discoveredRoot, options RevisionOp
 		return root, err
 	}
 	root.ContentSetHash = contentSetHash(root.Files, manifestHashes)
-	root.ConfigurationHash = configurationHash(options.IncludeTests, root.Variant)
-	root.Dependencies, err = readDependencies(ctx, root)
+	root.ConfigurationHash = configurationHash(includeTests, root.Variant)
+	if root.AnalysisMode == "" {
+		root.Dependencies, err = readDependencies(ctx, root)
+	}
 	return root, err
 }
 

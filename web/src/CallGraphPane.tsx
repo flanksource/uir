@@ -50,9 +50,7 @@ function Candidates({ graph, onRoute }: { graph: ModuleGraphResult; onRoute: OnR
 
 function Stages({ graph }: { graph: ModuleGraphResult }) {
   return <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label="Resolution stages">
-    {graph.stages.map((stage) => <li key={stage.name}><span className="font-medium text-foreground">{stage.name}</span> {stage.value}</li>)}
-    {graph.warnings.map((warning) => <li key={`${warning.root_key}:${warning.location}`} className="text-amber-600 dark:text-amber-400">{warning.root_key}: {warning.message}</li>)}
-  </ul>;
+    {graph.stages.map((stage) => <li key={stage.name}><span className="font-medium text-foreground">{stage.name}</span> {stage.value}</li>)}  </ul>;
 }
 
 export function CallGraphPane({ route, selectedNode, onRoute }: { route: Route; selectedNode?: ModuleNode; onRoute: OnRoute }) {

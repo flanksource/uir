@@ -93,11 +93,11 @@ func (indexer *Indexer) expandVersionedNode(ctx context.Context, memo *runMemo, 
 }
 
 // storedVersionMiss is why a version's stored snapshot cannot stand without indexing the version
-// again, or "" when it can: its coverage is one extracting again cannot improve and its closure is
-// complete.
+// again, or "" when it can: its coverage is settled, so extracting again cannot change it, and its
+// closure is complete.
 func (indexer *Indexer) storedVersionMiss(ctx context.Context, memo *runMemo, stored storage.ModuleSnapshot) (string, error) {
-	if !stored.Coverage.Complete() {
-		return fmt.Sprintf("snapshot %s has %s coverage", stored.ID, stored.Coverage), nil
+	if !stored.CoverageSettled() {
+		return fmt.Sprintf("snapshot %s has %s coverage not known to be deterministic", stored.ID, stored.Coverage), nil
 	}
 	return indexer.versionedClosureMiss(ctx, memo, stored.ID)
 }
@@ -245,7 +245,7 @@ func (indexer *Indexer) publishVersionedGraph(ctx context.Context, memo *runMemo
 		return nil, err
 	}
 	for index, node := range graph.nodes {
-		extraction, err := extractModule(ctx, indexer.loadPackages, node.prepared.root, node.options.IncludeTests)
+		extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: node.prepared.root, includeTests: node.options.IncludeTests})
 		if err != nil {
 			return nil, fmt.Errorf("extract version %s: %w", node.key, err)
 		}
@@ -325,13 +325,26 @@ func (indexer *Indexer) reuseVersionedGraph(ctx context.Context, memo *runMemo, 
 		if stored.GitCommit != root.GitCommit || stored.ContentSetHash != root.ContentSetHash || stored.ConfigurationHash != root.ConfigurationHash || stored.DependencySetHash == nil || *stored.DependencySetHash != dependencyHash(root.Dependencies) {
 			return nil, false, nil
 		}
-		extraction, err := extractModule(ctx, indexer.loadPackages, root, node.options.IncludeTests)
+		extraction, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: node.options.IncludeTests})
 		if err != nil {
 			return nil, false, fmt.Errorf("extract version %s: %w", node.key, err)
 		}
-		if stored.ContextHash != extraction.contextHash || stored.Coverage != extraction.coverage {
+		if !storedMatchesExtraction(stored, extraction) {
 			return nil, false, nil
 		}
 	}
 	return existing, true, nil
+}
+
+// storedMatchesExtraction applies loadStoredRevision's rule after an extraction: the same context and
+// coverage, and for a degraded coverage the same recorded determinism, so a row published before
+// determinism was recorded is extracted again rather than kept unclassified.
+func storedMatchesExtraction(stored storage.ModuleSnapshot, extraction moduleExtraction) bool {
+	if stored.ContextHash != extraction.contextHash || stored.Coverage != extraction.coverage {
+		return false
+	}
+	if extraction.coverage.Complete() {
+		return true
+	}
+	return stored.CoverageDeterministic != nil && *stored.CoverageDeterministic == extraction.coverageDeterministic
 }

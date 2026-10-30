@@ -267,6 +267,33 @@ it("gets the call graph of a node by its symbol id and returns the candidates of
   ]);
 });
 
+it("sends a change query's revision and returns the changed nodes with their paths", async () => {
+  const changed: ModuleGraphResult = { ...submitGraph, since: {
+    revision: "v1.4.0", from_snapshot_id: "22222222-2222-2222-2222-222222222222", to_snapshot_id: snapshot, changed: true,
+    nodes: [{ id: chargeID, reason: "body", snapshot_id: snapshot, path: [submitID, chargeID] }], edges: [], symbols: { body: 1 }, dependencies: [],
+  } };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(changed), { status: 200, headers: graphTiming }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(getModuleGraph({ selector: "orders.Submit", depth: 4, root: "example.org/orders", since: "v1.4.0", "since-snapshot": snapshot })).resolves.toMatchObject({ data: changed });
+  expect(fetcher).toHaveBeenCalledWith(
+    `/api/v1/modules/graph?selector=orders.Submit&depth=4&root=example.org%2Forders&since=v1.4.0&since-snapshot=${snapshot}`,
+    expect.objectContaining({ headers: { Accept: "application/json" } }),
+  );
+});
+
+it("preserves the earlier graph and snapshot-qualified paths of removed nodes and edges", async () => {
+  const previous = "22222222-2222-2222-2222-222222222222";
+  const changed: ModuleGraphResult = { ...submitGraph, nodes: [submitGraph.nodes[0]!], edges: [], since: {
+    revision: "v1.4.0", from_snapshot_id: previous, to_snapshot_id: snapshot, changed: true, before: submitGraph,
+    nodes: [{ id: chargeID, reason: "removed", snapshot_id: previous, path: [submitID, chargeID] }],
+    edges: [{ id: submitGraph.edges[0]!.id, reason: "removed", snapshot_id: previous, path: [submitID, chargeID] }],
+    symbols: { removed: 1 }, dependencies: [],
+  } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(changed), { status: 200, headers: graphTiming })));
+
+  await expect(getModuleGraph({ selector: "orders.Submit", since: "v1.4.0", "since-snapshot": previous })).resolves.toMatchObject({ data: changed });
+});
+
 it("rejects a graph response that is not the graph envelope and surfaces a refused request", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ roots: [submitID], nodes: [], edges: [] }), { status: 200, headers: graphTiming })));
   await expect(getModuleGraph({ selector: "orders.Submit" })).rejects.toThrow("Graph response is not a graph envelope");
@@ -338,7 +365,7 @@ it("sends explicit add and reindex inputs, takes the started run id, and reports
   vi.stubGlobal("fetch", fetcher);
   await expect(addModules("/repo", true)).resolves.toEqual({ run_id: "run-1" });
   expect(fetcher.mock.calls[0]).toEqual(["/api/v1/modules/add", expect.objectContaining({
-    method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true, "no-workspace-uses": true }),
+    method: "POST", body: JSON.stringify({ args: ["/repo"], "include-tests": true }),
   })]);
   await expect(reindexModules({ path: "/repo", includeTests: true, force: false })).rejects.toThrow("index failed");
   expect(fetcher.mock.calls[1]).toEqual(["/api/v1/modules/reindex", expect.objectContaining({

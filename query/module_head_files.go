@@ -17,20 +17,20 @@ type ModuleHeadFiles struct {
 	Sources    []ModuleSourceView `json:"sources"`
 }
 
-func (pipeline *Pipeline) BrowseModuleHeads(ctx context.Context) (ItemsWithWarnings[ModuleHeadFiles], error) {
+func (pipeline *Pipeline) BrowseModuleHeads(ctx context.Context) ([]ModuleHeadFiles, error) {
 	if pipeline == nil || pipeline.database == nil {
-		return ItemsWithWarnings[ModuleHeadFiles]{}, errors.New("UIR query database is required")
+		return nil, errors.New("UIR query database is required")
 	}
 	var rootCount int64
 	if err := pipeline.database.WithContext(ctx).Model(&storage.ModuleRoot{}).Count(&rootCount).Error; err != nil {
-		return ItemsWithWarnings[ModuleHeadFiles]{}, fmt.Errorf("count module roots: %w", err)
+		return nil, fmt.Errorf("count module roots: %w", err)
 	}
 	if rootCount == 0 {
-		return ItemsWithWarnings[ModuleHeadFiles]{Items: []ModuleHeadFiles{}, Warnings: []MissingHeadWarning{}}, nil
+		return []ModuleHeadFiles{}, nil
 	}
 	selection, err := pipeline.moduleScopes(ctx, ModuleScopeOptions{}, true)
 	if err != nil {
-		return ItemsWithWarnings[ModuleHeadFiles]{}, err
+		return nil, err
 	}
 	scopes := selection.scopes
 	sort.Slice(scopes, func(i, j int) bool {
@@ -41,9 +41,9 @@ func (pipeline *Pipeline) BrowseModuleHeads(ctx context.Context) (ItemsWithWarni
 	})
 	result := make([]ModuleHeadFiles, 0, len(scopes))
 	for _, scope := range scopes {
-		revisions, err := storage.EffectiveSources(ctx, pipeline.database, scope.snapshot.ID)
+		revisions, err := storage.EffectiveSources(ctx, pipeline.database, storage.EffectiveSourcesOptions{SnapshotID: scope.snapshot.ID})
 		if err != nil {
-			return ItemsWithWarnings[ModuleHeadFiles]{}, fmt.Errorf("load head files for %s at %s: %w", scope.root.RootKey, scope.location.CanonicalPath, err)
+			return nil, fmt.Errorf("load head files for %s at %s: %w", scope.root.RootKey, scope.location.CanonicalPath, err)
 		}
 		paths := make([]string, 0, len(revisions))
 		for path := range revisions {
@@ -57,5 +57,5 @@ func (pipeline *Pipeline) BrowseModuleHeads(ctx context.Context) (ItemsWithWarni
 		}
 		result = append(result, head)
 	}
-	return ItemsWithWarnings[ModuleHeadFiles]{Items: result, Warnings: selection.warnings}, nil
+	return result, nil
 }

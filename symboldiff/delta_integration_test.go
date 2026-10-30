@@ -99,7 +99,7 @@ func indexPair(ctx SpecContext, options storage.DBOptions, before, after map[str
 
 func (fixture ledger) diffRoot(ctx SpecContext, root string, visibility Visibility, stat bool) Result {
 	GinkgoHelper()
-	result, err := Diff(ctx, fixture.database, Options{RootKey: root, From: fixture.from, To: fixture.to, Visibility: visibility, Stat: stat})
+	result, err := Diff(ctx, fixture.database, Options{RootKey: root, Revisions: []string{fixture.from, fixture.to}, Visibility: visibility, Stat: stat})
 	Expect(err).ToNot(HaveOccurred())
 	return result
 }
@@ -214,20 +214,20 @@ var bootAfter = map[string]*string{
 	"boot/c.go": text("package boot\n\nfunc init() { order = append(order, \"c\") }\n"),
 }
 
-const bootAll = `example.org/boot/boot
-  boot/b.go (modified)
-    init                 body
-  boot/c.go (added)
-    init                 added      func init()
+const bootAll = `╰── 📦 example.org/boot/boot
+    ├── ✏️ boot/b.go (modified)
+    │   ╰── 💻 init  body
+    ╰── ➕ boot/c.go (added)
+        ╰── ➕ init  added  func init()
 `
 
-const bootStatAll = `example.org/boot/boot  +4 -1
-  boot/b.go (modified)  +1 -1
-    init                 body      +1 -1
-    (file scope)                   +0 -0
-  boot/c.go (added)  +3 -0
-    init                 added     +1 -0  func init()
-    (file scope)                   +2 -0
+const bootStatAll = `╰── 📦 example.org/boot/boot  +4 -1
+    ├── ✏️ boot/b.go (modified)  +1 -1
+    │   ├── 💻 init  body  +1 -1
+    │   ╰── (file scope)  +0 -0
+    ╰── ➕ boot/c.go (added)  +3 -0
+        ├── ➕ init  added  +1 -0  func init()
+        ╰── (file scope)  +2 -0
 `
 
 const fallbackRoot = "example.org/fallback"
@@ -250,34 +250,34 @@ var fallbackAfter = map[string]*string{
 	"mixed/a.go":     text("package alpha\n\nfunc A() { _ = 1 }\n"),
 }
 
-const fallbackAll = `example.org/fallback/flip
-  flip/flip.go (modified) [syntax]
-    Flip                 body      [syntax]
-    drop                 removed   [syntax]  func drop()
-  flip/other.go (added) [syntax]
-    Other                added     [syntax]  func Other()
-example.org/fallback/mixed
-  mixed/a.go (modified) [syntax]
-    A                    body      [syntax]
-example.org/fallback/typed
-  typed/typed.go (modified) [partial]
-    Added                added     [partial]  func Added()
-    Right                body      [partial]
-    gone                 removed   [partial]  func gone()
+const fallbackAll = `├── 📦 example.org/fallback/flip
+│   ├── ✏️ flip/flip.go (modified) [syntax]
+│   │   ├── 💻 Flip  body [syntax]
+│   │   ╰── ➖ drop  removed [syntax]  func drop()
+│   ╰── ➕ flip/other.go (added) [syntax]
+│       ╰── ➕ Other  added [syntax]  func Other()
+├── 📦 example.org/fallback/mixed
+│   ╰── ✏️ mixed/a.go (modified) [syntax]
+│       ╰── 💻 A  body [syntax]
+╰── 📦 example.org/fallback/typed
+    ╰── ✏️ typed/typed.go (modified) [partial]
+        ├── ➕ Added  added [partial]  func Added()
+        ├── 💻 Right  body [partial]
+        ╰── ➖ gone  removed [partial]  func gone()
 `
 
-const fallbackExported = `example.org/fallback/flip
-  flip/flip.go (modified) [syntax]  (1 hidden row)
-    Flip                 body      [syntax]
-  flip/other.go (added) [syntax]
-    Other                added     [syntax]  func Other()
-example.org/fallback/mixed
-  mixed/a.go (modified) [syntax]
-    A                    body      [syntax]
-example.org/fallback/typed
-  typed/typed.go (modified) [partial]  (1 hidden row)
-    Added                added     [partial]  func Added()
-    Right                body      [partial]
+const fallbackExported = `├── 📦 example.org/fallback/flip
+│   ├── ✏️ flip/flip.go (modified) [syntax]  (1 hidden row)
+│   │   ╰── 💻 Flip  body [syntax]
+│   ╰── ➕ flip/other.go (added) [syntax]
+│       ╰── ➕ Other  added [syntax]  func Other()
+├── 📦 example.org/fallback/mixed
+│   ╰── ✏️ mixed/a.go (modified) [syntax]
+│       ╰── 💻 A  body [syntax]
+╰── 📦 example.org/fallback/typed
+    ╰── ✏️ typed/typed.go (modified) [partial]  (1 hidden row)
+        ├── ➕ Added  added [partial]  func Added()
+        ╰── 💻 Right  body [partial]
 `
 
 var shapesModule = map[string]*string{
@@ -319,37 +319,40 @@ var shapesModule = map[string]*string{
 	)),
 }
 
-const tallyExported = `example.org/tally/report
-  report/report.go (modified)
-example.org/tally/tally
-  tally/count.go (added)
-    Count                moved      from tally/tally.go
-  tally/tally.go (modified)  (1 hidden row)
-    Store.Add            body
-    Total                body
+const tallyExported = `├── 📦 example.org/tally/report
+│   ╰── ✏️ report/report.go (modified)
+╰── 📦 example.org/tally/tally
+    ├── ➕ tally/count.go (added)
+    │   ╰── 🔀 Count  moved  from tally/tally.go
+    ╰── ✏️ tally/tally.go (modified)  (1 hidden row)
+        ├── 🔀 Count  moved  to tally/count.go
+        ├── 💻 Store.Add  body
+        ╰── 💻 Total  body
 `
 
-const tallyAll = `example.org/tally/report
-  report/report.go (modified)
-example.org/tally/tally
-  tally/count.go (added)
-    Count                moved      from tally/tally.go
-  tally/tally.go (modified)
-    Store.Add            body
-    Total                body
-    later                added      func later() int
+const tallyAll = `├── 📦 example.org/tally/report
+│   ╰── ✏️ report/report.go (modified)
+╰── 📦 example.org/tally/tally
+    ├── ➕ tally/count.go (added)
+    │   ╰── 🔀 Count  moved  from tally/tally.go
+    ╰── ✏️ tally/tally.go (modified)
+        ├── 🔀 Count  moved  to tally/count.go
+        ├── 💻 Store.Add  body
+        ├── 💻 Total  body
+        ╰── ➕ later  added  func later() int
 `
 
-const tallyStatAll = `example.org/tally/report  +1 -0
-  report/report.go (modified)  +1 -0
-    (file scope)                   +1 -0
-example.org/tally/tally  +5 -2
-  tally/count.go (added)  +2 -0
-    Count                moved     +0 -0  from tally/tally.go
-    (file scope)                   +2 -0
-  tally/tally.go (modified)  +3 -2
-    Store.Add            body      +1 -1
-    Total                body      +1 -1
-    later                added     +1 -0  func later() int
-    (file scope)                   +0 -0
+const tallyStatAll = `├── 📦 example.org/tally/report  +1 -0
+│   ╰── ✏️ report/report.go (modified)  +1 -0
+│       ╰── (file scope)  +1 -0
+╰── 📦 example.org/tally/tally  +5 -2
+    ├── ➕ tally/count.go (added)  +2 -0
+    │   ├── 🔀 Count  moved  +0 -0  from tally/tally.go
+    │   ╰── (file scope)  +2 -0
+    ╰── ✏️ tally/tally.go (modified)  +3 -2
+        ├── 🔀 Count  moved  to tally/count.go
+        ├── 💻 Store.Add  body  +1 -1
+        ├── 💻 Total  body  +1 -1
+        ├── ➕ later  added  +1 -0  func later() int
+        ╰── (file scope)  +0 -0
 `

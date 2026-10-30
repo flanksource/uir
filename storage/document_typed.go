@@ -17,7 +17,8 @@ func declarable(kinds symbolhandle.Kinds, kind string) bool {
 }
 
 // validateTypedContent checks an indexed or partial document. Every declared symbol has a canonical
-// id, a public shape, public and private hashes, and interface ids it implements; a partial document may also keep a declaration
+// id, a public shape, and public and private hashes (and, before format 6, the interface ids it
+// implements); a partial document may also keep a declaration
 // it could not prove with only its syntax facts and a null id. Every occurrence has a role, a symbol
 // or a note saying why it has none, and an enclosing symbol declared in the same document; a call
 // also carries its call locator.
@@ -42,6 +43,9 @@ func validateTypedContent(content DocumentContent, partial bool, kinds symbolhan
 		}
 		if _, err := TypeForm(content.Version, symbol); err != nil {
 			return fmt.Errorf("%s: %w", subject, err)
+		}
+		if content.Version >= snapshotImplementsFormat && len(symbol.Implements) > 0 {
+			return fmt.Errorf("%s: document format %d keeps implements as snapshot facts, not in a symbol", subject, content.Version)
 		}
 		for _, implemented := range symbol.Implements {
 			if len(implemented) != 64 {

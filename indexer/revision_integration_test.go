@@ -94,7 +94,7 @@ var _ = Describe("historical revisions", func() {
 			module := canonicalTempDir()
 			writeFile(filepath.Join(module, "go.mod"), historyManifest)
 			writeFile(filepath.Join(module, "history.go"), "package history\n\nfunc Version() int { return 1 }\n")
-			roots, err := discoverModules(ctx, module, false)
+			roots, err := discoverModules(ctx, module, discoveryOptions{IncludeTests: false})
 			Expect(err).ToNot(HaveOccurred())
 			root := roots[0]
 			root.Historical = true
@@ -108,7 +108,7 @@ var _ = Describe("historical revisions", func() {
 				return nil, errors.New(message)
 			}
 
-			extraction, err := extractModule(loadCtx, loader, root, false)
+			extraction, err := extractModule(loadCtx, extractOptions{loadPackages: loader, root: root})
 
 			if !fallsBack {
 				Expect(err).To(HaveOccurred())

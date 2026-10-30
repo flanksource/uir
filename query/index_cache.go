@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/flanksource/uir/internal/buildconstraint"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -22,13 +23,14 @@ const snapshotCacheSize = 256
 // under another handle. What heads and primaries select, and the kind registry, can change with every
 // publication, so they live in a generation that a query keeps only while the cache token still matches.
 type indexCache struct {
-	mu         sync.Mutex
-	generation *cacheGeneration
-	symbols    *symbolFacts
-	modules    map[int32]string
-	snapshots  *lru[uuid.UUID, *snapshotFacts]
-	documents  *lru[uuid.UUID, decodedDocument]
-	capacity   int
+	mu           sync.Mutex
+	generation   *cacheGeneration
+	symbols      *symbolFacts
+	modules      map[int32]string
+	snapshots    *lru[uuid.UUID, *snapshotFacts]
+	documents    *lru[uuid.UUID, decodedDocument]
+	buildHeaders *lru[string, buildconstraint.Header]
+	capacity     int
 }
 
 func newIndexCache(documents int) *indexCache {
@@ -43,6 +45,7 @@ func (cache *indexCache) reset() {
 	cache.modules = map[int32]string{}
 	cache.snapshots = newLRU[uuid.UUID, *snapshotFacts](snapshotCacheSize)
 	cache.documents = newLRU[uuid.UUID, decodedDocument](cache.capacity)
+	cache.buildHeaders = newLRU[string, buildconstraint.Header](4096)
 }
 
 // cacheToken is what a query reads to decide whether the kept generation still holds: every location
@@ -154,7 +157,7 @@ func (generation *cacheGeneration) keepSelection(key selectionKey, selection mod
 }
 
 func (selection moduleScopeSelection) clone() moduleScopeSelection {
-	return moduleScopeSelection{scopes: append([]moduleScope(nil), selection.scopes...), warnings: append([]MissingHeadWarning{}, selection.warnings...)}
+	return moduleScopeSelection{scopes: append([]moduleScope(nil), selection.scopes...), missingHeads: selection.missingHeads}
 }
 
 // symbolFacts are the symbol rows, query names, and handles the pipeline's queries have read.
@@ -248,12 +251,13 @@ func (facts *symbolFacts) addHandle(id string, handle int64) error {
 	return nil
 }
 
-// snapshotFacts are one snapshot's active documents, without content, and the handles its queries
-// asked whether it defines.
+// snapshotFacts are one snapshot's active documents, without content, the handles its queries asked
+// whether it defines, and the implements facts they read, by the type or interface asked about.
 type snapshotFacts struct {
-	documents map[uuid.UUID]storage.ActiveDocument
-	mu        sync.Mutex
-	defined   map[int64]bool
+	documents  map[uuid.UUID]storage.ActiveDocument
+	mu         sync.Mutex
+	defined    map[int64]bool
+	implements map[implementsKey][]storage.ImplementsPair
 }
 
 // snapshot is the kept facts of one snapshot, read on first use.
@@ -265,7 +269,9 @@ func (cache *indexCache) snapshot(ctx context.Context, database *gorm.DB, id uui
 	if err != nil {
 		return nil, err
 	}
-	facts := &snapshotFacts{documents: make(map[uuid.UUID]storage.ActiveDocument, len(active)), defined: map[int64]bool{}}
+	facts := &snapshotFacts{
+		documents: make(map[uuid.UUID]storage.ActiveDocument, len(active)), defined: map[int64]bool{}, implements: map[implementsKey][]storage.ImplementsPair{},
+	}
 	for _, document := range active {
 		facts.documents[document.Document.ID] = document
 	}

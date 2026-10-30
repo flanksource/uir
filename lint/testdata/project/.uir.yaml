@@ -1,0 +1,23 @@
+version: 1
+lint:
+  include_tests: false
+  rules:
+    - id: small-files
+      severity: warning
+      message: "{{.path}} has {{.lines}} lines and {{.definitions}} definitions"
+      query: |
+        SELECT path, file.lines AS lines, file.definitions AS definitions
+        FROM files()
+        WHERE file.lines < 100 AND file.definitions < 3
+    - id: too-many-parameters
+      severity: error
+      message: "{{.name}} has {{.params}} parameters; maximum is 3"
+      query: |
+        SELECT symbol.name AS name, symbol.metrics.param_count AS params
+        FROM func:* WHERE symbol.metrics.param_count > 3
+    - id: long-bodies
+      severity: error
+      message: "{{.name}} has a {{.lines}}-line body; maximum is 50"
+      query: |
+        SELECT symbol.name AS name, symbol.metrics.body_lines AS lines
+        FROM func:* WHERE symbol.metrics.body_lines > 50

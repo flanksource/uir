@@ -11,27 +11,27 @@ import (
 
 // SuggestSelectors completes a partially typed selector or Entity:Field reference. A value may be
 // quoted, and may then contain whitespace; a suggested value is quoted when it needs to be.
-func (pipeline *Pipeline) SuggestSelectors(ctx context.Context, prefix string, options ModuleScopeOptions) (ItemsWithWarnings[string], error) {
+func (pipeline *Pipeline) SuggestSelectors(ctx context.Context, prefix string, options ModuleScopeOptions) ([]string, error) {
 	if pipeline == nil || pipeline.database == nil {
-		return ItemsWithWarnings[string]{}, fmt.Errorf("UIR query database is required")
+		return nil, fmt.Errorf("UIR query database is required")
 	}
 	parts, err := selectorPrefixParts(prefix)
 	if err != nil {
-		return ItemsWithWarnings[string]{}, err
+		return nil, err
 	}
 	if options.Limit == 0 {
 		options.Limit = 20
 	}
 	if options.Limit < 1 || options.Limit > 100 {
-		return ItemsWithWarnings[string]{}, fmt.Errorf("suggestion limit must be between 1 and 100, got %d", options.Limit)
+		return nil, fmt.Errorf("suggestion limit must be between 1 and 100, got %d", options.Limit)
 	}
 	if options.Location != "" && options.SnapshotID != "" {
-		return ItemsWithWarnings[string]{}, fmt.Errorf("location and snapshot selectors are mutually exclusive")
+		return nil, fmt.Errorf("location and snapshot selectors are mutually exclusive")
 	}
 	session, _ := pipeline.session()
 	selection, err := session.moduleScopes(ctx, options, false)
 	if err != nil {
-		return ItemsWithWarnings[string]{}, err
+		return nil, err
 	}
 	var choices map[string]bool
 	if options.Language == LanguageSQL {
@@ -40,7 +40,7 @@ func (pipeline *Pipeline) SuggestSelectors(ctx context.Context, prefix string, o
 		choices, err = session.selectorChoices(ctx, prefix, parts, selection.scopes)
 	}
 	if err != nil {
-		return ItemsWithWarnings[string]{}, err
+		return nil, err
 	}
 	result := make([]string, 0, len(choices))
 	for choice := range choices {
@@ -50,7 +50,7 @@ func (pipeline *Pipeline) SuggestSelectors(ctx context.Context, prefix string, o
 	if len(result) > options.Limit {
 		result = result[:options.Limit]
 	}
-	return ItemsWithWarnings[string]{Items: result, Warnings: selection.warnings}, nil
+	return result, nil
 }
 
 // selectorPrefixParts splits a partial selector into its kind, or entity, and at least one value. An

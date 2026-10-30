@@ -25,8 +25,21 @@ const ModuleIndexKind = "module-index"
 // indexAttempts bounds how often a task runs an index whose inputs changed under it.
 const indexAttempts = 3
 
+// indexRetryConfig retries an index only when its inputs changed under it, up to indexAttempts in all.
+// The backoff lets a burst of edits, such as a dependency bump rewriting go.mod, go.sum and go.work.sum
+// seconds apart, settle instead of using up every attempt; the jitter keeps concurrent runs from
+// retrying in step. A var so a spec can shorten the wait.
+var indexRetryConfig = clickytask.RetryConfig{
+	Retryable:     func(err error) bool { return errors.Is(err, ErrIndexInputsChanged) },
+	MaxRetries:    indexAttempts - 1,
+	BaseDelay:     2 * time.Second,
+	MaxDelay:      10 * time.Second,
+	BackoffFactor: 2,
+	JitterFactor:  0.5,
+}
+
 // noTaskRetries replaces clicky's default retry policy, which retries any error whose text mentions a
-// timeout or a connection. An index is retried only by indexTarget, and only when its inputs changed.
+// timeout or a connection, for tasks that never retry; a module index task retries with indexRetryConfig.
 var noTaskRetries = clickytask.WithRetryConfig(clickytask.RetryConfig{})
 
 type taskRunKey struct{}
@@ -52,20 +65,24 @@ type moduleTarget struct {
 	rootKey  string
 	location string
 	options  ModuleOptions
+	cached   *ModuleResult
 }
 
 // moduleRunSpec is everything that identifies a run: two requests with one identity share a run.
 type moduleRunSpec struct {
-	name     string
-	identity string
-	labels   map[string]string
-	targets  []moduleTarget
+	name       string
+	identity   string
+	labels     map[string]string
+	targets    []moduleTarget
+	checkpoint *indexCheckpoint
 }
 
 // ModuleIndexRun is a started module-index run: one task per module, indexed one at a time. A request
 // identical to a run still in progress joins that run instead of starting another.
 type ModuleIndexRun struct {
-	group clickytask.TypedGroup[[]ModuleResult]
+	group      clickytask.TypedGroup[[]ModuleResult]
+	checkpoint *indexCheckpoint
+	memo       *runMemo
 }
 
 // ID is the run's clicky task id, recorded on every snapshot it publishes.
@@ -76,11 +93,32 @@ func (run *ModuleIndexRun) ID() string { return run.group.ID() }
 // before the run starts, so a path without modules, or an unregistered checkout to reindex, fails
 // here.
 func StartModulesTask(ctx context.Context, indexer *Indexer, requests []ModuleOptions) (*ModuleIndexRun, error) {
-	if indexer == nil {
+	if indexer == nil || indexer.database == nil {
 		return nil, errors.New("UIR indexer is required")
 	}
 	if len(requests) == 0 {
 		return nil, errors.New("a module index run needs at least one path")
+	}
+	for _, request := range requests {
+		if err := refuseExternalRoot(ctx, indexer.database, request.Path); err != nil {
+			return nil, err
+		}
+	}
+	var checkpoint *indexCheckpoint
+	var cached []ModuleResult
+	if err := Phase(ctx, "fingerprint-check", func(ctx context.Context) (err error) {
+		checkpoint, cached, err = indexer.prepareCheckpoint(ctx, requests)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	if len(cached) != 0 {
+		var targets []moduleTarget
+		for i := range cached {
+			targets = append(targets, moduleTarget{rootKey: cached[i].RootKey, location: cached[i].Location, cached: &cached[i]})
+		}
+		return startModuleRun(ctx, indexer, moduleRunSpec{name: "Reuse unchanged index", identity: "index-checkpoint:" + checkpoint.key,
+			labels: map[string]string{"path": requests[0].Path, "reason": string(requests[0].Reason)}, targets: targets})
 	}
 	paths, identities := make([]string, 0, len(requests)), make([]string, 0, len(requests))
 	var targets []moduleTarget
@@ -115,10 +153,11 @@ func StartModulesTask(ctx context.Context, indexer *Indexer, requests []ModuleOp
 		action = "Reindex"
 	}
 	return startModuleRun(ctx, indexer, moduleRunSpec{
-		name:     fmt.Sprintf("%s %s", action, strings.Join(paths, ", ")),
-		identity: fmt.Sprintf("%s:%s reason=%s", ModuleIndexKind, strings.Join(identities, " + "), requests[0].Reason),
-		labels:   map[string]string{"path": strings.Join(paths, ","), "reason": string(requests[0].Reason)},
-		targets:  enclosingFirst(targets, imports),
+		name:       fmt.Sprintf("%s %s", action, strings.Join(paths, ", ")),
+		identity:   fmt.Sprintf("%s:%s reason=%s", ModuleIndexKind, strings.Join(identities, " + "), requests[0].Reason),
+		labels:     map[string]string{"path": strings.Join(paths, ","), "reason": string(requests[0].Reason)},
+		targets:    enclosingFirst(targets, imports),
+		checkpoint: checkpoint,
 	})
 }
 
@@ -164,6 +203,10 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 	if group.Joined() {
 		return run, nil
 	}
+	run.checkpoint = spec.checkpoint
+	if spec.checkpoint != nil {
+		ctx = context.WithValue(ctx, checkpointContextKey{}, spec.checkpoint)
+	}
 	if len(spec.targets) == 0 {
 		group.Add("Nothing to index", func(commonscontext.Context, *clickytask.Task) ([]ModuleResult, error) {
 			return []ModuleResult{}, nil
@@ -171,13 +214,17 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 		return run, nil
 	}
 	memo := newRunMemo()
+	run.memo = memo
 	for _, target := range spec.targets {
 		module := group.Add(target.rootKey, func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
 			started := time.Now()
 			progress.Infof("indexing %s at %s", target.rootKey, target.location)
 			results, err := runIndexTask(withRunMemo(context.WithValue(taskContext, runGroupKey{}, group.Group), memo), details, progress,
 				func(ctx context.Context) ([]ModuleResult, error) {
-					return indexer.indexTarget(ctx, target.options, progress.Warnf)
+					if target.cached != nil {
+						return []ModuleResult{*target.cached}, Phase(ctx, "fingerprint-reuse", func(context.Context) error { return nil })
+					}
+					return indexer.indexTarget(ctx, target.options)
 				})
 			if err != nil {
 				return []ModuleResult{{RootKey: target.rootKey, Location: target.location, Error: err.Error()}}, err
@@ -185,9 +232,12 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 			for _, result := range results {
 				progress.Infof("root=%s location=%s snapshot=%s files=%d parsed=%d reused=%d unchanged=%t in %s",
 					result.RootKey, result.Location, result.SnapshotID, result.Files, result.ParsedFiles, result.ReusedFiles, result.Unchanged, time.Since(started).Round(time.Millisecond))
+				for _, warning := range result.Warnings {
+					progress.Warnf("%s:%d:%d %s %s", warning.File, warning.Line, warning.Column, warning.Rule.Method, *warning.Message)
+				}
 			}
 			return results, nil
-		}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), noTaskRetries)
+		}, clickytask.WithContext(ctx), clickytask.WithCancellationDrain(), clickytask.WithRetryConfig(indexRetryConfig))
 		module.SetDescription(target.location)
 	}
 	return run, nil
@@ -225,6 +275,11 @@ func (run *ModuleIndexRun) Wait(ctx context.Context) ([]ModuleResult, error) {
 	if len(failures) > 0 {
 		return results, errors.Join(fmt.Errorf("%d of %d modules failed: %w", len(failures), modules, errors.Join(failures...)), mergeErr)
 	}
+	if mergeErr == nil && run.checkpoint != nil {
+		if err := run.checkpoint.save(ctx, run.memo, results); err != nil {
+			return results, fmt.Errorf("save index checkpoint: %w", err)
+		}
+	}
 	return results, mergeErr
 }
 
@@ -243,23 +298,17 @@ func waitForRun(ctx context.Context, group *clickytask.Group) error {
 	return nil
 }
 
-// indexTarget indexes one module checkout, again while its inputs change under it, up to
-// indexAttempts times in all; any other outcome is returned at once. An attempt whose inputs changed
-// makes the run forget everything it remembered, so the next attempt indexes every dependency whose
-// inputs changed again instead of reusing its stale snapshot.
-func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions, warn func(string, ...any)) ([]ModuleResult, error) {
+// indexTarget indexes one module checkout once; the task running it retries an index whose inputs
+// changed under it, with indexRetryConfig. Such an attempt makes the run forget everything it
+// remembered, so the next attempt indexes every dependency whose inputs changed again instead of
+// reusing its stale snapshot.
+func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions) ([]ModuleResult, error) {
 	ctx, memo := ensureRunMemo(ctx)
-	for attempt := 1; ; attempt++ {
-		results, err := indexer.IndexModules(ctx, options)
-		if !errors.Is(err, ErrIndexInputsChanged) {
-			return results, err
-		}
-		if attempt == indexAttempts {
-			return nil, fmt.Errorf("index inputs changed in %d consecutive attempts: %w", indexAttempts, err)
-		}
+	results, err := indexer.IndexModules(ctx, options)
+	if errors.Is(err, ErrIndexInputsChanged) {
 		memo.forget()
-		warn("attempt %d: %v; indexing again", attempt, err)
 	}
+	return results, err
 }
 
 // indexStep runs index as a step of the task run in ctx, so work a module does on the way, such as a

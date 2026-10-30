@@ -135,7 +135,7 @@ var _ = Describe("symbol deltas", func() {
 			Expect(operations(resigned)).To(Equal(map[string]storage.SourceOperation{unit.ID: storage.SourceSet}),
 				"a signature edit re-extracts the importing book package, whose symbols keep their fingerprints")
 			Expect(*resigned[unit.ID].PublicFP).ToNot(Equal(*deltas[unit.ID].PublicFP))
-			Expect(signature.documents["book/book.go"].ID).ToNot(Equal(initial.documents["book/book.go"].ID))
+			Expect(signature.documents["book/book.go"].ID).To(Equal(initial.documents["book/book.go"].ID), "book.go renders the same document under its new input hash")
 
 			half := "func Half(a Amount) Amount { return Amount{Cents: a.Cents / 2, Currency: a.Currency} }\n"
 			writeFile(moneyPath, moneySource(moneyAmount, reordered, moneyScale, pointerUnit, moneyZero, half))
@@ -182,10 +182,10 @@ var _ = Describe("symbol deltas", func() {
 		Entry("PostgreSQL", indexerPostgresOptions),
 	)
 
-	// Every func init of a package shares one canonical id (gavel TODO 34ea4d17), and a package's input
-	// hash covers all of its files, so a declaration can only disappear from a file whose document the
-	// snapshot replaced: a file with unchanged bytes still gets a new document when its package changes.
-	DescribeTable("fold the declarations of one id and keep a symbol still declared in a file whose bytes did not change",
+	// Every func init of a package has its own canonical id, discriminated by its file and position. A
+	// file with unchanged bytes keeps its document when another file of its package changes, so symbol
+	// deltas compare a changed package whole, both sides of every file.
+	DescribeTable("give each func init its own id and keep one still declared in a file whose bytes did not change",
 		func(ctx SpecContext, options func() storage.DBOptions) {
 			database := openIndexerDB(ctx, options())
 			workspace := GinkgoT().TempDir()
@@ -195,30 +195,31 @@ var _ = Describe("symbol deltas", func() {
 			writeFile(filepath.Join(workspace, "boot", "u.go"), bootU)
 			engine, err := New(database)
 			Expect(err).ToNot(HaveOccurred())
+			bootInit := func(discriminator string) string {
+				return SymbolID(Identity{ModuleKey: bootModule, PackagePath: bootPackage, Kind: "func", Name: bootInitName, Discriminator: discriminator})
+			}
+			aInit, uInit := bootInit("a.go#0"), bootInit("u.go#0")
 
 			initial, deltas := publishAndLoad(ctx, database, engine, workspace)
-			initFunc := findSymbol(database, bootPackage, "func", bootInitName)
-			Expect(declarationsOf(initial, initFunc.ID)).To(Equal(2), "both files declare the one init id")
+			Expect([]int{declarationsOf(initial, aInit), declarationsOf(initial, uInit)}).To(Equal([]int{1, 1}), "each file declares its own init id")
 
 			writeFile(filepath.Join(workspace, "boot", "a.go"), bootAEdited)
 			edited, rebodied := publishAndLoad(ctx, database, engine, workspace)
-			Expect(edited.documents["boot/u.go"].ID).ToNot(Equal(initial.documents["boot/u.go"].ID), "u.go's bytes did not change, its document did")
-			Expect(operations(rebodied)).To(Equal(map[string]storage.SourceOperation{initFunc.ID: storage.SourceSet}))
-			Expect([]int64{*rebodied[initFunc.ID].PublicFP, *rebodied[initFunc.ID].PrivateFP}).
-				To(Equal([]int64{*deltas[initFunc.ID].PublicFP, *deltas[initFunc.ID].PrivateFP}), "every init has the same shape")
-			Expect(*rebodied[initFunc.ID].ContentFP).ToNot(Equal(*deltas[initFunc.ID].ContentFP))
+			Expect(edited.documents["boot/u.go"].ID).To(Equal(initial.documents["boot/u.go"].ID), "u.go's bytes did not change, nor did its document")
+			Expect(operations(rebodied)).To(Equal(map[string]storage.SourceOperation{aInit: storage.SourceSet}))
+			Expect([]int64{*rebodied[aInit].PublicFP, *rebodied[aInit].PrivateFP}).
+				To(Equal([]int64{*deltas[aInit].PublicFP, *deltas[aInit].PrivateFP}), "a body edit keeps the shape")
+			Expect(*rebodied[aInit].ContentFP).ToNot(Equal(*deltas[aInit].ContentFP))
 
 			writeFile(filepath.Join(workspace, "boot", "a.go"), bootANoInit)
 			remaining, narrowed := publishAndLoad(ctx, database, engine, workspace)
-			Expect(declarationsOf(remaining, initFunc.ID)).To(Equal(1))
-			Expect(operations(narrowed)).To(Equal(map[string]storage.SourceOperation{initFunc.ID: storage.SourceSet}),
-				"init is still declared in u.go, so it is set to u.go's fingerprints, not deleted")
-			Expect(storage.SymbolFingerprints{Public: *narrowed[initFunc.ID].PublicFP, Private: *narrowed[initFunc.ID].PrivateFP, Content: *narrowed[initFunc.ID].ContentFP}).
-				To(Equal(remaining.definedFingerprints()[initFunc.ID]))
+			Expect(declarationsOf(remaining, uInit)).To(Equal(1))
+			Expect(operations(narrowed)).To(Equal(map[string]storage.SourceOperation{aInit: storage.SourceDelete}),
+				"u.go's init is still declared, unchanged, so only a.go's is deleted")
 
 			writeFile(filepath.Join(workspace, "boot", "u.go"), bootUNoInit)
 			_, gone := publishAndLoad(ctx, database, engine, workspace)
-			Expect(operations(gone)).To(Equal(map[string]storage.SourceOperation{initFunc.ID: storage.SourceDelete}))
+			Expect(operations(gone)).To(Equal(map[string]storage.SourceOperation{uInit: storage.SourceDelete}))
 		},
 		Entry("SQLite", indexerSQLiteOptions),
 		Entry("PostgreSQL", indexerPostgresOptions),

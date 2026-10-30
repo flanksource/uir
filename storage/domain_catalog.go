@@ -15,13 +15,21 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// DomainCatalog is what producers registered beyond kind names: each kind's property schema and
+// integer metrics, keyed by kind name, and the native relationship kinds.
 type DomainCatalog struct {
-	Symbols       map[string]JSON             `json:"symbols"`
-	Relationships map[string]RelationshipKind `json:"relationships"`
+	Symbols       map[string]JSON                  `json:"symbols"`
+	Metrics       map[string]map[string]MetricSpec `json:"metrics"`
+	Relationships map[string]RelationshipKind      `json:"relationships"`
 }
 
 func LoadDomainCatalog(ctx context.Context, database *gorm.DB) (DomainCatalog, error) {
 	catalog := DomainCatalog{Symbols: map[string]JSON{}, Relationships: map[string]RelationshipKind{}}
+	metrics, err := loadKindMetrics(ctx, database)
+	if err != nil {
+		return catalog, err
+	}
+	catalog.Metrics = metrics
 	var symbols []SymbolPropertySchema
 	if err := database.WithContext(ctx).Order("name").Find(&symbols).Error; err != nil {
 		return catalog, fmt.Errorf("load symbol property schemas: %w", err)
@@ -61,6 +69,11 @@ func RegisterDomainCatalog(ctx context.Context, database *gorm.DB, catalog Domai
 			}
 			if !samePropertySchema(stored.Schema, schema) {
 				return fmt.Errorf("kind %s is registered with a different property schema", name)
+			}
+		}
+		for kind, metrics := range catalog.Metrics {
+			if err := registerKindMetrics(ctx, tx, kind, metrics); err != nil {
+				return err
 			}
 		}
 		for name, kind := range catalog.Relationships {
@@ -193,6 +206,9 @@ func samePropertySchema(left, right JSON) bool {
 
 func (catalog DomainCatalog) Validate(content DocumentContent) error {
 	for _, symbol := range content.Symbols {
+		if err := catalog.validateDeclaredMeasures(symbol); err != nil {
+			return err
+		}
 		schema, ok := catalog.Symbols[symbol.Kind]
 		if !ok || len(schema) == 0 {
 			if len(symbol.Props) > 0 {

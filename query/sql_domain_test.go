@@ -126,7 +126,7 @@ var _ = Describe("SQL domain navigation", func() {
 		scope := query.ModuleScopeOptions{RootKey: publication.RootKey, Language: query.LanguageSQL}
 		choices, err := pipeline.SuggestSelectors(ctx, "http.route:Ord", scope)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(choices.Items).To(Equal([]string{"http.route:Orders"}))
+		Expect(choices).To(Equal([]string{"http.route:Orders"}))
 		publication.Revision = "old-format"
 		publication.Documents = publication.Documents[1:2]
 		publication.Documents[0].Content.Version = 3

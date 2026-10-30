@@ -18,7 +18,7 @@ export function registerQueryLanguage(monaco: Monaco): void {
     tokenizer: { root: [
       [/\s+/, "white"],
       [/--.*$|\/\*.*?\*\//, "comment"],
-      [/\b(?:SELECT|FROM|AS|WHERE|ORDER|BY|LIMIT|MATCH|IMATCH|IN|NOT|AND|OR|IS|NULL|TRUE|FALSE|ASC|DESC)\b/i, "keyword"],
+      [/\b(?:SELECT|FROM|AS|WHERE|ORDER|BY|LIMIT|MATCH|IMATCH|REQUIRES|IN|NOT|AND|OR|IS|NULL|TRUE|FALSE|ASC|DESC)\b/i, "keyword"],
       [/'(?:''|[^'])*'/, "string"],
       [/<<[1-8]?|>>[1-8]?|[<>=&|]/, "operator"],
       [new RegExp(`[+-]?(?:${selectorKinds}):`), "keyword"],

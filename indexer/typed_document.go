@@ -9,18 +9,20 @@ import (
 	"sort"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/tools/go/packages"
 )
 
-// documentBuilder renders typed documents from one load, sharing the resolver across the module.
+// documentBuilder renders typed documents from one load, sharing the resolver across the module. A
+// document holds only facts of its own file and the API its package imports; implements, which
+// depends on every interface the load declares, is the snapshot-level snapshotImplements pass.
 type documentBuilder struct {
-	resolver   *symbolResolver
-	interfaces map[string][]*types.TypeName
+	resolver *symbolResolver
 }
 
 func newDocumentBuilder(resolver *symbolResolver) *documentBuilder {
-	return &documentBuilder{resolver: resolver, interfaces: map[string][]*types.TypeName{}}
+	return &documentBuilder{resolver: resolver}
 }
 
 // typedSource is one root file with its syntax tree, token file, and bytes.
@@ -29,7 +31,7 @@ type typedSource struct {
 	file        *ast.File
 	tokens      *token.File
 	content     []byte
-	lines       lineIndex
+	lines       syntax.LineIndex
 	packagePath string
 }
 
@@ -48,7 +50,7 @@ type declaration struct {
 // the explorer projection of every declaration it knows, matched by name span. In a partial package
 // a declaration whose type is invalid keeps only its syntax facts and a null id.
 func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFile, diagnostics []storage.DocumentDiagnostic, partial bool) (storage.DocumentContent, error) {
-	syntax, err := extractGoFile(file.PathKey, file.PackagePath, file.Content)
+	extracted, err := syntax.Extract(file.PathKey, file.PackagePath, file.Content)
 	if err != nil {
 		return storage.DocumentContent{}, err
 	}
@@ -58,10 +60,10 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 	}
 	source := typedSource{
 		pkg: typed.pkg, file: typed.file, tokens: tokens, content: file.Content,
-		lines: newLineIndex(file.Content), packagePath: syntax.PackagePath,
+		lines: syntax.NewLineIndex(file.Content), packagePath: extracted.PackagePath,
 	}
-	projections := make(map[storage.ByteSpan]nodeSpec, len(syntax.Nodes))
-	for _, node := range syntax.Nodes {
+	projections := make(map[storage.ByteSpan]syntax.Node, len(extracted.Nodes))
+	for _, node := range extracted.Nodes {
 		projections[node.Name] = node
 	}
 	symbols, err := builder.symbols(source, projections, partial)
@@ -74,21 +76,29 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 	}
 	assignEnclosing(symbols, occurrences)
 	return storage.DocumentContent{
-		Version: storage.DocumentFormatVersion, PackagePath: syntax.PackagePath,
+		Version: storage.DocumentFormatVersion, PackagePath: extracted.PackagePath,
 		Symbols: symbols, Occurrences: occurrences, Diagnostics: diagnostics,
 	}, nil
 }
 
-func (builder *documentBuilder) symbols(source typedSource, projections map[storage.ByteSpan]nodeSpec, partial bool) ([]storage.DocumentSymbol, error) {
+func (builder *documentBuilder) symbols(source typedSource, projections map[storage.ByteSpan]syntax.Node, partial bool) ([]storage.DocumentSymbol, error) {
 	symbols := []storage.DocumentSymbol{}
+	bindings, err := typedBindings(source.file, source.tokens, source.pkg.TypesInfo)
+	if err != nil {
+		return nil, err
+	}
 	for _, declared := range fileDeclarations(source.file, source.pkg.TypesInfo) {
 		name, extent := source.span(declared.name.Pos(), declared.name.End()), source.span(declared.start, declared.end)
-		contentHash, err := tokenStreamHash(source.content[extent[0]:extent[1]])
+		contentHash, err := syntax.DeclarationContentHash(source.content, extent, bindings)
 		if err != nil {
 			return nil, fmt.Errorf("hash %s: %w", declared.name.Name, err)
 		}
 		projection, projected := projections[name]
-		symbol, proven, err := builder.typedSymbol(declared, source.pkg)
+		discriminator, err := initDiscriminator(declared, projection, projected)
+		if err != nil {
+			return nil, fmt.Errorf("%s at %v: %w", declared.name.Name, source.lines.RangeOf(name), err)
+		}
+		symbol, proven, err := builder.typedSymbol(declared, discriminator)
 		if err != nil {
 			return nil, err
 		}
@@ -102,10 +112,15 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 			symbol = storage.DocumentSymbol{Kind: projection.Kind, Visibility: projection.Visibility, Shape: projection.Shape}
 		}
 		symbol.ContentHash, symbol.NameBytes, symbol.ExtentBytes = contentHash, name, extent
-		symbol.Name, symbol.Extent = source.lines.rangeOf(name), source.lines.rangeOf(extent)
+		symbol.Name, symbol.Extent = source.lines.RangeOf(name), source.lines.RangeOf(extent)
 		if projected {
+			symbol.Metrics = projection.Metrics
+		}
+		if projected && projection.ChildSlot != "" {
 			symbol.Identifier, symbol.ParentKey, symbol.ChildSlot = projection.Identifier, projection.ParentIdentity, projection.ChildSlot
 			symbol.Ordinal, symbol.Payload, symbol.SemanticHash, symbol.Field = projection.Ordinal, projection.Payload, projection.SemanticHash, projection.Field
+		} else if !proven {
+			symbol.Identifier = projection.Identifier
 		} else if symbol.Identifier, err = builder.typedIdentifier(*symbol.ID, source.packagePath); err != nil {
 			return nil, err
 		}
@@ -119,10 +134,24 @@ func (builder *documentBuilder) symbols(source typedSource, projections map[stor
 	return symbols, nil
 }
 
+// initDiscriminator is a func init's Identity.Discriminator: the signature slot of the syntax
+// identifier its name span projects, so its id and its document key tell the same inits apart. Every
+// other declaration has none.
+func initDiscriminator(declared declaration, projection syntax.Node, projected bool) (string, error) {
+	if !isPackageInit(declared.object) {
+		return "", nil
+	}
+	if !projected || !syntax.PackageInit(projection.Identifier) {
+		return "", errors.New("func init has no syntax declaration to take its discriminator from")
+	}
+	return projection.Identifier.Signature, nil
+}
+
 // typedSymbol is a declaration's canonical facts, or proven=false when its identity or shape
-// involves an invalid type.
-func (builder *documentBuilder) typedSymbol(declared declaration, variant *packages.Package) (storage.DocumentSymbol, bool, error) {
-	resolved, err := builder.resolver.resolve(declared.object)
+// involves an invalid type. discriminator is the declaration's Identity.Discriminator, set only for a
+// func init.
+func (builder *documentBuilder) typedSymbol(declared declaration, discriminator string) (storage.DocumentSymbol, bool, error) {
+	resolved, err := builder.resolver.declaration(declared.object, discriminator)
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
 	}
@@ -139,19 +168,27 @@ func (builder *documentBuilder) typedSymbol(declared declaration, variant *packa
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
 	}
-	implements, err := builder.implements(declared.object, variant)
-	if err != nil {
-		return storage.DocumentSymbol{}, false, err
-	}
 	embeds, err := builder.embeds(declared.object)
 	if err != nil {
 		return storage.DocumentSymbol{}, false, err
 	}
 	row, id := builder.resolver.rows[resolved.ID], resolved.ID
 	public, private := layerHashes(shapes)
+	var metrics *storage.CallableMetrics
+	if function, ok := declared.object.(*types.Func); ok {
+		metrics = &storage.CallableMetrics{Version: storage.MetricsVersion, ParamCount: function.Signature().Params().Len()}
+	}
+	var declaredType *string
+	if row.Kind == "var" {
+		encoded, valid := encodeType(declared.object.Type())
+		if !valid {
+			return storage.DocumentSymbol{}, false, fmt.Errorf("encode type of variable %s", declared.name.Name)
+		}
+		declaredType = &encoded
+	}
 	return storage.DocumentSymbol{
 		ID: &id, Kind: row.Kind, Visibility: row.Visibility, Shape: shapes.Private, PublicShape: shapes.Public, TypeForm: typeFormOf(declared.object),
-		PublicHash: public, PrivateHash: private, Implements: implements, Embeds: embeds,
+		PublicHash: public, PrivateHash: private, Embeds: embeds, Metrics: metrics, DeclaredType: declaredType,
 	}, true, nil
 }
 
@@ -229,76 +266,6 @@ func (builder *documentBuilder) typedIdentifier(id, packagePath string) (uir.Ide
 	return storage.DeclarationIdentifier(packagePath, row, owners)
 }
 
-// implements lists the interfaces, among the variant and its transitive imports, that a declared
-// non-interface, non-generic named type satisfies by value or by pointer.
-func (builder *documentBuilder) implements(object types.Object, variant *packages.Package) ([]string, error) {
-	typeName, ok := object.(*types.TypeName)
-	if !ok || typeName.IsAlias() {
-		return nil, nil
-	}
-	named, ok := typeName.Type().(*types.Named)
-	if !ok || named.TypeParams().Len() > 0 || types.IsInterface(named) {
-		return nil, nil
-	}
-	pointer := types.NewPointer(named)
-	found := map[string]bool{}
-	for _, candidate := range builder.candidateInterfaces(variant) {
-		iface := candidate.Type().Underlying().(*types.Interface)
-		if !types.Implements(named, iface) && !types.Implements(pointer, iface) {
-			continue
-		}
-		resolved, err := builder.resolver.resolve(candidate)
-		if err != nil {
-			return nil, err
-		}
-		if resolved.ID != "" {
-			found[resolved.ID] = true
-		}
-	}
-	if len(found) == 0 {
-		return nil, nil
-	}
-	return sortedKeys(found), nil
-}
-
-// candidateInterfaces are the non-empty, non-generic, method-set interfaces declared at package
-// level in the variant and its transitive imports. Restricting them to the import closure keeps a
-// document a function of its package input hash.
-func (builder *documentBuilder) candidateInterfaces(variant *packages.Package) []*types.TypeName {
-	if candidates, found := builder.interfaces[variant.ID]; found {
-		return candidates
-	}
-	var candidates []*types.TypeName
-	visited := map[string]bool{}
-	var visit func(*packages.Package)
-	visit = func(pkg *packages.Package) {
-		if visited[pkg.ID] {
-			return
-		}
-		visited[pkg.ID] = true
-		for _, path := range sortedKeys(pkg.Imports) {
-			visit(pkg.Imports[path])
-		}
-		scope := pkg.Types.Scope()
-		for _, name := range scope.Names() {
-			typeName, ok := scope.Lookup(name).(*types.TypeName)
-			if !ok || typeName.IsAlias() {
-				continue
-			}
-			named, ok := typeName.Type().(*types.Named)
-			if !ok || named.TypeParams().Len() > 0 {
-				continue
-			}
-			if iface, ok := named.Underlying().(*types.Interface); ok && iface.IsMethodSet() && iface.NumMethods() > 0 {
-				candidates = append(candidates, typeName)
-			}
-		}
-	}
-	visit(variant)
-	builder.interfaces[variant.ID] = candidates
-	return candidates
-}
-
 // fileDeclarations lists a file's package-level declarations and the members of their literal
 // struct and interface types, skipping blank names.
 func fileDeclarations(file *ast.File, info *types.Info) []declaration {
@@ -311,7 +278,7 @@ func fileDeclarations(file *ast.File, info *types.Info) []declaration {
 	for _, declared := range file.Decls {
 		switch declared := declared.(type) {
 		case *ast.FuncDecl:
-			add(declared.Name, documentStart(declared.Doc, declared.Pos()), declared.End())
+			add(declared.Name, syntax.DocumentStart(declared.Doc, declared.Pos()), declared.End())
 		case *ast.GenDecl:
 			for _, spec := range declared.Specs {
 				start, end := specExtent(declared, spec)
@@ -331,15 +298,68 @@ func fileDeclarations(file *ast.File, info *types.Info) []declaration {
 	return declarations
 }
 
+// typedBindings is the syntax extraction's bindings read from the type checker: every identifier
+// whose object is a receiver, parameter, result, local variable, or a local constant or type, mapped
+// to the object's position. Identifier keys of composite literals stay unresolved, as the syntax
+// walk leaves them.
+func typedBindings(file *ast.File, tokens *token.File, info *types.Info) (syntax.Bindings, error) {
+	bindings, keys := syntax.Bindings{}, map[*ast.Ident]bool{}
+	var err error
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.CompositeLit:
+			for _, element := range node.Elts {
+				if keyed, ok := element.(*ast.KeyValueExpr); ok {
+					if key, bare := keyed.Key.(*ast.Ident); bare {
+						keys[key] = true
+					}
+				}
+			}
+		case *ast.TypeSwitchStmt:
+			if guard, ok := node.Assign.(*ast.AssignStmt); ok {
+				if ident, ok := guard.Lhs[0].(*ast.Ident); ok && ident.Name != "_" {
+					bindings[tokens.Offset(ident.Pos())] = tokens.Offset(ident.Pos())
+				}
+			}
+		case *ast.Ident:
+			object := info.Uses[node]
+			if object == nil {
+				object = info.Defs[node]
+			}
+			if keys[node] || node.Name == "_" || !localObject(object) {
+				return true
+			}
+			if position := object.Pos(); int(position) < tokens.Base() || int(position) > tokens.Base()+tokens.Size() {
+				err = fmt.Errorf("local %s at %s is bound outside %s", node.Name, tokens.Position(node.Pos()), tokens.Name())
+				return false
+			}
+			bindings[tokens.Offset(node.Pos())] = tokens.Offset(object.Pos())
+		}
+		return err == nil
+	})
+	return bindings, err
+}
+
+func localObject(object types.Object) bool {
+	switch object := object.(type) {
+	case *types.Var:
+		kind := object.Kind()
+		return kind == types.LocalVar || kind == types.ParamVar || kind == types.RecvVar || kind == types.ResultVar
+	case *types.Const, *types.TypeName:
+		return object.Pkg() != nil && object.Parent() != object.Pkg().Scope()
+	}
+	return false
+}
+
 func specExtent(declared *ast.GenDecl, spec ast.Spec) (token.Pos, token.Pos) {
 	if !declared.Lparen.IsValid() {
-		return documentStart(declared.Doc, declared.Pos()), declared.End()
+		return syntax.DocumentStart(declared.Doc, declared.Pos()), declared.End()
 	}
 	switch spec := spec.(type) {
 	case *ast.TypeSpec:
-		return documentStart(spec.Doc, spec.Pos()), spec.End()
+		return syntax.DocumentStart(spec.Doc, spec.Pos()), spec.End()
 	case *ast.ValueSpec:
-		return documentStart(spec.Doc, spec.Pos()), spec.End()
+		return syntax.DocumentStart(spec.Doc, spec.Pos()), spec.End()
 	}
 	return spec.Pos(), spec.End()
 }
@@ -348,10 +368,10 @@ func addMembers(add func(*ast.Ident, token.Pos, token.Pos), expression ast.Expr)
 	switch literal := expression.(type) {
 	case *ast.StructType:
 		for _, field := range literal.Fields.List {
-			start, end := documentStart(field.Doc, field.Pos()), field.End()
+			start, end := syntax.DocumentStart(field.Doc, field.Pos()), field.End()
 			names := field.Names
 			if len(names) == 0 {
-				if embedded := typeNameIdent(field.Type); embedded != nil {
+				if embedded := syntax.TypeNameIdent(field.Type); embedded != nil {
 					names = []*ast.Ident{embedded}
 				}
 			}
@@ -363,7 +383,7 @@ func addMembers(add func(*ast.Ident, token.Pos, token.Pos), expression ast.Expr)
 	case *ast.InterfaceType:
 		for _, method := range literal.Methods.List {
 			for _, name := range method.Names {
-				add(name, documentStart(method.Doc, method.Pos()), method.End())
+				add(name, syntax.DocumentStart(method.Doc, method.Pos()), method.End())
 			}
 		}
 	}

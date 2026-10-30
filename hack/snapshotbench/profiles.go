@@ -1,3 +1,5 @@
+//go:build hack
+
 package main
 
 import (
@@ -9,7 +11,7 @@ import (
 	"runtime/trace"
 )
 
-func startProfiles(result *observation, native bool) (func() error, error) {
+func startProfiles(result *observation, native, forceGC bool) (func() error, error) {
 	result.CPU, result.Heap = os.Getenv("GAVEL_CPU_PROFILE"), os.Getenv("GAVEL_MEM_PROFILE")
 	if result.CPU == "" {
 		result.CPU = filepath.Join(result.Case.Directory, "cpu.pprof")
@@ -43,7 +45,9 @@ func startProfiles(result *observation, native bool) (func() error, error) {
 		if err != nil {
 			return errors.Join(err, cpu.Close(), execution.Close())
 		}
-		runtime.GC()
+		if forceGC {
+			runtime.GC()
+		}
 		return errors.Join(pprof.WriteHeapProfile(heap), heap.Close(), cpu.Close(), execution.Close())
 	}, nil
 }

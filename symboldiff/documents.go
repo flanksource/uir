@@ -17,13 +17,14 @@ var decodeDocument = storage.DecodeDocument
 
 // fileSide is one side of a changed path: its active document header and, once the diff needs it,
 // the decoded content. owners marks the declarations whose extent is outermost: each owns one line
-// segment of the file.
+// segment of the file. source holds the side's bytes when a patch supplied them.
 type fileSide struct {
 	path    string
 	active  storage.ActiveDocument
 	content storage.DocumentContent
 	decoded bool
 	owners  map[int]bool
+	source  []byte
 }
 
 func (side *fileSide) coverage() storage.Coverage { return side.active.Document.Coverage }
@@ -106,15 +107,20 @@ func (side *fileSide) decode(content storage.JSON, kinds symbolhandle.Kinds) err
 	if err != nil {
 		return err
 	}
-	side.content, side.decoded = decoded, true
+	side.setContent(decoded)
+	return nil
+}
+
+// setContent records the side's decoded content and marks the declarations whose extent is outermost.
+func (side *fileSide) setContent(content storage.DocumentContent) {
+	side.content, side.decoded = content, true
 	openEnd := -1
-	for index, symbol := range decoded.Symbols {
+	for index, symbol := range content.Symbols {
 		if symbol.ExtentBytes[0] >= openEnd {
 			side.owners[index] = true
 			openEnd = symbol.ExtentBytes[1]
 		}
 	}
-	return nil
 }
 
 func (side *fileSide) clearOwners() {

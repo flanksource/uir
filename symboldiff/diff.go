@@ -32,25 +32,25 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	if options.From == "" || options.To == "" {
-		return Result{}, fmt.Errorf("commit range %q..%q has an empty revision", options.From, options.To)
-	}
-	if database == nil {
-		return Result{}, errors.New("diff: database is required")
-	}
-	scope, err := loadRootScope(ctx, database, options.RootKey)
+	changeTypes, err := ParseChangeTypes(options.ChangeTypes)
 	if err != nil {
 		return Result{}, err
 	}
-	if options.Location != "" {
-		if scope, err = scope.preferring(options.Location); err != nil {
-			return Result{}, err
-		}
+	scope, err := loadScope(ctx, database, options)
+	if err != nil {
+		return Result{}, err
 	}
 	if options.AutoIndex && scope.external {
 		return Result{}, scope.errExternal("its revisions cannot be indexed from Git; republish a missing revision with uir import")
 	}
-	before, after, err := selectSides(ctx, database, scope, options)
+	resolution, err := scope.resolveRevisions(ctx, options.Revisions)
+	if err != nil {
+		return Result{}, err
+	}
+	if resolution.Worktree {
+		return Result{}, fmt.Errorf("revision %q is compared against the worktree of %s, which is diffed as a git patch, not from the index", options.Revisions[0], resolution.Checkout)
+	}
+	before, after, err := selectSides(ctx, database, scope, resolution, options)
 	if err != nil {
 		return Result{}, err
 	}
@@ -58,7 +58,7 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{RootKey: scope.root.RootKey, From: before.info(), To: after.info(), Visibility: visibility, Stat: options.Stat, Packages: []PackageDiff{}}
+	result := Result{RootKey: scope.root.RootKey, From: before.info(), To: after.info(), Visibility: visibility, ChangeTypes: changeTypes, Stat: options.Stat, Packages: []PackageDiff{}}
 	var attribution *lineAttribution
 	var manifests []FileDiff
 	if options.Stat {
@@ -66,37 +66,34 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 			return Result{}, err
 		}
 	}
-	rows, err := buildRows(pairings, attribution, markers, visibility, scope.tokenizer())
+	rows, err := buildRows(pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, scope.tokenizer())
 	if err != nil {
 		return Result{}, err
 	}
-	result.Packages = assemble(files, rows, attribution, markers, manifests, scope.root.RootKey)
+	result.Packages = assemble(files, rows, attribution, markers, manifests, scope.root.RootKey, len(changeTypes) > 0)
 	return result, nil
 }
 
-func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, options Options) (selectedSide, selectedSide, error) {
+func selectSides(ctx context.Context, database *gorm.DB, scope rootScope, resolution Resolution, options Options) (selectedSide, selectedSide, error) {
 	var sides [2]selectedSide
-	for index, request := range []struct{ revision, override, flag string }{
-		{options.From, options.SnapshotFrom, "--snapshot-from"}, {options.To, options.SnapshotTo, "--snapshot-to"},
+	for index, request := range []struct{ commit, override, flag string }{
+		{resolution.From, options.SnapshotFrom, "--snapshot-from"}, {resolution.To, options.SnapshotTo, "--snapshot-to"},
 	} {
-		commit, err := scope.resolveCommit(ctx, request.revision)
-		if err != nil {
-			return selectedSide{}, selectedSide{}, err
-		}
 		var snapshot storage.ModuleSnapshot
+		var err error
 		if options.AutoIndex && request.override == "" {
-			indexed, indexErr := autoIndex(ctx, database, scope, commit, options)
+			indexed, indexErr := autoIndex(ctx, database, scope, request.commit, options)
 			if indexErr != nil {
 				return selectedSide{}, selectedSide{}, indexErr
 			}
-			snapshot, err = scope.overrideSnapshot(ctx, database, commit, indexed.SnapshotID, request.flag)
+			snapshot, err = scope.overrideSnapshot(ctx, database, request.commit, indexed.SnapshotID, request.flag)
 		} else {
-			snapshot, err = scope.selectSnapshot(ctx, database, commit, request.override, request.flag)
+			snapshot, err = scope.selectSnapshot(ctx, database, request.commit, request.override, request.flag)
 		}
 		if err != nil {
 			return selectedSide{}, selectedSide{}, err
 		}
-		sides[index] = selectedSide{commit: commit, snapshot: snapshot}
+		sides[index] = selectedSide{commit: request.commit, snapshot: snapshot}
 	}
 	if sides[0].snapshot.ConfigurationHash != sides[1].snapshot.ConfigurationHash {
 		return selectedSide{}, selectedSide{}, fmt.Errorf("snapshots %s and %s were indexed under different configuration hashes (%s, %s), so their shape and body hashes are not comparable",
@@ -154,7 +151,33 @@ func compareSnapshots(ctx context.Context, database *gorm.DB, sides [2]selectedS
 		return nil, nil, coverageMarkers{}, err
 	}
 	pairings, err := pairSymbols(ctx, database, files, plan, stat)
+	if err != nil {
+		return nil, nil, coverageMarkers{}, err
+	}
+	if unread := unreadMoveSides(moveCandidates(pairings)); len(unread) > 0 {
+		if err := readDocuments(ctx, database, files, unread); err != nil {
+			return nil, nil, coverageMarkers{}, err
+		}
+		if pairings, err = pairSymbols(ctx, database, files, plan, stat); err != nil {
+			return nil, nil, coverageMarkers{}, err
+		}
+	}
+	pairings, err = pairAcrossPackages(pairings)
 	return files, pairings, coverageMarkers{before: headers[0], after: headers[1]}, err
+}
+
+// unreadMoveSides are the documents of move candidates that were not read: pairing them across
+// packages compares their shapes and hashes.
+func unreadMoveSides(candidates [][2]*pairing) map[*fileSide]bool {
+	unread := map[*fileSide]bool{}
+	for _, candidate := range candidates {
+		for _, side := range []*entry{candidate[0].before, candidate[1].after} {
+			if !side.decoded() {
+				unread[side.file] = true
+			}
+		}
+	}
+	return unread
 }
 
 // statLines locates both commits' checkouts, attributes lines, and compares the manifests. A missing
@@ -209,7 +232,7 @@ func (markers coverageMarkers) ofPairing(pair *pairing) []string {
 }
 
 // reportedRow is a row with the pairing it describes, the file it is reported under, and whether the
-// visibility filter keeps it.
+// visibility and change-type filters keep it.
 type reportedRow struct {
 	row     Row
 	pair    *pairing
@@ -222,7 +245,7 @@ var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2
 
 // buildRows turns changed pairings into rows. With line counts, an unchanged pairing whose lines
 // differ (comments or layout inside the extent) is a body row saying so.
-func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, visibility Visibility, tokenizer Tokenizer) ([]reportedRow, error) {
+func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, filter rowFilter, tokenizer Tokenizer) ([]reportedRow, error) {
 	var rows []reportedRow
 	for _, pair := range pairings {
 		class, note := pair.class, ""
@@ -243,11 +266,16 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 			return nil, err
 		}
 		row.Lines, row.Note = count, note
-		reported, visible := pair.reported(), pair.visibleAs(visibility, class)
+		reported, visible := pair.reported(), pair.visibleAs(filter.visibility, class) && filter.changeTypes.shows(class)
 		if visible && !pair.shapesRead() {
 			return nil, fmt.Errorf("the %s row of %s in %q shows a shape whose document was not read", pair.class, row.DisplayName(), reported.file.path)
 		}
 		rows = append(rows, reportedRow{row: row, pair: pair, path: reported.file.path, pkg: reported.file.active.Source.PackagePath, visible: visible})
+		if pair.before != nil && pair.before.file.path != reported.file.path {
+			away := row
+			away.Lines, away.MovedAway = nil, true
+			rows = append(rows, reportedRow{row: away, pair: pair, path: pair.before.file.path, pkg: pair.before.file.active.Source.PackagePath, visible: visible})
+		}
 	}
 	groupRetypedPairs(rows, tokenizer)
 	sort.SliceStable(rows, func(i, j int) bool {

@@ -122,6 +122,21 @@ var _ = Describe("snapshot stats", func() {
 		Entry("PostgreSQL", postgresOptions("uir_snapshot_stats_rederived")),
 	)
 
+	It("preserves a snapshot's original change counts when pruning rebases it", func(ctx SpecContext) {
+		config := sqliteOptions("pruned-stats.db")()
+		database := openDB(ctx, config)
+		_, first, second := statsModule(ctx, database, map[string]string{"kept/kept.go": statsKept})
+		before := recordedStats(database, second)
+
+		pruned, err := storage.PruneHistory(ctx, database, "example.org/stats", storage.HistoryPruneOptions{Keep: 1})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(pruned.Rebased).To(Equal(1))
+		Expect(pruned.Snapshots).To(Equal(int64(1)))
+		Expect(database.Where("id = ?", first).Take(&storage.ModuleSnapshot{}).Error).To(MatchError(gorm.ErrRecordNotFound))
+		Expect(recordedStats(database, second)).To(Equal(before))
+		Expect(recordedStats(openDB(ctx, config), second)).To(Equal(before))
+	})
+
 	It("refuses to record stats without base sources or files, instead of counting them as empty", func(ctx SpecContext) {
 		database := openDB(ctx, sqliteOptions("missing-inputs.db")())
 		_, _, second := statsModule(ctx, database, nil)

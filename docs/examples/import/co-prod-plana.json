@@ -27,7 +27,7 @@
       "module_key": "Co/Prod/PlanA",
       "package_path": "Co/Prod/PlanA/screens",
       "kind": "field",
-      "owner_id": "a270ef4d11d69343c173f8b2322f125fb0b9e24f5c51711c54b53b0cb1a35793",
+      "owner_id": "7f107e93c26ec5e8ba1b72ab5741cd4c9d2048ff081aa28b50a98d27134041a3",
       "name": "Premium",
       "visibility": "exported"
     },
@@ -56,7 +56,7 @@
       "module_key": "Co/Prod",
       "package_path": "Co/Prod/records",
       "kind": "field",
-      "owner_id": "133430236d1a57229dcc2ce2a84abc87c26b7432a5a0c4592a1dde9ac215aaea",
+      "owner_id": "2e0bfa20664cf81d3d1a11db58c00954138d9620ef5e4ff51f0e6b716672308e",
       "name": "Amount",
       "visibility": "exported"
     }
@@ -68,11 +68,11 @@
       "content_hash": "a0dbca9dbaae3c8dfa31bb3cf2f1a1ba2dfcca84197e0fea340b9dbdb9e1bfa3",
       "source": "<Rule name=\"Apply\">\n  <Call rule=\"Calc\"/>\n  <Read field=\"Policy.Amount\"/>\n  <Set field=\"Entry.Premium\" value=\"Policy.Amount\"/>\n</Rule>\n",
       "content": {
-        "version": 5,
+        "version": 10,
         "package_path": "Co/Prod/PlanA/rules",
         "symbols": [
           {
-            "id": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725",
+            "id": "1e15c8e44b4e9493b6d511e5162b850101aaa316dcf6e2890509c32ca46730d4",
             "key": "v1:[\"function\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/rules\",\"\",\"Apply\",\"\",\"\"]",
             "kind": "test.rule",
             "visibility": "exported",
@@ -112,7 +112,7 @@
         ],
         "occurrences": [
           {
-            "symbol": "50e1e3a5c7f08cc11cd8f55c496c32de5f5195dccff34c0b68028178612b5c21",
+            "symbol": "53cc928f059a0532c1edfc50d0bc981c1c138d10f167896c3ceb64b47db4a7b6",
             "role": "call",
             "range": [
               2,
@@ -124,7 +124,7 @@
               34,
               38
             ],
-            "enclosing": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725",
+            "enclosing": "1e15c8e44b4e9493b6d511e5162b850101aaa316dcf6e2890509c32ca46730d4",
             "enclosing_key": "v1:[\"function\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/rules\",\"\",\"Apply\",\"\",\"\"]",
             "target": {
               "module": "Co/Prod",
@@ -137,7 +137,7 @@
             "text": "<Call rule=\"Calc\"/>"
           },
           {
-            "symbol": "1889b837d9c7101587b8463785c61bc44c02fa9b090af716089017242e816ee8",
+            "symbol": "693da91c61609f752c65286f93030218fc63a24c8027dc95ab6aabc7a51bff9f",
             "role": "reference",
             "range": [
               3,
@@ -149,10 +149,10 @@
               57,
               70
             ],
-            "enclosing": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725"
+            "enclosing": "1e15c8e44b4e9493b6d511e5162b850101aaa316dcf6e2890509c32ca46730d4"
           },
           {
-            "symbol": "87c92d729dd4a5171d7d7788939e100d40826b41282fce7b8263a6396d16a023",
+            "symbol": "d2c43a3468ac498e89d37dba624dec78ba4ee52f0811e340af908e66a228a826",
             "role": "write",
             "range": [
               4,
@@ -164,7 +164,7 @@
               88,
               101
             ],
-            "enclosing": "e9b4beaa2e27e4edc16b406a73c4fd51d350aae6e872609da672c54a8b5d1725"
+            "enclosing": "1e15c8e44b4e9493b6d511e5162b850101aaa316dcf6e2890509c32ca46730d4"
           }
         ],
         "diagnostics": []
@@ -176,11 +176,11 @@
       "content_hash": "0e429448efa230d9d7e257c07e5939bec1597e577e636b4af65610f216269f44",
       "source": "<Screen name=\"Entry\">\n  <Field name=\"Premium\"/>\n</Screen>\n",
       "content": {
-        "version": 5,
+        "version": 10,
         "package_path": "Co/Prod/PlanA/screens",
         "symbols": [
           {
-            "id": "a270ef4d11d69343c173f8b2322f125fb0b9e24f5c51711c54b53b0cb1a35793",
+            "id": "7f107e93c26ec5e8ba1b72ab5741cd4c9d2048ff081aa28b50a98d27134041a3",
             "key": "v1:[\"class\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/screens\",\"Entry\",\"\",\"\",\"\"]",
             "kind": "test.screen",
             "visibility": "exported",
@@ -218,7 +218,7 @@
             "ordinal": 0
           },
           {
-            "id": "87c92d729dd4a5171d7d7788939e100d40826b41282fce7b8263a6396d16a023",
+            "id": "d2c43a3468ac498e89d37dba624dec78ba4ee52f0811e340af908e66a228a826",
             "key": "v1:[\"record_field\",\"Co/Prod/PlanA\",\"Co/Prod/PlanA/screens\",\"Entry\",\"\",\"Premium\",\"\"]",
             "kind": "field",
             "visibility": "exported",

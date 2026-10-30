@@ -19,6 +19,7 @@ import (
 	"github.com/flanksource/clicky/rpc"
 	rpchttp "github.com/flanksource/clicky/rpc/http"
 	"github.com/flanksource/clicky/task"
+	"github.com/flanksource/commons-db/cmd/query/connections"
 	uiweb "github.com/flanksource/uir/web"
 	"github.com/spf13/cobra"
 )
@@ -118,13 +119,19 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		Title: "UIR", Version: "1", StructuredErrorResponses: true,
 		Executor: &rpc.ExecutorConfig{Enabled: true, SkipPreRun: true, PathPrefix: "/api/v1"},
 	}
-	server := rpc.NewSwaggerServer(config, root, &rpc.OpenAPIConfig{Title: "UIR", Version: "1", Extensions: []func(*rpc.OpenAPISpec){connectionOpenAPI}})
+	server := rpc.NewSwaggerServer(config, root, &rpc.OpenAPIConfig{Title: "UIR", Version: "1",
+		Extensions: []func(*rpc.OpenAPISpec){connections.AddConnectionsOpenAPI, databaseModuleOpenAPI}})
 	if server.Executor() == nil {
 		return nil, errors.New("register UIR Clicky operations: executor is unavailable")
 	}
 	taskRuns, err := runtime.TaskRuns(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("open the task run store for serve: %w", err)
+	}
+	// Bound after the database opened above, so the service's handlers carry it in their context.
+	service, err := bindConnectionService(runtime)
+	if err != nil {
+		return nil, fmt.Errorf("create the connection service for serve: %w", err)
 	}
 	mux := http.NewServeMux()
 	router := route.NewRouter(mux)
@@ -138,13 +145,14 @@ func newServeHandler(root *cobra.Command, runtime *commandRuntime, ui http.Handl
 		}
 		ui.ServeHTTP(w, r)
 	}))
+	api := service.Handler("/api/v1", mux)
 	return rpchttp.TimingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (strings.HasPrefix(r.URL.Path, "/api/v1/modules/refactor/") || strings.HasPrefix(r.URL.Path, "/api/v1/connections") || strings.HasPrefix(r.URL.Path, "/api/v1/database-modules")) && !localRefactorRequest(r) {
+		if (strings.HasPrefix(r.URL.Path, "/api/v1/modules/refactor/") || strings.HasPrefix(r.URL.Path, "/api/v1/connection") || strings.HasPrefix(r.URL.Path, "/api/v1/database-modules")) && !localRefactorRequest(r) {
 			http.Error(w, "connection management and explorer refactors require local, same-origin access", http.StatusForbidden)
 			return
 		}
 		ctx := context.WithValue(r.Context(), runtimeContextKey{}, runtime)
-		mux.ServeHTTP(w, r.WithContext(ctx))
+		api.ServeHTTP(w, r.WithContext(ctx))
 	})), nil
 }
 

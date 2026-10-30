@@ -24,7 +24,9 @@ type typedFile struct {
 	file *ast.File
 }
 
-// typedLoad is one go/packages load of a module root under its build variant.
+// typedLoad is one go/packages load of a module root under its build variant. errors are the load
+// errors of every package it loaded, dependencies included, which decide whether its coverage is
+// deterministic.
 type typedLoad struct {
 	root        discoveredRoot
 	origins     map[*types.Package]packageOrigin
@@ -33,6 +35,7 @@ type typedLoad struct {
 	directories map[string]bool
 	parsed      map[string]string
 	loadFailure string
+	errors      []packages.Error
 }
 
 type packageLoadError struct{ err error }
@@ -53,13 +56,7 @@ var sourceResolutionFailures = []string{
 // cause, which may be indexed as syntax. Anything else, an unreachable or failing proxy, a missing go
 // command, or an interrupted load, is not a fact about the commit and fails the index.
 func sourceResolutionFailure(err error) bool {
-	message := err.Error()
-	for _, failure := range sourceResolutionFailures {
-		if strings.Contains(message, failure) {
-			return true
-		}
-	}
-	return false
+	return containsAny(err.Error(), sourceResolutionFailures)
 }
 
 // loadTyped loads every package of the root (and its test variants when includeTests is set) with
@@ -78,16 +75,20 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 		root: root, origins: map[*types.Package]packageOrigin{}, files: map[string]typedFile{},
 		ignored: map[string]bool{}, directories: map[string]bool{}, parsed: sources.parsed,
 	}
-	var partial error
+	var failure error
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
 		origin := originOf(pkg)
 		load.origins[pkg.Types] = origin
-		if partial == nil && origin.Class == workspacePackage {
-			partial = sources.requireFull(pkg)
+		load.errors = append(load.errors, pkg.Errors...)
+		if failure == nil {
+			failure = infrastructureListError(pkg)
+		}
+		if failure == nil && origin.Class == workspacePackage {
+			failure = sources.requireFull(pkg)
 		}
 	})
-	if partial != nil {
-		return typedLoad{}, partial
+	if failure != nil {
+		return typedLoad{}, failure
 	}
 	packages.Visit(roots, nil, load.addFailedImports)
 	for _, pkg := range roots {
@@ -119,7 +120,7 @@ func typedLoadConfig(ctx context.Context, root discoveredRoot, includeTests bool
 		BuildFlags: []string{"-mod=readonly"}, ParseFile: sources.parse,
 	}
 	if len(root.Variant.BuildTags) > 0 {
-		config.BuildFlags = []string{"-tags=" + strings.Join(root.Variant.BuildTags, ",")}
+		config.BuildFlags = append(config.BuildFlags, "-tags="+strings.Join(root.Variant.BuildTags, ","))
 	}
 	if root.ModFile != "" {
 		config.BuildFlags = append(config.BuildFlags, "-modfile="+root.ModFile)
@@ -180,9 +181,10 @@ type packageState struct {
 }
 
 // classifyPackage maps a discovered package's files onto the load and decides its coverage: every
-// file excluded by build constraints is excluded; a go list failure, a variant without type
-// information, or a file the load did not type-check is syntax; any other error is partial.
-func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, error) {
+// file excluded by build constraints is excluded; a go list failure, a parse error, a variant without
+// type information, or a file the load did not type-check is syntax; any other error is partial. A
+// file that does not parse then fails its syntax extraction and is published degraded on its own.
+func (load *typedLoad) classifyPackage(files []discoveredFile) packageState {
 	state := packageState{typed: map[string]typedFile{}, excluded: map[string]string{}}
 	if load.loadFailure != "" {
 		state.diagnostics = append(state.diagnostics, packageDiagnostic{Message: load.loadFailure})
@@ -212,12 +214,8 @@ func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, er
 	for _, variant := range state.variants {
 		listFailed = listFailed || variant.TypesInfo == nil
 		for _, loadError := range variant.Errors {
-			diagnostic := load.diagnostic(loadError, files)
-			if loadError.Kind == packages.ParseError {
-				return packageState{}, fmt.Errorf("parse Go source %q: %s", load.relative(loadError.Pos), diagnostic.Message)
-			}
-			listFailed = listFailed || loadError.Kind == packages.ListError
-			state.diagnostics = append(state.diagnostics, diagnostic)
+			listFailed = listFailed || loadError.Kind == packages.ListError || loadError.Kind == packages.ParseError
+			state.diagnostics = append(state.diagnostics, load.diagnostic(loadError, files))
 		}
 	}
 	switch {
@@ -230,7 +228,7 @@ func (load *typedLoad) classifyPackage(files []discoveredFile) (packageState, er
 	default:
 		state.coverage = storage.CoverageIndexed
 	}
-	return state, nil
+	return state
 }
 
 // exportVariant is the variant whose API importers see: the non-test package when there is one.

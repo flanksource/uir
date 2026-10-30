@@ -286,6 +286,14 @@ func (index *compactIndex) selectorDeclarations(ctx context.Context, selector co
 		root := index.scopes[posting.scope].root.RootKey
 		return byID[posting.symbol].ModuleKey != root || selector.ModulePattern != "" && !selector.moduleGlob.matches(root)
 	})
+	if index.declarationProjection && selector.Kind != "struct" {
+		matches, err := index.projectedDeclarations(ctx, postings, "symbol")
+		active := map[string]bool{}
+		for _, match := range matches {
+			active[match.SymbolID] = true
+		}
+		return matches, active, err
+	}
 	if err := index.prefetch(ctx, postings); err != nil {
 		return nil, nil, err
 	}

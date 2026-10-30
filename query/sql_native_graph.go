@@ -117,7 +117,7 @@ func (pipeline *Pipeline) sqlNativeGraph(ctx context.Context, index *compactInde
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	result.Graph = &GraphResult{Graph: *built, Exclude: exclude, Packages: graphPackages(built, base.packages, exclusions), Warnings: result.Warnings, Stages: result.Stages, Candidates: []ModuleSymbol{}}
+	result.Graph = &GraphResult{Graph: *built, Exclude: exclude, Packages: graphPackages(built, base.packages, exclusions), Stages: result.Stages, Candidates: []ModuleSymbol{}}
 	result.Symbols = value.symbols
 	result.Total = len(built.Nodes)
 	return result, nil

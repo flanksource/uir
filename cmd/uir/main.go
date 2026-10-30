@@ -12,6 +12,7 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
+	"github.com/flanksource/clicky/extensions"
 	"github.com/flanksource/clicky/shutdown"
 	clickytask "github.com/flanksource/clicky/task"
 	"github.com/flanksource/commons/properties"
@@ -21,8 +22,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// version is set at link time by `make binary VERSION=...`.
-var version = "dev"
+// Build metadata is set at link time by make binary and make install.
+var (
+	version   = "dev"
+	gitCommit = "unknown"
+	buildDate = "unknown"
+)
 
 // dsnEnv and schemaEnv supply --dsn and --schema when the flags are not set.
 const (
@@ -82,7 +87,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	root := &cobra.Command{
 		Use:          "uir",
 		Short:        "Query and incrementally index Universal Intermediate Representation modules",
-		Version:      version,
+		Version:      fmt.Sprintf("%s (git: %s, built: %s)", version, gitCommit, buildDate),
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().StringVar(&runtime.DSN, "dsn", "", "PostgreSQL DSN, sqlite:// URL, or .db path (default $"+dsnEnv+", then ~/.config/uir/uir.db)")
@@ -90,8 +95,12 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	bindProfileFlags(root, runtime)
 	properties.BindFlags(root.PersistentFlags())
 	clicky.BindAllFlagsToCommand(root, "tasks", "format")
+	if _, err := bindConnectionService(runtime); err != nil {
+		panic(fmt.Sprintf("create the connection service: %v", err))
+	}
 	clicky.GenerateCLI(root)
 	registerModuleCommands(root)
+	registerLintCommand(root, runtime)
 	registerRefactorCommands(root, runtime)
 	registerDiffCommand(root)
 	registerHistoryCommand(root)
@@ -108,6 +117,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	}
 	clicky.MarkLocalOnly(versionCommand)
 	root.AddCommand(versionCommand)
+	extensions.CobraExtensions(root).Interactive()
 	return root
 }
 

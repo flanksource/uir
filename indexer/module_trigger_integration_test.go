@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -85,7 +87,8 @@ var _ = Describe("snapshot trigger", func() {
 
 			GinkgoT().Setenv("CGO_ENABLED", "0")
 			variant := indexOnce(ctx, engine, workspace)
-			Expect(outcomeOf(variant)).To(Equal(triggerOutcome{HeadVersion: 2, ParsedFiles: 3}), "a new configuration re-keys every document")
+			Expect(outcomeOf(variant)).To(Equal(triggerOutcome{HeadVersion: 2, ReusedFiles: 3}),
+				"a new configuration re-keys every package, whose files render the documents they had")
 			Expect(countRows(database, &storage.SourceDelta{}, "snapshot_id = ?", variant.SnapshotID)).To(BeZero())
 			before, after := loadSnapshot(database, first.SnapshotID), loadSnapshot(database, variant.SnapshotID)
 			Expect(after.ContentSetHash).To(Equal(before.ContentSetHash))
@@ -155,7 +158,11 @@ var _ = Describe("snapshot trigger", func() {
 		writeTwoPackageModule(workspace)
 		engine, err := New(database)
 		Expect(err).ToNot(HaveOccurred())
-		GinkgoT().Setenv("PATH", "")
+		git, err := exec.LookPath("git")
+		Expect(err).ToNot(HaveOccurred())
+		bin := GinkgoT().TempDir()
+		Expect(os.Symlink(git, filepath.Join(bin, "git"))).To(Succeed())
+		GinkgoT().Setenv("PATH", bin)
 		_, err = engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 		Expect(err).To(MatchError(ContainSubstring("read go env")))
 		Expect(countRows(database, &storage.ModuleRoot{}, "1 = 1")).To(BeZero())

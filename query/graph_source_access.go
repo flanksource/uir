@@ -47,6 +47,9 @@ func (source *indexGraphSource) accesses(ctx context.Context, symbol ModuleSymbo
 	if err := source.remember(ctx, targets); err != nil {
 		return nil, err
 	}
+	if err := source.guards.prefetch(ctx, uses); err != nil {
+		return nil, err
+	}
 	for _, use := range uses {
 		if source.index.category(source.symbols[use.SymbolID].Kind) == symbolhandle.CategoryContainer {
 			continue

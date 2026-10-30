@@ -3,14 +3,13 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("module workspace uses", func() {
-	It("requires a decision for external go.work modules in non-interactive mode", func() {
+	It("adds external go.work modules only with --all", func() {
 		workspace := GinkgoT().TempDir()
 		app := filepath.Join(workspace, "app")
 		other := filepath.Join(workspace, "other")
@@ -23,18 +22,15 @@ var _ = Describe("module workspace uses", func() {
 		canonicalOther, err := filepath.EvalSymlinks(other)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(os.WriteFile(filepath.Join(workspace, "go.work"), []byte("go 1.26.0\n\nuse (\n./app\n./other\n)\n"), 0o644)).To(Succeed())
-		input := strings.NewReader("")
-		_, err = addPaths(addPathOptions{Path: app, Input: input})
-		Expect(err).To(MatchError(ContainSubstring("--include-workspace-uses or --no-workspace-uses")))
-		included, err := addPaths(addPathOptions{Path: app, IncludeWorkspaceUses: true, Input: input})
+		selected, err := addPaths(addPathOptions{Path: app})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(included).To(Equal([]string{canonicalApp, canonicalOther}))
-		excluded, err := addPaths(addPathOptions{Path: app, NoWorkspaceUses: true, Input: input})
+		Expect(selected).To(Equal([]string{canonicalApp}))
+		all, err := addPaths(addPathOptions{Path: app, All: true})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(excluded).To(Equal([]string{canonicalApp}))
+		Expect(all).To(Equal([]string{canonicalApp, canonicalOther}))
 		packageDir := filepath.Join(app, "internal")
 		Expect(os.MkdirAll(packageDir, 0o755)).To(Succeed())
-		packagePaths, err := addPaths(addPathOptions{Path: packageDir, IncludeWorkspaceUses: true, Input: input})
+		packagePaths, err := addPaths(addPathOptions{Path: packageDir, All: true})
 		Expect(err).ToNot(HaveOccurred())
 		canonicalPackage, err := filepath.EvalSymlinks(packageDir)
 		Expect(err).ToNot(HaveOccurred())

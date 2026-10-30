@@ -7,6 +7,12 @@ import (
 
 func (publication Publication) domainCatalog(registered storage.DomainCatalog) (storage.DomainCatalog, error) {
 	for _, kind := range publication.Kinds {
+		if err := storage.EvolveKindMetrics(kind.Name, registered.Metrics[kind.Name], kind.Metrics); err != nil {
+			return registered, err
+		}
+		if len(kind.Metrics) > 0 {
+			registered.Metrics[kind.Name] = kind.Metrics
+		}
 		if len(kind.Schema) == 0 {
 			continue
 		}

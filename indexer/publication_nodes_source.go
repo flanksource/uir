@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
@@ -66,13 +67,13 @@ func (scope nodeScope) symbol(node uir.Node, owner *nodeSymbol, slot string, pri
 	if name == "" {
 		return nodeSymbol{}, fmt.Errorf("a %s node has no name", uir.ShapeKind(node))
 	}
-	parameters, err := nodeParameterTypes(node)
+	parameters, results, err := nodeCallableTypes(node)
 	if err != nil {
 		return nodeSymbol{}, err
 	}
 	symbol := nodeSymbol{
 		node: node, slot: slot, visibility: "exported",
-		identity: Identity{ModuleKey: scope.moduleKey, PackagePath: scope.packagePath, Kind: kind, Name: name, ParameterTypes: parameters},
+		identity: Identity{ModuleKey: scope.moduleKey, PackagePath: scope.packagePath, Kind: kind, Name: name, ParameterTypes: parameters, ResultTypes: results},
 	}
 	if private || !uir.IsPublic(node) || (owner != nil && owner.visibility == "internal") {
 		symbol.visibility = "internal"
@@ -103,7 +104,7 @@ func (scope nodeScope) declare(symbol nodeSymbol, owner *nodeSymbol) error {
 	case scope.declared.ids[id]:
 		return fmt.Errorf("%s is declared twice", symbol.subject(owner))
 	case scope.declared.keys[key]:
-		return fmt.Errorf("%s has identifier key %s, which another symbol already has; qualify members with their owner, as uir.NewTable does for a table's", symbol.subject(owner), key)
+		return fmt.Errorf("%s has identifier key %s, which another symbol already has; qualify members with their owner, as uir.NewTable and uir.NewType do", symbol.subject(owner), key)
 	}
 	scope.declared.ids[id], scope.declared.keys[key] = true, true
 	return nil
@@ -215,7 +216,7 @@ func namedLine(node uir.Node, line string) (string, error) {
 
 // content is the typed document of everything written, symbols in extent order.
 func (writer *sourceWriter) content(packagePath string) (storage.DocumentContent, error) {
-	lines := newLineIndex([]byte(writer.text.String()))
+	lines := syntax.NewLineIndex([]byte(writer.text.String()))
 	content := storage.DocumentContent{
 		Version: storage.DocumentFormatVersion, PackagePath: packagePath, Symbols: make([]storage.DocumentSymbol, len(writer.written)),
 		Occurrences: []storage.DocumentOccurrence{}, Diagnostics: []storage.DocumentDiagnostic{},
@@ -230,7 +231,7 @@ func (writer *sourceWriter) content(packagePath string) (storage.DocumentContent
 	return content, nil
 }
 
-func (written writtenSymbol) documentSymbol(lines lineIndex) (storage.DocumentSymbol, error) {
+func (written writtenSymbol) documentSymbol(lines syntax.LineIndex) (storage.DocumentSymbol, error) {
 	node, symbol := written.symbol.node, written.symbol
 	prints := uir.Fingerprint(node)
 	if prints.Content == "" {
@@ -250,7 +251,7 @@ func (written writtenSymbol) documentSymbol(lines lineIndex) (storage.DocumentSy
 		ID: &id, Key: node.GetIdentifier().IdentityKey(), Kind: symbol.identity.Kind, Visibility: symbol.visibility,
 		Shape: uir.Shape(node, uir.LayerPrivate), PublicShape: uir.Shape(node, uir.LayerPublic),
 		PublicHash: prints.Public, PrivateHash: prints.Private, ContentHash: prints.Content,
-		Name: lines.rangeOf(written.name), NameBytes: written.name, Extent: lines.rangeOf(written.extent), ExtentBytes: written.extent,
+		Name: lines.RangeOf(written.name), NameBytes: written.name, Extent: lines.RangeOf(written.extent), ExtentBytes: written.extent,
 		Identifier: node.GetIdentifier(), ParentKey: symbol.parentKey, ChildSlot: symbol.slot, Ordinal: symbol.ordinal,
 		Payload: storage.JSON(payload), SemanticHash: node.Hash(),
 	}

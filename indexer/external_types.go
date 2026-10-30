@@ -3,11 +3,13 @@ package indexer
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
@@ -15,7 +17,7 @@ import (
 // ExternalIndexerVersion versions how Publish turns a publication into documents and hashes: it enters
 // the configuration hash of every external snapshot and is the indexer version of every external
 // document.
-const ExternalIndexerVersion = "external-v3"
+const ExternalIndexerVersion = "external-v8"
 
 const (
 	externalConfigurationVersion = "uir-external-configuration-v1"
@@ -42,20 +44,31 @@ type Publication struct {
 	Relationships []storage.RelationshipKind `json:"relationships,omitempty"`
 	Symbols       []PublishedSymbol          `json:"symbols"`
 	Documents     []PublishedDocument        `json:"documents"`
+	Delta         *PublicationDelta          `json:"delta,omitempty"`
+}
+
+// PublicationDelta replaces complete packages and explicitly removes paths from
+// Options.BaseSnapshotID. Omitted packages retain their sources and documents.
+type PublicationDelta struct {
+	DeletedPaths []string `json:"deleted_paths,omitempty"`
 }
 
 // ExternalLocation is where the producer reads the root from; URI is stored as the location's
 // canonical path, with kind external.
 type ExternalLocation struct {
-	URI string `json:"uri"`
+	URI           string `json:"uri"`
+	RepositoryURI string `json:"repository_uri,omitempty"`
 }
 
 // KindDeclaration is a custom symbol kind the publication uses, registered before its documents are
-// validated; see storage.RegisterKind.
+// validated; see storage.RegisterKind. Metrics names the non-negative integer metrics every declaration
+// of the kind records in its document symbol's measures; a later declaration may add metrics but never
+// remove or redescribe one.
 type KindDeclaration struct {
-	Schema   storage.JSON          `json:"schema,omitempty"`
-	Name     string                `json:"name"`
-	Category symbolhandle.Category `json:"category"`
+	Schema   storage.JSON                  `json:"schema,omitempty"`
+	Metrics  map[string]storage.MetricSpec `json:"metrics,omitempty"`
+	Name     string                        `json:"name"`
+	Category symbolhandle.Category         `json:"category"`
 }
 
 // PublishedSymbol is one symbol's identity, whose id is SymbolID(Identity), and its visibility,
@@ -74,6 +87,7 @@ type PublishedDocument struct {
 	ContentHash string                  `json:"content_hash"`
 	Source      string                  `json:"source"`
 	Content     storage.DocumentContent `json:"content"`
+	GitPath     string                  `json:"git_path,omitempty"`
 }
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -88,7 +102,9 @@ func (publication Publication) validate() error {
 		return errors.New("name is required")
 	case publication.Location.URI == "":
 		return errors.New("location.uri is required")
-	case len(publication.Documents) == 0:
+	case publication.Delta != nil && (!publication.Options.Historical || publication.Options.BaseSnapshotID == ""):
+		return errors.New("delta publication requires a historical identity and options.base_snapshot_id")
+	case len(publication.Documents) == 0 && publication.Delta == nil:
 		return errors.New("documents must list at least one document")
 	}
 	kinds := make(map[string]bool, len(publication.Kinds))
@@ -99,10 +115,18 @@ func (publication Publication) validate() error {
 		if kinds[kind.Name] {
 			return fmt.Errorf("kind %q is declared twice", kind.Name)
 		}
+		for name := range kind.Metrics {
+			if err := storage.ValidateMetricName(name); err != nil {
+				return fmt.Errorf("kind %q: %w", kind.Name, err)
+			}
+		}
 		kinds[kind.Name] = true
 	}
 	paths := make(map[string]bool, len(publication.Documents))
 	for _, document := range publication.Documents {
+		if document.GitPath != "" && (publication.Location.RepositoryURI == "" || publication.Options.GitCommit == "") {
+			return fmt.Errorf("document %q: git_path requires location.repository_uri and options.git_commit", document.PathKey)
+		}
 		if paths[document.PathKey] {
 			return fmt.Errorf("document %q is listed twice", document.PathKey)
 		}
@@ -116,6 +140,8 @@ func (publication Publication) validate() error {
 
 func (document PublishedDocument) validate() error {
 	switch {
+	case document.GitPath != "" && (!fs.ValidPath(document.GitPath) || document.GitPath == "." || strings.ContainsRune(document.GitPath, 0)):
+		return errors.New("git_path must be a repository-relative slash-separated file path")
 	case document.PathKey == "" || strings.Contains(document.PathKey, `\`) || path.IsAbs(document.PathKey) ||
 		path.Clean(document.PathKey) != document.PathKey || document.PathKey == ".." || strings.HasPrefix(document.PathKey, "../"):
 		return errors.New("path_key must be a relative slash-separated path inside the root")
@@ -135,16 +161,17 @@ func (document PublishedDocument) validate() error {
 func externalInputHash(configuration, packagePath string, files []discoveredFile, contents map[string]storage.JSON) string {
 	sorted := append([]discoveredFile(nil), files...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].PathKey < sorted[j].PathKey })
-	digest := newCanonicalHash(externalPackageInputVersion)
-	digest.text(configuration)
-	digest.text(packagePath)
-	digest.count(len(sorted))
+	digest := canonicalhash.New(externalPackageInputVersion)
+	digest.Text(configuration)
+	digest.Text(packagePath)
+	digest.Count(len(sorted))
 	for _, file := range sorted {
-		digest.text(file.PathKey)
-		digest.text(file.ContentHash)
-		digest.text(string(contents[file.PathKey]))
+		digest.Text(file.PathKey)
+		digest.Text(file.ContentHash)
+		digest.Text(file.GitPath)
+		digest.Text(string(contents[file.PathKey]))
 	}
-	return digest.sum()
+	return digest.Sum()
 }
 
 // externalExportShape digests the sorted (id, public_hash) of a package's exported declarations.
@@ -158,10 +185,10 @@ func externalExportShape(documents []storage.DocumentContent) string {
 		}
 	}
 	sort.Strings(declared)
-	digest := newCanonicalHash(externalExportShapeVersion)
-	digest.count(len(declared))
+	digest := canonicalhash.New(externalExportShapeVersion)
+	digest.Count(len(declared))
 	for _, entry := range declared {
-		digest.text(entry)
+		digest.Text(entry)
 	}
-	return digest.sum()
+	return digest.Sum()
 }

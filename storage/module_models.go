@@ -84,6 +84,7 @@ const (
 // counts are nil only on a row published before they were recorded, until the storage backfill
 // derives them; Stats reads them.
 type ModuleSnapshot struct {
+	AnalysisMode      AnalysisMode  `gorm:"column:analysis_mode"`
 	ID                uuid.UUID     `gorm:"column:id;primaryKey"`
 	RootID            uuid.UUID     `gorm:"column:root_id"`
 	LocationID        uuid.UUID     `gorm:"column:location_id"`
@@ -116,9 +117,21 @@ type ModuleSnapshot struct {
 	FilesChanged    *int           `gorm:"column:files_changed"`
 	FilesDeleted    *int           `gorm:"column:files_deleted"`
 	SymbolsChanged  *int           `gorm:"column:symbols_changed"`
+	// CoverageDeterministic says whether extracting the same commit, configuration and dependency set
+	// again must reach the same coverage: every load error was a fact of the sources and the module
+	// versions they pin, never of the network, the module cache or the file system. It is nil only on
+	// a row published before it was recorded, which counts as not deterministic.
+	CoverageDeterministic *bool `gorm:"column:coverage_deterministic"`
 }
 
 func (ModuleSnapshot) TableName() string { return "snapshots" }
+
+// CoverageSettled reports whether extracting the snapshot's commit again under its configuration and
+// dependency set must reach its coverage again: the coverage is complete, or degraded and deterministic.
+// It is the one rule deciding whether a stored snapshot's coverage stands without extracting.
+func (snapshot ModuleSnapshot) CoverageSettled() bool {
+	return snapshot.Coverage.Complete() || snapshot.CoverageDeterministic != nil && *snapshot.CoverageDeterministic
+}
 
 type ModuleLocationHead struct {
 	RootID     uuid.UUID `gorm:"column:root_id"`
@@ -143,6 +156,7 @@ type SourceRevision struct {
 	ContentHash string    `gorm:"column:content_hash"`
 	PackagePath string    `gorm:"column:package_path"`
 	SizeBytes   int64     `gorm:"column:size_bytes"`
+	GitPath     string    `gorm:"column:git_path"`
 }
 
 func (SourceRevision) TableName() string { return "source_revisions" }

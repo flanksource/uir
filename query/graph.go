@@ -11,6 +11,7 @@ import (
 	"github.com/flanksource/uir/graph"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
+	"github.com/google/uuid"
 )
 
 // GraphOptions select the root of a call graph and bound it: a function or method, or a data symbol
@@ -32,9 +33,17 @@ type GraphOptions struct {
 	// None takes DefaultGraphExclusions, and ExcludeNone alone excludes nothing.
 	Exclude []string
 	// Access are the edge types the graph follows: call (with the dispatches a call reaches), read
-	// and write. None takes DefaultGraphAccess.
+	// and write. None takes DefaultGraphAccess for indexed and Go file graphs,
+	// or all three types for SQL file graphs.
 	Access []uir.RelationshipType
-	Scope  ModuleScopeOptions
+	// Since, when set, makes the graph a change query against an earlier snapshot of the root. It walks
+	// callees only, so a zero Direction takes graph.DirectionCallees and any other is refused.
+	Since *GraphSince
+	// File, when set, draws the graph of one source file instead of an indexed root: Selector names
+	// one of its functions, or is empty when it declares one. Pipeline.Graph resolves the callees the
+	// file does not declare in the selected snapshots; StandaloneGraph leaves them unresolved.
+	File  *GraphFile
+	Scope ModuleScopeOptions
 }
 
 // DefaultGraphAccess is what a graph follows when no access is given: calls alone, so a graph of
@@ -51,10 +60,13 @@ type GraphResult struct {
 	// Exclude are the effective exclusion patterns.
 	Exclude []string `json:"exclude"`
 	// Packages are the packages reached while walking, drawn or excluded.
-	Packages   []GraphPackage       `json:"packages"`
-	Stages     []ResolutionStage    `json:"stages"`
-	Warnings   []MissingHeadWarning `json:"warnings"`
-	Candidates []ModuleSymbol       `json:"candidates"`
+	Packages   []GraphPackage    `json:"packages"`
+	Stages     []ResolutionStage `json:"stages"`
+	Candidates []ModuleSymbol    `json:"candidates"`
+	// Since is the answer of a change query, absent from any other graph.
+	Since *GraphChanges `json:"since,omitempty"`
+	// Diagnostics are the statements of a file graph's source that could not be lowered.
+	Diagnostics []FileDiagnostic `json:"diagnostics,omitempty"`
 }
 
 func invalidGraph(format string, arguments ...any) error {
@@ -65,6 +77,9 @@ func invalidGraph(format string, arguments ...any) error {
 
 // normalized fills in the defaults, validates the options, and parses the effective exclusions.
 func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) {
+	if options.Since != nil && options.Direction == "" {
+		options.Direction = graph.DirectionCallees
+	}
 	if options.Direction == "" {
 		options.Direction = graph.DirectionBoth
 	}
@@ -78,7 +93,11 @@ func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) 
 		options.Exclude = slices.Clone(DefaultGraphExclusions)
 	}
 	if len(options.Access) == 0 {
-		options.Access = slices.Clone(DefaultGraphAccess)
+		if options.File != nil && options.File.Dialect != "" {
+			options.Access = slices.Clone(graphAccessTypes)
+		} else {
+			options.Access = slices.Clone(DefaultGraphAccess)
+		}
 	}
 	if err := options.validate(); err != nil {
 		return options, graphExclusions{}, err
@@ -88,8 +107,13 @@ func (options GraphOptions) normalized() (GraphOptions, graphExclusions, error) 
 }
 
 func (options GraphOptions) validate() error {
+	if options.File != nil {
+		if err := options.validateFile(); err != nil {
+			return err
+		}
+	}
 	switch {
-	case options.Selector == "" && options.Symbol == "":
+	case options.File == nil && options.Selector == "" && options.Symbol == "":
 		return invalidGraph("a call graph requires a selector or a symbol")
 	case options.Selector != "" && options.Symbol != "":
 		return invalidGraph("a call graph takes a selector or a symbol, not both")
@@ -103,6 +127,10 @@ func (options GraphOptions) validate() error {
 		return invalidGraph("the node limit of a call graph is Limit, not the scope's row limit")
 	case options.Scope.Location != "" && options.Scope.SnapshotID != "":
 		return invalidGraph("location and snapshot selectors are mutually exclusive")
+	case options.Since != nil && options.Direction != graph.DirectionCallees:
+		return invalidGraph("a change query walks callees from the root, not %s", options.Direction)
+	case options.Since != nil && options.Since.SnapshotID == uuid.Nil:
+		return invalidGraph("a change query requires the snapshot to compare against")
 	}
 	for _, access := range options.Access {
 		if !slices.Contains(graphAccessTypes, access) {
@@ -127,6 +155,9 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 	if err != nil {
 		return GraphResult{}, err
 	}
+	if options.File != nil {
+		return pipeline.indexedFileGraph(ctx, options, exclusions)
+	}
 	session, trace := pipeline.session()
 	clock := newStageClock()
 	selection, err := session.moduleScopes(ctx, options.Scope, false)
@@ -140,14 +171,20 @@ func (pipeline *Pipeline) Graph(ctx context.Context, options GraphOptions) (Grap
 	clock.lap("scope")
 	result := GraphResult{
 		Graph:   graph.Graph{Roots: []string{}, Nodes: []graph.Node{}, Edges: []graph.Edge{}},
-		Exclude: options.Exclude, Packages: []GraphPackage{}, Warnings: selection.warnings, Candidates: []ModuleSymbol{},
+		Exclude: options.Exclude, Packages: []GraphPackage{}, Candidates: []ModuleSymbol{},
 		Stages: []ResolutionStage{{Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))}, coverageStage(coverage)},
 	}
 	if len(selection.scopes) == 0 {
 		result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: "no indexed snapshot to resolve in"})
 		return result, nil
 	}
-	result, built, err := session.resolveGraph(ctx, selection, coverage, graphBuild{options: options, exclusions: exclusions}, result, clock)
+	request := graphBuild{options: options, exclusions: exclusions}
+	if options.Since != nil {
+		if request.since, err = session.sinceSides(ctx, *options.Since, selection.scopes); err != nil {
+			return GraphResult{}, err
+		}
+	}
+	result, built, err := session.resolveGraph(ctx, selection, coverage, request, result, clock)
 	if err != nil || !built {
 		return result, err
 	}
@@ -167,7 +204,7 @@ func (pipeline *Pipeline) resolveGraph(ctx context.Context, selection moduleScop
 	index := newCompactIndex(base)
 	roots, err := index.graphRoots(ctx, request.options, coverage)
 	var unresolved *UnresolvedSymbolError
-	if len(selection.warnings) > 0 && errors.As(err, &unresolved) {
+	if selection.missingHeads > 0 && errors.As(err, &unresolved) {
 		result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: "0 symbols"})
 		return result, false, nil
 	}
@@ -181,6 +218,7 @@ func (pipeline *Pipeline) resolveGraph(ctx context.Context, selection moduleScop
 	}
 	clock.lap("resolve")
 	request.root = roots[0]
+	request.scopes = selection.scopes
 	if result, err = pipeline.buildGraph(ctx, index, request, result); err != nil {
 		return GraphResult{}, false, err
 	}
@@ -190,13 +228,21 @@ func (pipeline *Pipeline) resolveGraph(ctx context.Context, selection moduleScop
 
 type graphBuild struct {
 	root       ModuleSymbol
+	scopes     []moduleScope
 	options    GraphOptions
 	exclusions graphExclusions
+	since      *sinceSides
 }
 
-func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, request graphBuild, result GraphResult) (GraphResult, error) {
+type graphWalk struct {
+	built  *graph.Graph
+	source *indexGraphSource
+	reader *guardReader
+}
+
+func buildIndexedGraph(ctx context.Context, index *compactIndex, request graphBuild) (graphWalk, error) {
 	sources := newScopeSources(index.indexContext)
-	reader := newGuardReader(pipeline.database, sources)
+	reader := newGuardReader(index.database, sources)
 	options := request.options
 	source := newIndexGraphSource(index, sources, reader, options.Access)
 	built, err := graph.Build(ctx, source, []string{request.root.ID}, graph.Options{
@@ -204,19 +250,34 @@ func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, r
 		Exclude: func(node graph.Node) bool { return request.exclusions.excludes(source.packageFacts(node.Group)) },
 	})
 	if err != nil {
+		return graphWalk{}, err
+	}
+	built.Omitted.UnreadableSource = reader.unreadablePaths()
+	return graphWalk{built: built, source: source, reader: reader}, nil
+}
+
+func (pipeline *Pipeline) buildGraph(ctx context.Context, index *compactIndex, request graphBuild, result GraphResult) (GraphResult, error) {
+	walk, err := buildIndexedGraph(ctx, index, request)
+	if err != nil {
 		return GraphResult{}, err
 	}
+	built, source, reader := walk.built, walk.source, walk.reader
 	result.Graph = *built
 	result.Packages = graphPackages(built, source.packages, request.exclusions)
 	root := request.root
 	result.Stages = append(result.Stages, ResolutionStage{Name: "resolve", Value: root.QueryName})
 	result.Stages = append(result.Stages, source.stages...)
 	if unreadable := reader.unreadablePaths(); len(unreadable) > 0 {
-		result.Omitted.UnreadableSource = unreadable
 		result.Stages = append(result.Stages, ResolutionStage{Name: "guards", Value: fmt.Sprintf(
 			"%d sources unreadable, their call sites carry no guards; %s: %v", len(unreadable), unreadable[0], reader.unreadable[unreadable[0]])})
 	}
 	result.Stages = append(result.Stages, ResolutionStage{Name: "graph", Value: fmt.Sprintf("%d nodes, %d edges", len(built.Nodes), len(built.Edges))})
+	if request.since != nil {
+		if result.Since, err = pipeline.graphChanges(ctx, request, built, source.packageFacts); err != nil {
+			return GraphResult{}, err
+		}
+		result.Stages = append(result.Stages, sinceStage(result.Since, built))
+	}
 	return result, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
@@ -52,7 +53,7 @@ var _ = Describe("root-level module commands", func() {
 		Expect(again[0].SnapshotID).To(Equal(results[0].SnapshotID))
 	})
 
-	It("warns for an unscoped query with a missing head and rejects explicit scopes", func(ctx context.Context) {
+	It("counts a missing head in an unscoped query's coverage stage and rejects explicit scopes", func(ctx context.Context) {
 		database := openCommandDatabase(ctx)
 		now := time.Now().UTC()
 		root := storage.ModuleRoot{ID: uuid.New(), RootKey: "example.org/registered", Name: "registered", CreatedAt: now}
@@ -70,8 +71,8 @@ var _ = Describe("root-level module commands", func() {
 		result, err := queryModules(ctx, database, moduleQueryOptions{Expression: "registered.Run"})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.Total).To(Equal(0))
-		Expect(result.Warnings).To(Equal([]query.MissingHeadWarning{{RootKey: root.RootKey, Location: checkout,
-			Message: "registered checkout has no indexed head; run `uir reindex --all`"}}))
+		Expect(result.Stages).To(ContainElement(query.ResolutionStage{Name: "coverage", Value: "incomplete: 1 registered checkout without an indexed head"}),
+			"the query only counts the skipped checkout; `uir status` lists it")
 		for _, options := range []moduleQueryOptions{{Expression: "registered.Run", RootKey: root.RootKey}, {Expression: "registered.Run", Location: location.CanonicalPath}} {
 			_, err = queryModules(ctx, database, options)
 			Expect(err).To(MatchError(ContainSubstring("is registered but not indexed; run `uir reindex`")), "%+v", options)
@@ -144,8 +145,14 @@ var _ = Describe("root-level module commands", func() {
 			HaveField("Kind", "method"), HaveField("Owner", "Store"), HaveField("Name", "Save"), HaveField("Visibility", "exported"),
 			HaveField("ModuleKey", referencesRoot), HaveField("PackagePath", referencesRoot+"/store"),
 		)))
-		Expect(result.Coverage).To(ConsistOf(query.ModuleCoverage{
-			RootKey: referencesRoot, Location: match.Location, SnapshotID: match.SnapshotID, PackagePath: referencesRoot + "/broken", Coverage: "partial", Diagnostics: 1,
+		Expect(result.Coverage).To(HaveLen(1))
+		coverage := result.Coverage[0]
+		warnings, err := indexer.CoverageViolations(coverage.Location, coverage.Diagnostics)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(warnings).To(ConsistOf(HaveField("Rule.Method", indexer.RuleCoverage)))
+		coverage.Diagnostics = nil
+		Expect(coverage).To(Equal(query.ModuleCoverage{
+			RootKey: referencesRoot, Location: match.Location, SnapshotID: match.SnapshotID, PackagePath: referencesRoot + "/broken", Coverage: "partial",
 		}))
 		Expect(result.Stages).To(ContainElement(query.ResolutionStage{Name: "coverage", Value: "incomplete: 1 package is not fully indexed (1 partial)"}))
 	})

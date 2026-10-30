@@ -1,6 +1,7 @@
 package uir
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,14 @@ func tableLayers(t RecordTable) layers {
 	c.add(NodesOf(t.Indexes), unordered, true)
 	c.add(NodesOf(t.ForeignKeys), unordered, true)
 	c.add(NodesOf(t.Triggers), unordered, true)
+	if dependencies := sqlDependenciesText(t.SQLDependencies) + sqlModuleText(t.SQLQuotedIdentifierOff, t.SQLRuntimeDependencies); dependencies != "" {
+		c.private = append(c.private, dependencies)
+	}
+	checks := slices.Clone(t.Checks)
+	slices.SortFunc(checks, func(a, b SQLCheck) int { return strings.Compare(a.Name, b.Name) })
+	if len(checks) > 0 {
+		c.private = append(c.private, "checks="+canonicalJSON(checks))
+	}
 	definition := ""
 	if t.Definition != nil {
 		definition = t.Definition.Hash()
@@ -44,6 +53,22 @@ func columnLayers(col RecordColumn) layers {
 	if col.DefaultValue != nil {
 		private += " default=" + canonicalJSON(*col.DefaultValue)
 	}
+	if col.Identity != nil {
+		private += " identity=" + canonicalJSON(col.Identity)
+	}
+	if col.SQLDefault != nil {
+		// A system-named default's name differs in every database, so it is no
+		// part of the column's identity.
+		sqlDefault := *col.SQLDefault
+		if sqlDefault.SystemNamed {
+			sqlDefault.Name = ""
+		}
+		private += " sql-default=" + canonicalJSON(sqlDefault)
+	}
+	if col.Collation != "" {
+		private += " collation=" + strconv.Quote(col.Collation)
+	}
+	private += flagText(col.RowGUID, "rowguidcol")
 	if len(col.Enum) > 0 {
 		private += " enum=" + canonicalJSON(col.Enum)
 	}
@@ -60,16 +85,49 @@ func indexLayers(i RecordIndex) layers {
 		private += " include (" + strings.Join(i.Included, ", ") + ")"
 	}
 	private += flagText(i.Unique, "unique") + flagText(i.Primary, "primary") + flagText(i.Clustered, "clustered")
+	private += flagText(i.Constraint, "constraint")
+	if len(i.Descending) > 0 {
+		descending := slices.Clone(i.Descending)
+		slices.Sort(descending)
+		private += " descending=" + canonicalJSON(descending)
+	}
 	if i.IndexType != "" {
 		private += " using " + i.IndexType
 	}
 	if i.Condition != "" {
 		private += " where " + i.Condition
 	}
+	if i.FillFactor != 0 {
+		private += " fillfactor=" + strconv.Itoa(i.FillFactor)
+	}
 	return leafLayers(ShapeKind(i), "", private, "")
 }
 
-// foreignKeyLayers: a foreign key is a private member, like an index.
+func sqlDependenciesText(input []SQLDependency) string {
+	if len(input) == 0 {
+		return ""
+	}
+	dependencies := slices.Clone(input)
+	slices.SortFunc(dependencies, func(a, b SQLDependency) int {
+		if a.Schema != b.Schema {
+			return strings.Compare(a.Schema, b.Schema)
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return " sql-dependencies=" + canonicalJSON(dependencies)
+}
+
+// sqlModuleText renders a module's runtime references in catalogue order and
+// its SET QUOTED_IDENTIFIER OFF creation.
+func sqlModuleText(quotedIdentifierOff bool, runtime []SQLRuntimeDependency) string {
+	text := flagText(quotedIdentifierOff, "quoted-identifier-off")
+	if len(runtime) > 0 {
+		text += " sql-runtime-dependencies=" + canonicalJSON(runtime)
+	}
+	return text
+}
+
+// foreignKeyLayers:a foreign key is a private member, like an index.
 func foreignKeyLayers(f RecordForeignKey) layers {
 	target := f.ReferencedTable
 	if f.ReferencedSchema != "" {

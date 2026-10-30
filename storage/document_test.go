@@ -49,8 +49,8 @@ func workerDocument() (storage.Document, storage.SourceRevision, storage.Documen
 }
 
 // typedWorkerDocument turns the syntax fixture into a valid indexed document: every declaration has
-// an id, a public shape, and public and private hashes, the call names its symbol and enclosing
-// method, and the type implements an interface declared elsewhere.
+// an id, a public shape, and public and private hashes, and the call names its symbol and enclosing
+// method.
 func typedWorkerDocument() (storage.Document, storage.SourceRevision, storage.DocumentContent) {
 	document, source, content := workerDocument()
 	document.Coverage = storage.CoverageIndexed
@@ -62,7 +62,6 @@ func typedWorkerDocument() (storage.Document, storage.SourceRevision, storage.Do
 	}
 	content.Symbols[0].TypeForm = "struct"
 	content.Symbols[0].Shape, content.Symbols[0].PublicShape = "type Service struct{}", "type Service struct{}"
-	content.Symbols[0].Implements = []string{digest("interface")}
 	target, method := digest("Stop"), *content.Symbols[2].ID
 	content.Occurrences[0].Symbol, content.Occurrences[0].Enclosing = &target, &method
 	content.Occurrences = append(content.Occurrences, storage.DocumentOccurrence{
@@ -151,6 +150,9 @@ var _ = Describe("DecodeDocument", func() {
 			content.Symbols[1].ContentHash = ""
 		}, "64-character content_hash are required"),
 		Entry("a key that is not the identifier key", func(_ *storage.Document, content *storage.DocumentContent) { content.Symbols[0].Key = "v1:[]" }, "does not match identifier key"),
+		Entry("a key declared twice", func(_ *storage.Document, content *storage.DocumentContent) {
+			content.Symbols[2].Identifier, content.Symbols[2].Key = content.Symbols[1].Identifier, content.Symbols[1].Key
+		}, "symbol 2: key is already declared by symbol 1"),
 		Entry("an undeclared enclosing key", func(_ *storage.Document, content *storage.DocumentContent) {
 			content.Occurrences[0].EnclosingKey = "v1:[]"
 		}, "is not declared"),
@@ -165,9 +167,10 @@ var _ = Describe("DecodeDocument", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(decoded).To(Equal(content))
 	})
-	It("reads typed documents from format 2 without embedding facts", func() {
+	It("reads typed documents from format 2 with implements entries and without embedding facts", func() {
 		document, source, content := typedWorkerDocument()
 		content.Version = 2
+		content.Symbols[0].Implements = []string{digest("interface")}
 		decoded, err := storage.DecodeDocument(encodeDocument(document, content), source)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(decoded).To(Equal(content))
@@ -202,6 +205,9 @@ var _ = Describe("DecodeDocument", func() {
 		Entry("an embedding edge on a non-type declaration", storage.CoverageIndexed, func(content *storage.DocumentContent) {
 			content.Symbols[1].Embeds = []string{digest("base")}
 		}, "only a type can embed"),
+		Entry("an implements entry in a format that keeps implements as snapshot facts", storage.CoverageIndexed, func(content *storage.DocumentContent) {
+			content.Symbols[0].Implements = []string{digest("interface")}
+		}, "keeps implements as snapshot facts"),
 		Entry("an embedding edge in format 2", storage.CoverageIndexed, func(content *storage.DocumentContent) {
 			content.Version = 2
 			content.Symbols[0].Embeds = []string{digest("base")}

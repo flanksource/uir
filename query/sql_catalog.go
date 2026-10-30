@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/flanksource/uir/storage"
@@ -38,6 +39,7 @@ func (pipeline *Pipeline) QueryCatalog(ctx context.Context) (SQLCatalog, error) 
 		return SQLCatalog{}, err
 	}
 	registered := make([]SQLKind, 0, len(kinds.All()))
+	maps.Copy(fields, sqlFileFields)
 	for _, kind := range kinds.All() {
 		registered = append(registered, SQLKind{Name: kind.Name, Category: kind.Category})
 	}

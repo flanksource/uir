@@ -269,6 +269,18 @@ func (b *RecordReadBuilder) WithArgument(name string, value ExprStmt) *RecordRea
 	return b
 }
 
+// WithSource sets the read statement's own location, which CollectRelationships reports, not
+// the location of its expression.
+func (b *RecordReadBuilder) WithSource(path string, start, end int) *RecordReadBuilder {
+	b.stmt.recordBase.Location = statementLocation(path, start, end)
+	return b
+}
+
+func (b *RecordReadBuilder) WithSourceCode(text string) *RecordReadBuilder {
+	b.stmt.recordBase.Content = &text
+	return b
+}
+
 func (b *RecordReadBuilder) Build() *RecordReadStmt {
 	return &b.stmt
 }
@@ -309,8 +321,28 @@ func (b *RecordWriteBuilder) WithExpression(exprType ExpressionType, expr string
 	return b
 }
 
+// WithSource sets the write statement's own location, which CollectRelationships reports, not
+// the location of its expression.
+func (b *RecordWriteBuilder) WithSource(path string, start, end int) *RecordWriteBuilder {
+	b.stmt.recordBase.Location = statementLocation(path, start, end)
+	return b
+}
+
+func (b *RecordWriteBuilder) WithSourceCode(text string) *RecordWriteBuilder {
+	b.stmt.recordBase.Content = &text
+	return b
+}
+
 func (b *RecordWriteBuilder) Build() RecordWriteStmt {
 	return b.stmt
+}
+
+// statementLocation is a statement's location from start to end; an end of 0 is the start line.
+func statementLocation(path string, start, end int) Location {
+	if end == 0 {
+		end = start
+	}
+	return Location{Path: path, StartLine: &start, EndLine: &end}
 }
 
 // ForBuilder provides fluent API for building ForStmt

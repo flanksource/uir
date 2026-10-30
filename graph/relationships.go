@@ -14,6 +14,16 @@ var graphRelationships = []uir.RelationshipType{
 	uir.RelationshipTypeCall, uir.RelationshipTypeDispatch, uir.RelationshipTypeRead, uir.RelationshipTypeWrite,
 }
 
+// RelationshipOptions are what FromRelationships serves.
+type RelationshipOptions struct {
+	// Nodes are declared nodes: Describe answers for each even when no
+	// relationship mentions it, so one can be a root with no edges.
+	Nodes         []uir.Node
+	Relationships []uir.UIRRelationship
+	// Describe is required.
+	Describe func(uir.Identifier) Node
+}
+
 // FromRelationships serves call, dispatch, read and write relationships as a
 // Source; every other relationship type is not a call-graph edge and is
 // ignored. Options.Access chooses which of them a Build follows.
@@ -21,20 +31,27 @@ var graphRelationships = []uir.RelationshipType{
 // Each relationship is one step: its Kind is the edge's Kind, and its location,
 // Content and guards are the step's one Site.
 //
-// A node's id is the IdentityKey of the relationship end it stands for. describe
-// supplies the rest of each node once per id: FromRelationships sets ID and
-// Identifier, and fills Kind (the identifier's node type) and Label (the
-// identifier as written) when describe leaves them empty. describe reports an
-// identifier it cannot place by returning a Node with Unresolved set.
+// A node's id is the IdentityKey of the declared node or relationship end it
+// stands for. Describe supplies the rest of each node once per id:
+// FromRelationships sets ID and Identifier, and fills Kind (the identifier's
+// node type) and Label (the identifier as written) when Describe leaves them
+// empty. Describe reports an identifier it cannot place by returning a Node with
+// Unresolved set.
 //
-// A drawn relationship missing either end is an error: an edge needs both, and
-// uir.CollectRelationships always sets them.
-func FromRelationships(rels []uir.UIRRelationship, describe func(uir.Identifier) Node) (Source, error) {
-	if describe == nil {
+// A nil declared node, and a drawn relationship missing either end, are errors:
+// an edge needs both ends, and uir.CollectRelationships always sets them.
+func FromRelationships(opts RelationshipOptions) (Source, error) {
+	if opts.Describe == nil {
 		return nil, errors.New("graph: FromRelationships: describe is required")
 	}
-	src := &relationshipSource{describe: describe, nodes: map[string]Node{}, out: map[string][]Step{}, in: map[string][]Step{}}
-	for i, rel := range rels {
+	src := &relationshipSource{describe: opts.Describe, nodes: map[string]Node{}, out: map[string][]Step{}, in: map[string][]Step{}}
+	for i, node := range opts.Nodes {
+		if node == nil {
+			return nil, fmt.Errorf("graph: FromRelationships: nodes[%d] is nil", i)
+		}
+		src.node(node.GetIdentifier())
+	}
+	for i, rel := range opts.Relationships {
 		if !slices.Contains(graphRelationships, rel.RelationshipType) {
 			continue
 		}
@@ -105,7 +122,7 @@ func (s *relationshipSource) node(id uir.Identifier) Node {
 func (s *relationshipSource) Describe(_ context.Context, id string) (Node, error) {
 	node, ok := s.nodes[id]
 	if !ok {
-		return Node{}, fmt.Errorf("graph: no call, dispatch, read or write relationship names %q", id)
+		return Node{}, fmt.Errorf("graph: %q is neither a declared node nor named by a call, dispatch, read or write relationship", id)
 	}
 	return node, nil
 }

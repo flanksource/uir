@@ -108,13 +108,13 @@ var _ = Describe("module call graph", func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	It("serves the graph fields at the top level beside stages, warnings and candidates", func() {
+	It("serves the graph fields at the top level beside stages and candidates", func() {
 		response := get(url.Values{"selector": {"orders.Submit"}, "direction": {"both"}, "depth": {"2"}, "root": {ordersRoot}})
 		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
 		var envelope map[string]any
 		Expect(json.Unmarshal(response.Body.Bytes(), &envelope)).To(Succeed())
 		Expect(envelope).To(And(HaveKey("roots"), HaveKey("nodes"), HaveKey("edges"), HaveKey("omitted"), HaveKey("stages"),
-			HaveKey("packages"), HaveKeyWithValue("warnings", BeEmpty()), HaveKeyWithValue("candidates", BeEmpty())))
+			HaveKey("packages"), HaveKeyWithValue("candidates", BeEmpty()), Not(HaveKey("warnings"))))
 
 		var result query.GraphResult
 		Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
@@ -148,6 +148,40 @@ var _ = Describe("module call graph", func() {
 		Expect(result.Nodes).To(HaveLen(1), "only the root is left of its excluded package")
 		Expect(result.Omitted.Excluded).To(Equal(map[string]int{ordersRoot: 5}))
 		Expect(result.Packages).To(Equal([]query.GraphPackage{{Path: ordersRoot, Nodes: 6, Excluded: true}}))
+	})
+
+	It("serves a removed implementation and its former path in a change query", func(ctx SpecContext) {
+		workspace, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+		Expect(err).ToNot(HaveOccurred())
+		gitIn(workspace, "init", "--quiet", "--initial-branch=main")
+		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module "+ordersRoot+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
+		var snapshots []string
+		var before string
+		for _, source := range []string{ordersSource, strings.Replace(ordersSource, "func (Mail) Notify(message string) {}", "", 1)} {
+			Expect(os.WriteFile(filepath.Join(workspace, ordersPath), []byte(source), 0o644)).To(Succeed())
+			gitIn(workspace, "add", "--", "go.mod", ordersPath)
+			gitIn(workspace, "commit", "--quiet", "--message", "fixture")
+			indexed, err := addModules(ctx, database, workspace, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(indexed).To(HaveLen(1))
+			snapshots = append(snapshots, indexed[0].SnapshotID)
+			if before == "" {
+				before = gitIn(workspace, "rev-parse", "HEAD")
+			}
+		}
+		response := get(url.Values{"selector": {"orders.Submit"}, "root": {ordersRoot}, "location": {workspace}, "since": {before}})
+		Expect(response.Code).To(Equal(http.StatusOK), response.Body.String())
+		var result query.GraphResult
+		Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
+		Expect(result.Since).ToNot(BeNil())
+		Expect(result.Since.Changed).To(BeTrue())
+		Expect(result.Since.FromSnapshotID).To(Equal(snapshots[0]))
+		Expect(result.Since.ToSnapshotID).To(Equal(snapshots[1]))
+		Expect(result.Since.Before).ToNot(BeNil())
+		Expect(result.Since.Before.Nodes).To(ContainElement(HaveField("Label", "Mail.Notify")))
+		Expect(result.Nodes).ToNot(ContainElement(HaveField("Label", "Mail.Notify")))
+		Expect(result.Since.Nodes).To(ConsistOf(And(HaveField("Reason", query.GraphChangeRemoved), HaveField("SnapshotID", snapshots[0]), HaveField("Path", HaveLen(2)))))
+		Expect(result.Since.Edges).To(ConsistOf(And(HaveField("Reason", query.GraphChangeRemoved), HaveField("SnapshotID", snapshots[0]), HaveField("Path", HaveLen(2)))))
 	})
 
 	It("accepts the canonical symbol id of a node in place of a selector", func() {
@@ -198,7 +232,8 @@ var _ = Describe("module call graph", func() {
 		Entry("a selector that names a type", url.Values{"selector": {"orders.Order"}}, http.StatusBadRequest, "invalid_query", "matched no function or method"),
 		Entry("a selector that matches nothing", url.Values{"selector": {"orders.Missing"}}, http.StatusNotFound, "symbol_not_found", "orders.Missing"),
 		Entry("a symbol id that is not indexed", url.Values{"symbol": {"0123456789abcdef"}}, http.StatusNotFound, "symbol_not_found", "0123456789abcdef"),
-	)
+		Entry("a since snapshot without since", url.Values{"selector": {"orders.Submit"}, "root": {ordersRoot}, "since-snapshot": {"11111111-1111-1111-1111-111111111111"}},
+			http.StatusBadRequest, "invalid_query", "since-snapshot overrides the snapshot of since"))
 
 	It("publishes the route once per parameter in the OpenAPI document", func() {
 		response := httptest.NewRecorder()
@@ -222,7 +257,7 @@ var _ = Describe("module call graph", func() {
 			Expect(parameter.In).To(Equal("query"), parameter.Name)
 			names = append(names, parameter.Name)
 		}
-		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "access", "root", "location", "snapshot"))
+		Expect(names).To(ConsistOf("args", "selector", "symbol", "direction", "depth", "limit", "exclude", "access", "root", "location", "snapshot", "since", "since-snapshot", "file", "path", "dialect", "index", "all"))
 	})
 
 	It("takes the selector as the first argument in place of the flag", func(ctx SpecContext) {
