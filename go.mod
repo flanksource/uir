@@ -4,12 +4,12 @@ go 1.26.1
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
-	github.com/flanksource/clicky v1.21.85
-	github.com/flanksource/commons v1.60.2-0.20261023035157-e894a9b2a6db
-	github.com/flanksource/commons-db v0.1.62
-	github.com/flanksource/commons-db/cmd/query v0.1.62
-	github.com/flanksource/gavel v0.0.64
-	github.com/flanksource/sqlglot-go v1.0.5-0.20261022195735-0ab250d620a9
+	github.com/flanksource/clicky v1.21.89
+	github.com/flanksource/commons v1.63.0
+	github.com/flanksource/commons-db v0.1.67
+	github.com/flanksource/commons-db/cmd/query v0.1.67
+	github.com/flanksource/gavel v0.0.67
+	github.com/flanksource/sqlglot-go v1.0.7
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260507013755-92041b743c96
@@ -65,6 +65,7 @@ require (
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/TomOnTime/utfutil v1.0.0 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
+	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/alecthomas/chroma/v2 v2.23.1 // indirect
 	github.com/alpkeskin/gotoon v0.1.1 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
@@ -125,6 +126,7 @@ require (
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -132,6 +134,9 @@ require (
 	github.com/eko/gocache/lib/v4 v4.2.3 // indirect
 	github.com/eko/gocache/store/go_cache/v4 v4.2.5 // indirect
 	github.com/elazarl/goproxy v1.7.2 // indirect
+	github.com/emersion/go-message v0.18.2 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
+	github.com/emersion/go-smtp v0.25.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
@@ -146,8 +151,8 @@ require (
 	github.com/flanksource/captain v0.0.72-0.20261023035220-26c09a9de22f // indirect
 	github.com/flanksource/clicky/aichat v1.21.85 // indirect
 	github.com/flanksource/clicky/valkey v1.21.85 // indirect
-	github.com/flanksource/commons-db/recordstore v0.1.62 // indirect
-	github.com/flanksource/commons-db/tracing v0.1.62 // indirect
+	github.com/flanksource/commons-db/recordstore v0.1.67 // indirect
+	github.com/flanksource/commons-db/tracing v0.1.67 // indirect
 	github.com/flanksource/gomplate/v3 v3.24.90 // indirect
 	github.com/flanksource/is-healthy v1.0.92 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
@@ -164,6 +169,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-git/go-git/v5 v5.19.2 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -184,6 +190,7 @@ require (
 	github.com/go-openapi/swag/typeutils v0.25.4 // indirect
 	github.com/go-openapi/swag/yamlutils v0.25.4 // indirect
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
+	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-xmlfmt/xmlfmt v1.1.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
@@ -286,6 +293,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/sftp v1.13.10 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20250313105119-ba97887b0a25 // indirect
+	github.com/playwright-community/playwright-go v0.5700.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/pointlander/compress v1.1.1-0.20190518213731-ff44bd196cc3 // indirect
 	github.com/pointlander/jetset v1.0.1-0.20190518214125-eee7eff80bd4 // indirect
@@ -296,6 +304,8 @@ require (
 	github.com/prometheus/common v0.68.1 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/richardlehane/mscfb v1.0.7 // indirect
+	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robertkrimen/otto v0.5.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
@@ -310,6 +320,7 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
+	github.com/slack-go/slack v0.29.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
@@ -318,6 +329,7 @@ require (
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/timberio/go-datemath v0.1.0 // indirect
 	github.com/tj/go-naturaldate v1.3.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
@@ -337,6 +349,9 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/xuri/efp v0.0.1 // indirect
+	github.com/xuri/excelize/v2 v2.11.0 // indirect
+	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.7.17 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
