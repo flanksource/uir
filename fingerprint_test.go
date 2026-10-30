@@ -195,6 +195,16 @@ var _ = Describe("Fingerprint", func() {
 		Expect(uir.Fingerprint(after).Private).NotTo(Equal(uir.Fingerprint(before).Private))
 	})
 
+	It("ignores a system-named default's per-database name but not a user-named one", func() {
+		withDefault := func(name string, systemNamed bool) uir.RecordColumn {
+			c := uir.NewColumn("row_id", "uniqueidentifier", uir.RecordFieldTypeUUID)
+			c.SQLDefault = &uir.SQLDefault{Name: name, Expression: "(newsequentialid())", SystemNamed: systemNamed}
+			return c
+		}
+		Expect(uir.Fingerprint(withDefault("DF__orders__row_id__1A2B3C4D", true))).To(Equal(uir.Fingerprint(withDefault("DF__orders__row_id__5E6F7A8B", true))))
+		Expect(uir.Fingerprint(withDefault("DF_orders_row_id", false)).Private).NotTo(Equal(uir.Fingerprint(withDefault("DF_orders_row_guid", false)).Private))
+	})
+
 	It("handles every registered node type, by value and by pointer", func() {
 		for _, node := range uir.Nodes {
 			pointer := reflect.New(reflect.TypeOf(node))
