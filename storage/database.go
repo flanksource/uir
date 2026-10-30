@@ -21,7 +21,7 @@ type DBOptions struct {
 }
 
 //go:embed migrations/04_module_roots.hcl migrations/05_source_deltas.hcl migrations/06_symbol_index.hcl migrations/07_symbol_handles.hcl migrations/08_snapshot_dependencies.hcl migrations/09_task_runs.hcl migrations/10_symbol_kinds.hcl migrations/11_history_prunes.hcl migrations/12_domain_catalog.hcl migrations/13_layered_fingerprints.hcl migrations/14_connections.hcl migrations/15_snapshot_sibling_shapes.hcl migrations/16_properties.hcl migrations/17_implements.hcl migrations/18_document_membership.hcl migrations/19_metrics.hcl migrations/20_index_checkpoints.hcl
-//go:embed migrations/21_analysis_heads.hcl
+//go:embed migrations/21_analysis_heads.hcl migrations/22_producer_metrics.hcl
 var migrations embed.FS
 
 // UirDB opens the database, discards a pre-handle, H64a, or two-layer index, applies the schema, seeds the builtin
