@@ -11,7 +11,7 @@ import (
 	"github.com/flanksource/uir"
 )
 
-const CatalogVersion = 1
+const CatalogVersion = 3
 
 type Selection struct {
 	Kind   string     `json:"kind"`
@@ -34,7 +34,7 @@ func ParseSelection(id string) (Selection, error) {
 		return s, fmt.Errorf("invalid selection ID %q", id)
 	}
 	switch kind {
-	case "table", "view", "procedure", "function", "trigger":
+	case "table", "view", "procedure", "function", "trigger", "table-type", "sequence":
 		_, err := fmt.Sscanf(rest, "%q.%q", &s.Object.Schema, &s.Object.Name)
 		if err != nil {
 			return s, fmt.Errorf("invalid selection ID %q: %w", id, err)
