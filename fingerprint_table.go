@@ -19,7 +19,7 @@ func tableLayers(t RecordTable) layers {
 	c.add(NodesOf(t.Indexes), unordered, true)
 	c.add(NodesOf(t.ForeignKeys), unordered, true)
 	c.add(NodesOf(t.Triggers), unordered, true)
-	if dependencies := sqlDependenciesText(t.SQLDependencies); dependencies != "" {
+	if dependencies := sqlDependenciesText(t.SQLDependencies) + sqlModuleText(t.SQLQuotedIdentifierOff, t.SQLRuntimeDependencies); dependencies != "" {
 		c.private = append(c.private, dependencies)
 	}
 	checks := slices.Clone(t.Checks)
@@ -57,11 +57,18 @@ func columnLayers(col RecordColumn) layers {
 		private += " identity=" + canonicalJSON(col.Identity)
 	}
 	if col.SQLDefault != nil {
-		private += " sql-default=" + canonicalJSON(col.SQLDefault)
+		// A system-named default's name differs in every database, so it is no
+		// part of the column's identity.
+		sqlDefault := *col.SQLDefault
+		if sqlDefault.SystemNamed {
+			sqlDefault.Name = ""
+		}
+		private += " sql-default=" + canonicalJSON(sqlDefault)
 	}
 	if col.Collation != "" {
 		private += " collation=" + strconv.Quote(col.Collation)
 	}
+	private += flagText(col.RowGUID, "rowguidcol")
 	if len(col.Enum) > 0 {
 		private += " enum=" + canonicalJSON(col.Enum)
 	}
@@ -90,6 +97,9 @@ func indexLayers(i RecordIndex) layers {
 	if i.Condition != "" {
 		private += " where " + i.Condition
 	}
+	if i.FillFactor != 0 {
+		private += " fillfactor=" + strconv.Itoa(i.FillFactor)
+	}
 	return leafLayers(ShapeKind(i), "", private, "")
 }
 
@@ -107,7 +117,17 @@ func sqlDependenciesText(input []SQLDependency) string {
 	return " sql-dependencies=" + canonicalJSON(dependencies)
 }
 
-// foreignKeyLayers: a foreign key is a private member, like an index.
+// sqlModuleText renders a module's runtime references in catalogue order and
+// its SET QUOTED_IDENTIFIER OFF creation.
+func sqlModuleText(quotedIdentifierOff bool, runtime []SQLRuntimeDependency) string {
+	text := flagText(quotedIdentifierOff, "quoted-identifier-off")
+	if len(runtime) > 0 {
+		text += " sql-runtime-dependencies=" + canonicalJSON(runtime)
+	}
+	return text
+}
+
+// foreignKeyLayers:a foreign key is a private member, like an index.
 func foreignKeyLayers(f RecordForeignKey) layers {
 	target := f.ReferencedTable
 	if f.ReferencedSchema != "" {
