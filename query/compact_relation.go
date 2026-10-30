@@ -33,7 +33,7 @@ func (index *compactIndex) evaluateRelation(ctx context.Context, expression *Exp
 		return compactValue{}, err
 	}
 	var roots func(string) bool
-	if scoped {
+	if scoped && expression.Relation != ":uses" {
 		roots = scope.admitsRoot
 	}
 	matches, err := index.relationMatches(ctx, expression, left, roots, result)
@@ -60,9 +60,9 @@ func (index *compactIndex) evaluateRelation(ctx context.Context, expression *Exp
 	return value, err
 }
 
-// relationScope is the right operand of an incoming relation as a scope predicate, when it is one.
+// relationScope is the right operand of an incoming relation or :uses as a scope predicate, when it is one.
 func relationScope(expression *Expr) (scopePredicate, bool, error) {
-	if expression.Relation != "<" && expression.Relation != "~w" {
+	if expression.Relation != "<" && expression.Relation != "~w" && expression.Relation != ":uses" {
 		return scopePredicate{}, false, nil
 	}
 	return compileScopePredicate(expression.Right)
@@ -210,20 +210,28 @@ func (index *compactIndex) filterRelationRight(ctx context.Context, value compac
 }
 
 // filterRelationScope keeps the incoming rows whose enclosing declaration the scope predicate admits in
-// the row's own root: the rows the scope's symbols, listed as a set, would keep.
+// the row's own root: the rows the scope's symbols, listed as a set, would keep. A :uses row is kept
+// when the scope admits the symbol used, which is declared in its own module rather than the row's root.
 func (index *compactIndex) filterRelationScope(ctx context.Context, value compactValue, relation string, scope scopePredicate, result *ModuleQueryResult) (compactValue, error) {
-	enclosing := map[string]bool{}
+	scoped := func(match ModuleMatch) string { return match.EnclosingID }
+	if relation == ":uses" {
+		scoped = func(match ModuleMatch) string { return match.SymbolID }
+	}
+	ids := map[string]bool{}
 	for _, match := range value.matches {
-		if match.EnclosingID != "" {
-			enclosing[match.EnclosingID] = true
+		if id := scoped(match); id != "" {
+			ids[id] = true
 		}
 	}
-	rows, err := index.symbolRowsByID(ctx, sortedKeys(enclosing))
+	rows, err := index.symbolRowsByID(ctx, sortedKeys(ids))
 	if err != nil {
 		return compactValue{}, err
 	}
 	value.matches = slices.DeleteFunc(value.matches, func(match ModuleMatch) bool {
-		row, found := rows[match.EnclosingID]
+		row, found := rows[scoped(match)]
+		if relation == ":uses" {
+			return !found || !scope.admitsPackage(row.PackagePath, row.ModuleKey)
+		}
 		return !found || !scope.admits(match.RootKey, row.ModuleKey, row.PackagePath)
 	})
 	value.symbols, err = index.project(ctx, value.matches, relation, result)
@@ -258,6 +266,8 @@ func (index *compactIndex) relationRowsIn(ctx context.Context, target ModuleSymb
 		return index.embedders(ctx, target)
 	case ":methods":
 		return index.methods(ctx, target)
+	case ":uses":
+		return index.uses(ctx, target)
 	case "~w":
 		return index.occurrences(ctx, occurrenceQuery{targets: singleTarget(target.ID), kind: "reference", roots: roots, keep: func(occurrence storage.DocumentOccurrence) bool {
 			return occurrence.Role == "write"
@@ -301,8 +311,8 @@ func (index *compactIndex) methods(ctx context.Context, target ModuleSymbol) ([]
 
 func applyCompactFilters(matches []ModuleMatch, relation string, filters []Filter) ([]ModuleMatch, error) {
 	for _, filter := range filters {
-		if filter.Kind == "~w" && relation != "<" && relation != "~w" {
-			return nil, fmt.Errorf("~w applies only to incoming references, not %s", relation)
+		if filter.Kind == "~w" && relation != "<" && relation != "~w" && relation != ":uses" {
+			return nil, fmt.Errorf("~w applies only to incoming references and :uses, not %s", relation)
 		}
 		matches = slices.DeleteFunc(matches, func(match ModuleMatch) bool {
 			switch filter.Kind {

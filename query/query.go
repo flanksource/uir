@@ -19,6 +19,7 @@ const (
 	OperationImplementers      Operation = "implementers"
 	OperationInheritors        Operation = "inheritors"
 	OperationMethods           Operation = "methods"
+	OperationUses              Operation = "uses"
 	OperationTransitiveCallers Operation = "transitive_callers"
 	OperationSet               Operation = "set"
 	OperationPath              Operation = "path"
