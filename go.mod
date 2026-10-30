@@ -5,11 +5,11 @@ go 1.26.1
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/flanksource/clicky v1.21.89
-	github.com/flanksource/commons v1.63.0
-	github.com/flanksource/commons-db v0.1.67
-	github.com/flanksource/commons-db/cmd/query v0.1.67
+	github.com/flanksource/commons v1.62.0
+	github.com/flanksource/commons-db v0.1.65
+	github.com/flanksource/commons-db/cmd/query v0.1.65
 	github.com/flanksource/gavel v0.0.67
-	github.com/flanksource/sqlglot-go v1.0.7
+	github.com/flanksource/sqlglot-go v1.0.8-0.20261030111844-ec6a39b5ff63
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260507013755-92041b743c96
@@ -134,9 +134,6 @@ require (
 	github.com/eko/gocache/lib/v4 v4.2.3 // indirect
 	github.com/eko/gocache/store/go_cache/v4 v4.2.5 // indirect
 	github.com/elazarl/goproxy v1.7.2 // indirect
-	github.com/emersion/go-message v0.18.2 // indirect
-	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
-	github.com/emersion/go-smtp v0.25.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
@@ -151,8 +148,8 @@ require (
 	github.com/flanksource/captain v0.0.72-0.20261023035220-26c09a9de22f // indirect
 	github.com/flanksource/clicky/aichat v1.21.85 // indirect
 	github.com/flanksource/clicky/valkey v1.21.85 // indirect
-	github.com/flanksource/commons-db/recordstore v0.1.67 // indirect
-	github.com/flanksource/commons-db/tracing v0.1.67 // indirect
+	github.com/flanksource/commons-db/recordstore v0.1.65 // indirect
+	github.com/flanksource/commons-db/tracing v0.1.65 // indirect
 	github.com/flanksource/gomplate/v3 v3.24.90 // indirect
 	github.com/flanksource/is-healthy v1.0.92 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
@@ -320,7 +317,6 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/slack-go/slack v0.29.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
