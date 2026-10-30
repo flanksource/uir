@@ -21,15 +21,16 @@ SelectorValue <- Quoted / ([A-Za-z0-9_./*?@#$!] / '-' / '\\' .)+
 EntityField <- <!(SelectorPrefix ':') EntityName ':' !(RelationName !EntityChar) (Quoted / EntityChar+)> { p.addToken("entity_field", text) }
 EntityName <- Quoted / [A-Za-z_*?] EntityChar*
 EntityChar <- [A-Za-z0-9_*?] / '-'
-RelationName <- 'impl' / 'inherits' / 'methods'
+RelationName <- 'impl' / 'inherits' / 'methods' / 'uses'
 Symbol <- '"' <QuotedText> '"' { p.addToken("symbol", text) } / <[A-Za-z_*?]([A-Za-z0-9_./*?] / '-')*> { p.addToken("symbol", text) }
 Quoted <- '"' QuotedText '"'
 QuotedText <- ('\\' . / !'"' .)*
-Relation <- Transitive / Implementers / Inheritors / Methods / Incoming / Outgoing / Definition / Writes
+Relation <- Transitive / Implementers / Inheritors / Methods / Uses / Incoming / Outgoing / Definition / Writes
 Transitive <- '<<' <[0-9]*> { p.addToken("relation", "<<" + text) }
 Implementers <- ':impl' { p.addToken("relation", ":impl") }
 Inheritors <- ':inherits' { p.addToken("relation", ":inherits") }
 Methods <- ':methods' { p.addToken("relation", ":methods") }
+Uses <- ':uses' { p.addToken("relation", ":uses") }
 Incoming <- '<' { p.addToken("relation", "<") }
 Outgoing <- '>' { p.addToken("relation", ">") }
 Definition <- '=' { p.addToken("relation", "=") }

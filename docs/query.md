@@ -45,7 +45,7 @@ selector     := "pkg:" package-glob | "pkg:" module-glob ":" relative-package-gl
 entity-field := entity-glob ":" field-glob
 modifier     := ("+" | "-") selector
 symbol       := qualified-name | symbol-glob | quoted
-relation     := "<" | ">" | "=" | "<<" [depth] | ":impl" | ":inherits" | ":methods" | "~w"
+relation     := "<" | ">" | "=" | "<<" [depth] | ":impl" | ":inherits" | ":methods" | ":uses" | "~w"
 filter       := "-f" file-suffix | "+pkg" package | "-pkg" package | "~w"
 depth        := 1..8
 quoted       := '"' (char | "\" char)* '"'
@@ -72,6 +72,8 @@ Postfix `+kind:pattern` keeps symbols and `-kind:pattern` removes them. Multiple
 | `sub.Iface :impl` | Types indexed as implementing the interface. |
 | `sub.Base :inherits` | Types that directly embed the named struct or interface. Older snapshots without embedding facts require reindexing. |
 | `sub.Thing :methods` | Methods owned by the type. |
+| `sub.Thing.Do :uses` | What the declaration itself reads, writes, and calls: every resolved occurrence inside its body, each row naming the symbol used. Works from any declaration kind, not only callables. |
+| `kind:sql.procedure:Load :uses ~w` | The writes the body makes. |
 | `sub.Thing.Do < -f _test.go` | Incoming rows excluding paths with that suffix. |
 | `sub.Thing.Do < +pkg api` | Incoming rows inside a package named `api`; a full import path selects exactly that package. |
 | `sub.Thing.Do < -pkg sub` | Incoming rows outside package `sub`; use the full import path when several packages share the name. |
@@ -81,12 +83,15 @@ Postfix `+kind:pattern` keeps symbols and `-kind:pattern` removes them. Multiple
 | `func:Save < pkg:example.org/service:api` | Incoming call sites whose enclosing caller is declared in that package. |
 | `func:Run > func:Store.Save` | Outgoing call sites whose resolved callee is that method. |
 | `struct:Store :methods func:Save` | Method witnesses of matching struct types, narrowed to `Save`. |
+| `func:Run :uses pkg:example.org/service:store` | Uses within `Run` of symbols declared in that package. |
 
 A name with `/` is matched against its full import path; without `/`, the package portion is suffix matched. Bare symbol globs are case sensitive and anchored: `*` matches within one slash-delimited segment, `?` matches one character, and `**` matches across whole slash-delimited segments. The existing `.*` form selects direct children of the named package or owner. Other globs expand to all matching active canonical symbols, including variables, without an ambiguity prompt. An exact spelling that resolves to several canonical symbols returns positioned candidates with their full `query_name`; use a full path to disambiguate. `&` and `|` compare canonical symbol identities after each side's location rows are projected to symbols. Chaining a relation traverses the projected symbols from the previous step.
 
 Package filters without `/...` match one package. A filter ending in `/...` matches that full Go import path and every descendant at a `/` boundary. Use the full `go.mod` module path followed by `/...` to cover a whole module. Pass `--all` (or omit `--root` outside a registered checkout) to search every registered primary root; the filter then removes callers from the selected package or module while retaining indexed consumers in other roots.
 
-Binary relations keep the unary relation's witness rows and retain only rows whose projected canonical symbol belongs to the right operand in the same selected snapshot. `<` projects the enclosing caller or referrer, `>` the resolved callee, `<<N` the caller after traversal, `:impl` the implementing type, `:methods` the owned method, and `~w` the enclosing writer. `=` has only a unary form. Use parentheses to make a set the right operand, as in `func:Save < (pkg:example.org/service:api & func:Run)`. A bare right operand binds before `&`, so `func:Save < pkg:example.org/service:api & func:Run` intersects the binary relation result with `func:Run`. The older space-separated `+pkg value` and `-pkg value` filter location rows; colon modifiers filter projected canonical symbols.
+Binary relations keep the unary relation's witness rows and retain only rows whose projected canonical symbol belongs to the right operand in the same selected snapshot. `<` projects the enclosing caller or referrer, `>` the resolved callee, `<<N` the caller after traversal, `:impl` the implementing type, `:methods` the owned method, `:uses` the symbol used, and `~w` the enclosing writer. `=` has only a unary form. Use parentheses to make a set the right operand, as in `func:Save < (pkg:example.org/service:api & func:Run)`. A bare right operand binds before `&`, so `func:Save < pkg:example.org/service:api & func:Run` intersects the binary relation result with `func:Run`. The older space-separated `+pkg value` and `-pkg value` filter location rows; colon modifiers filter projected canonical symbols.
+
+`:uses` is the outgoing counterpart of `<` for any declaration, not only callables: `X <` lists what reads, writes, or calls `X`; `X :uses` lists what `X`'s own body reads, writes, or calls. Its rows are the occurrences inside the extent of each declaration of `X` (or enclosed by it) that resolve to a symbol, other than definitions and the uses of declarations nested inside `X`, which are part of `X` rather than used by it. Each row is positioned at the occurrence, keeps its `role` (`reference`, `write`, `call`, or a producer role), its `source_id`/`source_name` name `X`, and `symbol_id`, `identifier`, `node_kind`, and `props` describe the symbol used, taken from its declaration in scope (the row's own snapshot first). `path`, `line`, and `package_path` stay those of the occurrence, as for `>`. `~w` keeps the writes. A right operand keeps the rows whose used symbol belongs to it; a pure `mod:`/`pkg:` scope keeps the rows whose used symbol is declared in an admitted module or package, wherever `X` itself sits. An unresolved call is not a use; `>` lists those. Like the other relations, `:uses` on a container kind is an error, and an unresolved symbol on its left fails.
 
 ### Quoted values
 
@@ -115,7 +120,7 @@ OIPA writes an entity field as `Entity:Field`, such as `Plan:PlanField1`, `Polic
 | `Plan:* & mod:"Co/Prod/GL"` | Fields of `Plan` declared in that module. |
 | `Plan:"Field With Space"` | A field whose name needs quotes. |
 
-A selector prefix always wins: `type:Code` is a type selector, `pkg:a/b:Sym` a package selector, and `kind:x:y` a kind selector, so write `"type":Code` for an entity named like a prefix (`pkg`, `mod`, `func`, `field`, `struct`, `all`, `method`, `var`, `type`, `module`, `package`, `path`, `kind`). A colon followed by `impl`, `inherits`, or `methods` is a relation, so `Thing:methods` lists the methods of `Thing`; write `Thing:"methods"` for a field of that name. An unquoted entity has no `.` or `/`, so `sub.Iface:impl` remains the `:impl` relation.
+A selector prefix always wins: `type:Code` is a type selector, `pkg:a/b:Sym` a package selector, and `kind:x:y` a kind selector, so write `"type":Code` for an entity named like a prefix (`pkg`, `mod`, `func`, `field`, `struct`, `all`, `method`, `var`, `type`, `module`, `package`, `path`, `kind`). A colon followed by `impl`, `inherits`, `methods`, or `uses` is a relation, so `Thing:methods` lists the methods of `Thing`; write `Thing:"methods"` for a field of that name. An unquoted entity has no `.` or `/`, so `sub.Iface:impl` remains the `:impl` relation.
 
 ## Results and limits
 
