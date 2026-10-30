@@ -10,10 +10,11 @@ import (
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-// DocumentFormatVersion versions documents.content. Format 9 gives every symbol of a document its own
-// key (each Go func init is keyed by its discriminator); format 8 adds resolved variable types;
-// format 6 moved implements into snapshot-level facts (EffectiveImplements).
-const DocumentFormatVersion = 9
+// DocumentFormatVersion versions documents.content. Format 10 adds producer metric values (measures);
+// format 9 gives every symbol of a document its own key (each Go func init is keyed by its
+// discriminator); format 8 adds resolved variable types; format 6 moved implements into snapshot-level
+// facts (EffectiveImplements).
+const DocumentFormatVersion = 10
 
 // uniqueKeysFormat is the first document format whose symbol keys are unique within a document.
 const uniqueKeysFormat = 9
@@ -49,6 +50,7 @@ type DocumentContent struct {
 type DocumentSymbol struct {
 	DeclaredType *string          `json:"declared_type,omitempty"`
 	Metrics      *CallableMetrics `json:"metrics,omitempty"`
+	Measures     map[string]int64 `json:"measures,omitempty"`
 	Props        map[string]any   `json:"props,omitempty"`
 	ID           *string          `json:"id"`
 	Key          string           `json:"key"`
@@ -193,6 +195,9 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 		declared[symbol.Key] = index
 		if symbol.DeclaredType != nil && (content.Version < 8 || symbol.Kind != "var" || symbol.ID == nil || *symbol.DeclaredType == "" || document.Coverage == CoverageSyntax) {
 			return fmt.Errorf("symbol %s: declared_type requires a proven variable, a nonempty canonical type and document format 8 or newer", symbol.Key)
+		}
+		if err := validateMeasures(content.Version, symbol); err != nil {
+			return err
 		}
 	}
 	if content.Version < 7 {

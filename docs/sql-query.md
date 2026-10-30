@@ -110,6 +110,35 @@ Here `version` is the metric semantics version, `param_count` is nonnegative, an
 
 Run the focused and repository acceptance checks with `gavel fixtures fixtures/queryable-metrics.md`. Real-corpus benchmark instructions are in [the metric plan](queryable-metrics-plan.md).
 
+## Producer metrics
+
+A non-Go producer can publish its own per-symbol integer metrics and query them beside the callable ones. A kind declares its metrics in the publication's `kinds`, by name with a description:
+
+```json
+{"name": "acme.rule", "category": "callable", "metrics": {
+  "variables": {"description": "Variables the rule declares"},
+  "fan_in": {"description": "Distinct rules that call this rule"}
+}}
+```
+
+Every declaration of that kind then records a value for each declared metric in its document symbol's `measures`, which requires document format 10:
+
+```json
+{"key": "…", "kind": "acme.rule", "measures": {"variables": 14, "fan_in": 2}, "…": "…"}
+```
+
+Publication refuses, before writing anything, a metric name that is not a lower snake_case identifier or that is `param_count` or `body_lines`; `measures` in a document older than format 10 or on a declaration without a canonical `id`; a negative value; a name the symbol's kind does not declare; and a symbol missing a value for one its kind declares. A kind that declares no metrics carries no `measures`. Each error names the kind and the symbol, and the metric at fault. Values are stored in `declaration_measures` by document ordinal, declaration key and name (migration [`22_producer_metrics.hcl`](../storage/migrations/22_producer_metrics.hcl)), and the declared metrics in `symbol_kind_metrics`.
+
+`symbol.metrics.<name>` is a catalogued `integer` field whenever a kind the source selects declares it, the same way a declared property types `symbol.props.<name>`. It works in projection, `WHERE` and `ORDER BY`, on symbol sources and on navigation rows such as `callers`, `callees` and `traverse`, for kinds of any category:
+
+```sh
+uir query 'SELECT symbol.name, symbol.metrics.variables, symbol.metrics.fan_in FROM acme.rule:* WHERE symbol.metrics.variables > 10 AND symbol.metrics.fan_in >= 2 ORDER BY symbol.metrics.variables DESC'
+```
+
+A metric no selected kind declares is an unknown field. A row whose kind does not declare a requested metric reads `NULL`. A declaration whose kind declares the metric but whose document recorded no value, such as one published before the kind declared it, fails the query with its snapshot, path, declaration, kind and metric, and asks to republish; it never reads as zero or `NULL`. Like the callable metrics, a metric-only query reads the stored values without decoding documents.
+
+Metrics evolve additively. Publishing a kind again may declare new metrics, after which every new document of the kind must record them; removing a declared metric or changing its description is refused, naming the kind and the metric. To change a metric's meaning, declare a new name. Format 9 documents remain readable; only their producer metric fields are unavailable.
+
 ## Runnable domain publication
 
 From the repository root, build the CLI and generate a publication containing HTTP → handler → topic → consumer links plus parallel Kubernetes relationships:

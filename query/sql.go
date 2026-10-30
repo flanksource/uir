@@ -208,8 +208,13 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 			return ModuleQueryResult{}, err
 		}
 	}
-	if rows.needsMetrics() {
+	if rows.needsCallableMetrics() {
 		if err := index.sqlRecordMetrics(ctx, records); err != nil {
+			return ModuleQueryResult{}, err
+		}
+	}
+	if measures := rows.requiredMeasures(); len(measures) > 0 {
+		if err := index.sqlRecordMeasures(ctx, records, measures, catalog.Metrics); err != nil {
 			return ModuleQueryResult{}, err
 		}
 	}
