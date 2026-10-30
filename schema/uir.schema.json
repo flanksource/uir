@@ -2282,6 +2282,16 @@
             "$ref": "#/$defs/SQLDependency"
           }
         },
+        "sqlQuotedIdentifierOff": {
+          "type": "boolean"
+        },
+        "sqlRuntimeDependencies": {
+          "description": "SQLRuntimeDependencies and SQLQuotedIdentifierOff describe a SQL module.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLRuntimeDependency"
+          }
+        },
         "type": {
           "description": "The type, class, table, API group the node belongs to",
           "type": "string"
@@ -2937,6 +2947,10 @@
           "type": "object",
           "additionalProperties": {}
         },
+        "rowGuid": {
+          "description": "RowGUID marks the table's ROWGUIDCOL.",
+          "type": "boolean"
+        },
         "scale": {
           "type": "integer"
         },
@@ -3218,6 +3232,10 @@
         "field": {
           "type": "string"
         },
+        "fillFactor": {
+          "description": "FillFactor is 1-99; 0 is the server default.",
+          "type": "integer"
+        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -3490,6 +3508,16 @@
             "$ref": "#/$defs/SQLDependency"
           }
         },
+        "sqlQuotedIdentifierOff": {
+          "type": "boolean"
+        },
+        "sqlRuntimeDependencies": {
+          "description": "SQLRuntimeDependencies and SQLQuotedIdentifierOff describe a view's module.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLRuntimeDependency"
+          }
+        },
         "triggers": {
           "description": "Triggers defined against the table. Each carries its event and timing in Properties under TriggerEventProperty and TriggerTimingProperty, and its lowered body in Body.",
           "type": "array",
@@ -3760,6 +3788,18 @@
             }
           ]
         },
+        "sequences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLSequence"
+          }
+        },
+        "tableTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SQLTableType"
+          }
+        },
         "version": {
           "type": "integer"
         }
@@ -3786,6 +3826,10 @@
         },
         "name": {
           "type": "string"
+        },
+        "systemNamed": {
+          "description": "SystemNamed marks a constraint the server named itself; its Name differs in every database.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -3810,6 +3854,100 @@
         },
         "seed": {
           "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLRuntimeDependency": {
+      "description": "SQLRuntimeDependency is a module reference the catalogue could not bind to a local object (missing, cross-database, linked-server or built-in); it resolves only when the module runs.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLSequence": {
+      "description": "SQLSequence is a CREATE SEQUENCE object. Bounds are exact decimal strings; CacheSize 0 without NoCache is the server's default cache.",
+      "type": "object",
+      "properties": {
+        "cacheSize": {
+          "type": "integer"
+        },
+        "cycle": {
+          "type": "boolean"
+        },
+        "increment": {
+          "type": "string"
+        },
+        "maximum": {
+          "type": "string"
+        },
+        "minimum": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "noCache": {
+          "type": "boolean"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "start": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SQLTableType": {
+      "description": "SQLTableType is a user-defined table type (CREATE TYPE ... AS TABLE). The server names its defaults and keys itself, so SQLDefault.Name and the key names stay empty.",
+      "type": "object",
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "columns": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RecordColumn"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordIndex"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
         }
       },
       "additionalProperties": false
