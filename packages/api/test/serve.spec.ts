@@ -42,10 +42,9 @@ it("previews then applies the exact selected explorer refactor", async () => {
 
 it("loads every module checkout head for the explorer tree", async () => {
   const heads = [{ root_key: "example.org/service", name: "service", location: "/checkout/service", snapshot_id: "head-1", sources: [] }];
-  const warnings = [{ root_key: "example.org/missing", location: "/checkout/missing", message: "registered checkout has no indexed head; run `uir reindex --all`" }];
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: heads, warnings }), { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(heads), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
-  await expect(listModuleHeads()).resolves.toEqual({ items: heads, warnings });
+  await expect(listModuleHeads()).resolves.toEqual(heads);
   expect(fetcher).toHaveBeenCalledWith("/api/v1/modules/heads", expect.objectContaining({ headers: { Accept: "application/json" } }));
 });
 
@@ -138,7 +137,7 @@ it.each([
 
 it("gets scoped canonical symbol suggestions for query completion", async () => {
   const symbols = [{ id: saveID, query_name: "example.org/refs/store.Store.Save", package_path: "example.org/refs/store", kind: "method", name: "Save" }];
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: symbols, warnings: [] }), { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(symbols), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   await expect(suggestModuleSymbols("store.Store.S", scope.root, snapshot)).resolves.toEqual(symbols);
   expect(fetcher).toHaveBeenCalledWith(`/api/v1/modules/suggest?prefix=store.Store.S&root=example.org%2Frefs&snapshot=${snapshot}`, expect.objectContaining({ headers: { Accept: "application/json" } }));
@@ -146,7 +145,7 @@ it("gets scoped canonical symbol suggestions for query completion", async () => 
 
 it("gets module scoped relative package completions", async () => {
   const choices = ["pkg:example.org/refs:app", "pkg:example.org/refs:app/sub"];
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: choices, warnings: [] }), { status: 200 }));
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(choices), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   await expect(suggestTypedSelectors("pkg:example.org/refs:app", scope.root, snapshot)).resolves.toEqual(choices);
   expect(fetcher).toHaveBeenCalledWith(`/api/v1/modules/suggest-selectors?prefix=pkg%3Aexample.org%2Frefs%3Aapp&root=example.org%2Frefs&snapshot=${snapshot}`, expect.objectContaining({ headers: { Accept: "application/json" } }));

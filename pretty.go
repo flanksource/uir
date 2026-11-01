@@ -488,15 +488,15 @@ func (l Location) Pretty() api.Text {
 			result = result.Append(":", StyleFaint)
 		}
 		result = result.Append("L", StyleLineMarker)
-		result = result.Append(fmt.Sprintf("%d", l.StartLine), StyleLineNumber)
+		result = result.Append(fmt.Sprintf("%d", *l.StartLine), StyleLineNumber)
 		result = result.Append("-", StyleFaint)
-		result = result.Append(fmt.Sprintf("%d", l.EndLine), StyleLineNumber)
+		result = result.Append(fmt.Sprintf("%d", *l.EndLine), StyleLineNumber)
 	} else if l.StartLine != nil {
 		if l.Path != "" {
 			result = result.Append(":", StyleFaint)
 		}
 		result = result.Append("L", StyleLineMarker)
-		result = result.Append(fmt.Sprintf("%d", l.StartLine), StyleLineNumber)
+		result = result.Append(fmt.Sprintf("%d", *l.StartLine), StyleLineNumber)
 	}
 
 	return result
