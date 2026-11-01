@@ -116,3 +116,5 @@ GOWORK=off .bin/uir --dsn .tmp/lint-example.db lint --config lint/testdata/proje
 ```
 
 The sample reports one warning and one parameter-count error. `GOWORK=off` selects the sample's own module rather than the repository's development workspace. To see a warning-only successful run, add `--rule small-files`.
+
+A repeat run reuses the index of an unchanged checkout but evaluates every selected rule again. Reusing each rule's findings while the symbols it read are unchanged is planned in [Lint findings as generation-gated facts](lint-result-reuse-plan.md).

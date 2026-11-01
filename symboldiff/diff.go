@@ -1,6 +1,7 @@
 package symboldiff
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 			return Result{}, err
 		}
 	}
-	rows, err := buildRows(pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, scope.tokenizer())
+	rows, err := buildRows(files, pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, scope.tokenizer())
 	if err != nil {
 		return Result{}, err
 	}
@@ -241,14 +242,18 @@ type reportedRow struct {
 	visible bool
 }
 
-var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2, ClassStructure: 3, ClassBody: 4, ClassMoved: 5}
+var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2, ClassStructure: 3, ClassBody: 4, ClassFormat: 5, ClassMoved: 6, ClassImport: 7}
 
-// buildRows turns changed pairings into rows. With line counts, an unchanged pairing whose lines
-// differ (comments or layout inside the extent) is a body row saying so.
-func buildRows(pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, filter rowFilter, tokenizer Tokenizer) ([]reportedRow, error) {
-	var rows []reportedRow
+// buildRows turns changed pairings, and the changed imports of files, into rows. An unchanged pairing
+// whose source bytes differ (comments or layout inside the extent) is a format row: compared byte for
+// byte when both sides' bytes are at hand, as a patch has them, else from its line counts.
+func buildRows(files []changedFile, pairings []*pairing, attribution *lineAttribution, markers coverageMarkers, filter rowFilter, tokenizer Tokenizer) ([]reportedRow, error) {
+	rows, err := importRows(files, markers, filter)
+	if err != nil {
+		return nil, err
+	}
 	for _, pair := range pairings {
-		class, note := pair.class, ""
+		class := pair.class
 		var count *LineCount
 		if attribution != nil {
 			if lines, ok := attribution.pairs[pair]; ok {
@@ -256,16 +261,16 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 			}
 		}
 		if class == "" {
-			if count == nil || *count == (LineCount{}) {
+			if !sourceChanged(pair, count) {
 				continue
 			}
-			class, note = ClassBody, NoteLayoutOnly
+			class = ClassFormat
 		}
 		row, err := newRow(pair, class, markers.ofPairing(pair), tokenizer)
 		if err != nil {
 			return nil, err
 		}
-		row.Lines, row.Note = count, note
+		row.Lines = count
 		reported, visible := pair.reported(), pair.visibleAs(filter.visibility, class) && filter.changeTypes.shows(class)
 		if visible && !pair.shapesRead() {
 			return nil, fmt.Errorf("the %s row of %s in %q shows a shape whose document was not read", pair.class, row.DisplayName(), reported.file.path)
@@ -289,6 +294,17 @@ func buildRows(pairings []*pairing, attribution *lineAttribution, markers covera
 		return classOrder[left.row.Class] < classOrder[right.row.Class]
 	})
 	return rows, nil
+}
+
+// sourceChanged reports whether a pairing with equal hashes changed its source text: its extents'
+// bytes when both sides carry them, else whether its line counts are nonzero.
+func sourceChanged(pair *pairing, count *LineCount) bool {
+	before, after := pair.before.file.source, pair.after.file.source
+	if before != nil && after != nil {
+		old, current := pair.before.symbol.ExtentBytes, pair.after.symbol.ExtentBytes
+		return !bytes.Equal(before[old[0]:old[1]], after[current[0]:current[1]])
+	}
+	return count != nil && *count != (LineCount{})
 }
 
 // groupRetypedPairs groups a parameter-type change: exactly one removed and one added canonical

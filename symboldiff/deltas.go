@@ -146,13 +146,14 @@ func (plan *symbolPlan) classify() error {
 }
 
 // chooseReads marks the documents the output needs: every changed document for line counts; keyed
-// and excluded documents; both sides of a symbol declared more than once; and, for a visible row, the
-// new side of an added symbol, the old side of a removed one, and both sides of a signature or
-// structure change.
+// and excluded documents; both sides of a file whose imports are compared when import rows are shown;
+// both sides of a symbol declared more than once; and, for a visible row, the new side of an added
+// symbol, the old side of a removed one, and both sides of a signature or structure change.
 func (plan *symbolPlan) chooseReads(files []changedFile, visibility Visibility, stat bool) error {
+	imports := visibility.shows(ClassImport, importVisibility)
 	for _, file := range files {
 		for _, document := range file.sides() {
-			if document != nil && (stat || plan.keyedFile(file) || document.coverage() == storage.CoverageExcluded) {
+			if document != nil && (stat || plan.keyedFile(file) || document.coverage() == storage.CoverageExcluded || imports && importsCompared(file)) {
 				plan.read[document] = true
 			}
 		}

@@ -104,7 +104,7 @@ var _ = Describe("commit-to-commit diff", func() {
 			Expect([]string{removed.Group, added.Group, added.ShapeBefore, added.ShapeAfter}).To(Equal([]string{"Half", "Half", "func Half(a Amount) Amount", "func Half(a *Amount) Amount"}))
 			Expect(removed.ShapeDiff).To(BeNil())
 			Expect(added.ShapeDiff).To(Equal(DiffShapes("func Half(a Amount) Amount", "func Half(a *Amount) Amount", TokenizerGo)))
-			Expect(money.row("Add", ClassBody).Note).To(Equal(NoteLayoutOnly))
+			Expect(money.row("Add", ClassFormat).Note).To(BeEmpty())
 			Expect(all.file("book/count.go").row("Count", ClassMoved)).To(Equal(Row{
 				Class: ClassMoved, Kind: "func", Name: "Count", Visibility: "exported",
 				PathBefore: "book/book.go", PathAfter: "book/count.go", Lines: &LineCount{},

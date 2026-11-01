@@ -49,7 +49,7 @@ func (visibility Visibility) shows(class Class, symbol string) bool {
 // filters rows after symbols are paired, so it never changes how a symbol is classified.
 type ChangeTypes []string
 
-var classes = []Class{ClassAdded, ClassRemoved, ClassSignature, ClassStructure, ClassBody, ClassMoved}
+var classes = []Class{ClassAdded, ClassRemoved, ClassSignature, ClassStructure, ClassBody, ClassFormat, ClassMoved, ClassImport}
 
 // ParseChangeTypes validates --change-type patterns: each, without its !, must match at least one class.
 func ParseChangeTypes(patterns []string) (ChangeTypes, error) {
@@ -82,7 +82,9 @@ type rowFilter struct {
 
 // Class is how a symbol changed between the two commits. Of a symbol on both sides, the class names the
 // outermost layer whose hash differs: signature the public layer, structure the private layer only,
-// body the content layer only.
+// body the content layer only. format is a symbol whose hashes are all equal but whose source bytes
+// changed: comments, whitespace, or layout. import is one import of a file whose path changed under
+// its alias, or that only one side has.
 type Class string
 
 const (
@@ -91,8 +93,13 @@ const (
 	ClassSignature Class = "signature"
 	ClassStructure Class = "structure"
 	ClassBody      Class = "body"
+	ClassFormat    Class = "format"
 	ClassMoved     Class = "moved"
+	ClassImport    Class = "import"
 )
+
+// importVisibility is the visibility of every import row: an import binds a name in its file only.
+const importVisibility = "internal"
 
 // changedClass is the class of a symbol declared on both sides from which of its layers differ and
 // whether its defining path changed; empty when nothing did.
@@ -117,9 +124,6 @@ const (
 	MarkerExcluded = "excluded"
 	MarkerManifest = "manifest"
 )
-
-// NoteLayoutOnly marks a body row whose hashes are equal but whose lines changed: comments or layout.
-const NoteLayoutOnly = "comments or layout only; content_hash unchanged"
 
 // Options selects the root, the revisions to compare, and what the diff reports.
 type Options struct {

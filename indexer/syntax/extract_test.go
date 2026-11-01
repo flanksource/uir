@@ -2,6 +2,7 @@ package syntax_test
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/indexer/syntax"
@@ -72,5 +73,73 @@ func Build() *Service {
 		Expect(indexed.Calls[0].Text).To(Equal("helper.Notify"))
 		Expect(indexed.Document().Occurrences[0].Range).To(Equal(storage.Range{10, 2, 10, 15}))
 		Expect(json.Valid(indexed.Nodes[0].Payload)).To(BeTrue())
+	})
+
+	It("extracts package-level vars and consts by name, with the declared type as the shape and the value in the content hash", func() {
+		const packagePath = "example.org/acme/limits"
+		content := []byte(`package limits
+
+// Max is the ceiling.
+const Max int = 10
+
+const (
+	low  = 1
+	High = 2
+)
+
+var registry, _ = map[string]int{}, 0
+
+var Default = New(Max)
+`)
+		document, err := syntax.Document("limits/limits.go", packagePath, content)
+		Expect(err).ToNot(HaveOccurred())
+		type declared struct{ Kind, Visibility, Shape, PublicShape string }
+		got := map[string]declared{}
+		for _, symbol := range document.Symbols {
+			Expect(symbol.Identifier).To(Equal(uir.Identifier{Package: packagePath, Field: symbol.Identifier.Field, NodeType: uir.NodeTypePackageVariable}))
+			got[symbol.Identifier.Field] = declared{symbol.Kind, symbol.Visibility, symbol.Shape, symbol.PublicShape}
+		}
+		Expect(got).To(Equal(map[string]declared{
+			"Max":      {"const", "exported", "package_variable (int) public", "package_variable (int) public"},
+			"low":      {"const", "internal", "package_variable private", "package_variable private"},
+			"High":     {"const", "exported", "package_variable public", "package_variable public"},
+			"registry": {"var", "internal", "package_variable private", "package_variable private"},
+			"Default":  {"var", "exported", "package_variable public", "package_variable public"},
+		}))
+
+		retyped := strings.Replace(string(content), "New(Max)", "New(Max + 1)", 1)
+		changed, err := syntax.Document("limits/limits.go", packagePath, []byte(retyped))
+		Expect(err).ToNot(HaveOccurred())
+		hashes := func(document storage.DocumentContent) map[string][2]string {
+			result := map[string][2]string{}
+			for _, symbol := range document.Symbols {
+				result[symbol.Identifier.Field] = [2]string{symbol.PublicHash, symbol.ContentHash}
+			}
+			return result
+		}
+		before, after := hashes(document), hashes(changed)
+		Expect(after["Default"][0]).To(Equal(before["Default"][0]))
+		Expect(after["Default"][1]).ToNot(Equal(before["Default"][1]))
+		Expect(after["Max"]).To(Equal(before["Max"]))
+	})
+
+	It("records every import of the file with its alias", func() {
+		content := []byte(`package worker
+
+import (
+	"fmt"
+	celtypes "cel.dev/cel-go/common/types"
+	_ "embed"
+	. "strings"
+)
+`)
+		document, err := syntax.Document("worker/imports.go", "example.org/acme/worker", content)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(document.Imports).To(Equal([]storage.DocumentImport{
+			{Alias: "fmt", Path: "fmt"},
+			{Alias: "celtypes", Path: "cel.dev/cel-go/common/types"},
+			{Alias: "_", Path: "embed"},
+			{Alias: ".", Path: "strings"},
+		}))
 	})
 })

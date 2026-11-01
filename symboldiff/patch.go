@@ -114,7 +114,7 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 		lines := attributeLines(ctx, files, pairings, inline, inline)
 		attribution = &lines
 	}
-	rows, err := buildRows(pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, TokenizerGo)
+	rows, err := buildRows(files, pairings, attribution, markers, rowFilter{visibility: visibility, changeTypes: changeTypes}, TokenizerGo)
 	if err != nil {
 		return Result{}, err
 	}

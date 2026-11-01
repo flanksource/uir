@@ -21,7 +21,7 @@ type diffOptions struct {
 	Revisions    []string `args:"true"`
 	Root         string   `flag:"root" help:"Module path of the revisions; defaults to the module of the current checkout"`
 	Visibility   string   `flag:"visibility" help:"Rows to report: exported, internal, or all" default:"exported"`
-	ChangeType   []string `flag:"change-type" help:"Row classes to report: added, removed, signature, structure, body, moved; * and ! patterns (repeatable or comma separated; default all)"`
+	ChangeType   []string `flag:"change-type" help:"Row classes to report: added, removed, signature, structure, body, format, moved, import; * and ! patterns (repeatable or comma separated; default all)"`
 	Untracked    bool     `flag:"untracked" help:"Compare untracked files that are not ignored as new files when a revision is compared against the worktree"`
 	Stat         bool     `flag:"stat" help:"Add per-file and per-symbol line counts from hash-verified Git blobs, or an external root's stored blobs"`
 	SnapshotFrom string   `flag:"snapshot-from" help:"Snapshot UUID to use for <from> instead of its newest clean snapshot"`

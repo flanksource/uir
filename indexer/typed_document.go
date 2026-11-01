@@ -77,7 +77,7 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 	assignEnclosing(symbols, occurrences)
 	return storage.DocumentContent{
 		Version: storage.DocumentFormatVersion, PackagePath: extracted.PackagePath,
-		Symbols: symbols, Occurrences: occurrences, Diagnostics: diagnostics,
+		Symbols: symbols, Occurrences: occurrences, Diagnostics: diagnostics, Imports: extracted.Imports,
 	}, nil
 }
 
@@ -281,7 +281,7 @@ func fileDeclarations(file *ast.File, info *types.Info) []declaration {
 			add(declared.Name, syntax.DocumentStart(declared.Doc, declared.Pos()), declared.End())
 		case *ast.GenDecl:
 			for _, spec := range declared.Specs {
-				start, end := specExtent(declared, spec)
+				start, end := syntax.SpecExtent(declared, spec)
 				switch spec := spec.(type) {
 				case *ast.TypeSpec:
 					add(spec.Name, start, end)
@@ -349,19 +349,6 @@ func localObject(object types.Object) bool {
 		return object.Pkg() != nil && object.Parent() != object.Pkg().Scope()
 	}
 	return false
-}
-
-func specExtent(declared *ast.GenDecl, spec ast.Spec) (token.Pos, token.Pos) {
-	if !declared.Lparen.IsValid() {
-		return syntax.DocumentStart(declared.Doc, declared.Pos()), declared.End()
-	}
-	switch spec := spec.(type) {
-	case *ast.TypeSpec:
-		return syntax.DocumentStart(spec.Doc, spec.Pos()), spec.End()
-	case *ast.ValueSpec:
-		return syntax.DocumentStart(spec.Doc, spec.Pos()), spec.End()
-	}
-	return spec.Pos(), spec.End()
 }
 
 func addMembers(add func(*ast.Ident, token.Pos, token.Pos), expression ast.Expr) {
