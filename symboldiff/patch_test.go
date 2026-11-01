@@ -77,6 +77,56 @@ var _ = Describe("DiffPatch with a source locator", func() {
 		}))
 	})
 
+	It("reports import re-paths, formatting-only edits, and package-level var changes as their own rows", func(ctx SpecContext) {
+		before := lines(
+			"package calc", "",
+			"import (", "\t\"fmt\"", "\t\"github.com/google/cel-go/cel\"", "\t\"os\"", ")", "",
+			"var Env = cel.NewEnv(fmt.Sprint( 1))", "",
+			"var limit = 3", "",
+			"func Run() {", "\tif limit > 0 {os.Exit(1)}", "}", "",
+			"func Keep() int { return 1 }",
+		)
+		after := lines(
+			"package calc", "",
+			"import (", "\t\"cel.dev/cel-go/cel\"", "\t\"fmt\"", "\t\"io\"", ")", "",
+			"var Env = cel.NewEnv(fmt.Sprint(1))", "",
+			"var limit = 4", "",
+			"func Run() {", "\tif limit > 0 {", "\t\tio.EOF.Error()", "\t}", "}", "",
+			"// Keep stays.", "func Keep() int { return 1 }",
+		)
+		locator := memoryLocator{blobs: map[string][]byte{calcBeforeBlob: []byte(before), calcAfterBlob: []byte(after)}}
+		diff := func(changeTypes ...string) []patchRow {
+			result, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(modifiedCalcPatch), Locator: locator, Visibility: VisibilityAll, ChangeTypes: changeTypes})
+			Expect(err).To(Succeed())
+			return patchRows(result)
+		}
+		Expect(diff()).To(Equal([]patchRow{
+			{Path: "calc/calc.go", Class: "format", Name: "Env", Visibility: "exported", PathBefore: "calc/calc.go"},
+			{Path: "calc/calc.go", Class: "format", Name: "Keep", Visibility: "exported", PathBefore: "calc/calc.go"},
+			{Path: "calc/calc.go", Class: "body", Name: "Run", Visibility: "exported", PathBefore: "calc/calc.go"},
+			{Path: "calc/calc.go", Class: "import", Name: "cel", Visibility: "internal", ShapeBefore: "github.com/google/cel-go/cel", ShapeAfter: "cel.dev/cel-go/cel", PathBefore: "calc/calc.go"},
+			{Path: "calc/calc.go", Class: "import", Name: "io", Visibility: "internal", ShapeAfter: "io"},
+			{Path: "calc/calc.go", Class: "body", Name: "limit", Visibility: "internal", PathBefore: "calc/calc.go"},
+			{Path: "calc/calc.go", Class: "import", Name: "os", Visibility: "internal", ShapeBefore: "os", PathBefore: "calc/calc.go"},
+		}))
+		Expect(diff("!format", "!import")).To(Equal([]patchRow{
+			{Path: "calc/calc.go", Class: "body", Name: "Run", Visibility: "exported", PathBefore: "calc/calc.go"},
+			{Path: "calc/calc.go", Class: "body", Name: "limit", Visibility: "internal", PathBefore: "calc/calc.go"},
+		}))
+	})
+
+	It("hides import rows from the default exported visibility", func(ctx SpecContext) {
+		before := lines("package calc", "", "import \"github.com/google/cel-go/cel\"", "", "var env = cel.NewEnv")
+		after := lines("package calc", "", "import \"cel.dev/cel-go/cel\"", "", "var env = cel.NewEnv")
+		locator := memoryLocator{blobs: map[string][]byte{calcBeforeBlob: []byte(before), calcAfterBlob: []byte(after)}}
+		result, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(modifiedCalcPatch), Locator: locator, Visibility: VisibilityExported})
+		Expect(err).To(Succeed())
+		Expect(patchRows(result)).To(BeEmpty())
+		result, err = DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(modifiedCalcPatch), Locator: locator, Visibility: VisibilityInternal})
+		Expect(err).To(Succeed())
+		Expect(patchRows(result)).To(HaveLen(1))
+	})
+
 	It("fails with the locator's read error", func(ctx SpecContext) {
 		readErr := errors.New("object store unreachable")
 		_, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(modifiedCalcPatch), Locator: memoryLocator{readErr: readErr}, Visibility: VisibilityAll})
