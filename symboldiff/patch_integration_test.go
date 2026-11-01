@@ -198,6 +198,7 @@ var _ = Describe("DiffPatch", func() {
 				ShapeBefore: "method public (item (models.Item)) ( (int))", ShapeAfter: "method public (item (Item)) ( (int))",
 			},
 			{Path: "app/app.go", Class: "removed", Name: "Twin", Visibility: "exported", ShapeBefore: "method public () ( (int))", PathBefore: "app/app.go"},
+			{Path: "app/app.go", Class: "import", Name: "models", Visibility: "internal", ShapeBefore: patchModule + "/models", PathBefore: "app/app.go"},
 			{Path: "models/models.go", Class: "moved", Name: "Pure", Visibility: "exported", PathBefore: "app/app.go"},
 			{
 				Path: "models/models.go", Class: "signature", Name: "Retyped", Visibility: "exported", PathBefore: "app/app.go",
@@ -215,7 +216,7 @@ var _ = Describe("DiffPatch", func() {
 	It("refuses a change type that names no class", func(ctx SpecContext) {
 		repo := newPatchRepository()
 		_, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(patchOf(repo, "HEAD~1")), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll, ChangeTypes: ChangeTypes{"!removd"}})
-		Expect(err).To(MatchError(`change type "!removd" matches none of added, removed, signature, structure, body, moved`))
+		Expect(err).To(MatchError(`change type "!removd" matches none of added, removed, signature, structure, body, format, moved, import`))
 	})
 
 	It("reads a worktree diff's new side from the worktree and counts lines as git does", func(ctx SpecContext) {

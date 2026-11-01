@@ -21,7 +21,9 @@ var classThemes = map[Class]changeTheme{
 	ClassSignature: {icon: icons.Edit, style: uir.StyleDiffSignature},
 	ClassStructure: {icon: icons.Refactor, style: uir.StyleDiffStructure},
 	ClassBody:      {icon: icons.Code, style: uir.StyleDiffBody},
+	ClassFormat:    {icon: icons.Style, style: uir.StyleDim},
 	ClassMoved:     {icon: icons.Rename, style: uir.StyleDiffMoved},
+	ClassImport:    {icon: icons.Dependency, style: uir.StyleDiffSignature},
 }
 
 var fileThemes = map[FileStatus]changeTheme{
@@ -127,7 +129,8 @@ func (row Row) tree(stat bool) api.TextTree {
 	return clicky.Tree(label)
 }
 
-// singleShape is the one-line shape an added or removed row shows when it has no shape diff.
+// singleShape is the one-line shape an added or removed row shows when it has no shape diff, and an
+// import row's paths: old → new when re-pathed, else the one side's path.
 func (row Row) singleShape() string {
 	if len(row.ShapeDiff) > 0 {
 		return ""
@@ -138,6 +141,13 @@ func (row Row) singleShape() string {
 		shape = row.ShapeAfter
 	case ClassRemoved:
 		shape = row.ShapeBefore
+	case ClassImport:
+		shape = strings.Trim(row.ShapeBefore+" → "+row.ShapeAfter, " →")
+		if row.ShapeBefore == "" {
+			shape = "+ " + shape
+		} else if row.ShapeAfter == "" {
+			shape = "- " + shape
+		}
 	}
 	if first, _, multiline := strings.Cut(shape, "\n"); multiline {
 		return first + " …"

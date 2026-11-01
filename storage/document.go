@@ -10,11 +10,12 @@ import (
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-// DocumentFormatVersion versions documents.content. Format 10 adds producer metric values (measures);
+// DocumentFormatVersion versions documents.content. Format 11 adds a Go file's imports and its
+// package-level vars and consts to syntax documents; format 10 adds producer metric values (measures);
 // format 9 gives every symbol of a document its own key (each Go func init is keyed by its
 // discriminator); format 8 adds resolved variable types; format 6 moved implements into snapshot-level
 // facts (EffectiveImplements).
-const DocumentFormatVersion = 10
+const DocumentFormatVersion = 11
 
 // uniqueKeysFormat is the first document format whose symbol keys are unique within a document.
 const uniqueKeysFormat = 9
@@ -37,7 +38,15 @@ type DocumentContent struct {
 	Symbols       []DocumentSymbol       `json:"symbols"`
 	Occurrences   []DocumentOccurrence   `json:"occurrences"`
 	Diagnostics   []DocumentDiagnostic   `json:"diagnostics"`
+	Imports       []DocumentImport       `json:"imports,omitempty"`
 	Excluded      string                 `json:"excluded,omitempty"`
+}
+
+// DocumentImport is one import of a Go file in source order: the name it binds (the last path element
+// when unaliased, or _ or .) and its import path.
+type DocumentImport struct {
+	Alias string `json:"alias"`
+	Path  string `json:"path"`
 }
 
 // DocumentSymbol is one declared symbol. Identifier through Field carry the explorer and query

@@ -42,7 +42,7 @@ func (indexed *File) Document() storage.DocumentContent {
 		Version: storage.DocumentFormatVersion, PackagePath: indexed.PackagePath,
 		Symbols:     make([]storage.DocumentSymbol, 0, len(indexed.Nodes)),
 		Occurrences: make([]storage.DocumentOccurrence, 0, len(indexed.Calls)),
-		Diagnostics: []storage.DocumentDiagnostic{},
+		Diagnostics: []storage.DocumentDiagnostic{}, Imports: indexed.Imports,
 	}
 	for _, node := range indexed.Nodes {
 		content.Symbols = append(content.Symbols, storage.DocumentSymbol{

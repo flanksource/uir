@@ -121,7 +121,8 @@ var _ = Describe("diff on symbol deltas", func() {
 			}
 			Expect(outputs).To(Equal([3]string{tallyExported, tallyAll, tallyStatAll}))
 			Expect(decodes[0]).To(BeEmpty(), "an exported diff without signature, added, or removed rows reads no document")
-			Expect(decodes[1]).To(Equal([]string{"tally/tally.go"}), "only the new side of the file that declares the added symbol")
+			Expect(decodes[1]).To(ConsistOf("report/report.go", "report/report.go", "tally/tally.go", "tally/tally.go"),
+				"both sides of every file on both sides, whose imports an internal diff compares, and nothing of the added file")
 			Expect(decodes[2]).To(ConsistOf("report/report.go", "report/report.go", "tally/tally.go", "tally/tally.go", "tally/count.go"),
 				"line counts read both sides of every changed file")
 		},

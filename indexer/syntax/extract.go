@@ -24,6 +24,7 @@ type File struct {
 	PackagePath string
 	PackageName string
 	Nodes       []Node
+	Imports     []storage.DocumentImport
 	Calls       []Call
 	fileSet     *token.FileSet
 	content     []byte
@@ -70,14 +71,23 @@ func Extract(pathKey, packagePath string, content []byte) (File, error) {
 		PackagePath: packagePath, PackageName: file.Name.Name, fileSet: fileSet, content: content,
 		bindings: syntaxBindings(file, fileSet.File(file.Pos())),
 	}
-	imports, err := goImports(file)
+	indexed.Imports, err = goImports(file)
 	if err != nil {
 		return File{}, fmt.Errorf("read imports from %q: %w", pathKey, err)
+	}
+	imports := make(map[string]string, len(indexed.Imports))
+	for _, imported := range indexed.Imports {
+		if imported.Alias != "_" && imported.Alias != "." {
+			imports[imported.Alias] = imported.Path
+		}
 	}
 	for _, declaration := range file.Decls {
 		switch declaration := declaration.(type) {
 		case *ast.GenDecl:
 			if err := indexed.addTypes(pathKey, declaration); err != nil {
+				return File{}, err
+			}
+			if err := indexed.addValues(pathKey, declaration); err != nil {
 				return File{}, err
 			}
 			if err := indexed.addInterfaceDeclarations(pathKey, declaration); err != nil {
@@ -92,8 +102,8 @@ func Extract(pathKey, packagePath string, content []byte) (File, error) {
 	return indexed, nil
 }
 
-func goImports(file *ast.File) (map[string]string, error) {
-	imports := make(map[string]string, len(file.Imports))
+func goImports(file *ast.File) ([]storage.DocumentImport, error) {
+	imports := make([]storage.DocumentImport, 0, len(file.Imports))
 	for _, spec := range file.Imports {
 		importPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
@@ -103,11 +113,59 @@ func goImports(file *ast.File) (map[string]string, error) {
 		if spec.Name != nil {
 			alias = spec.Name.Name
 		}
-		if alias != "_" && alias != "." {
-			imports[alias] = importPath
-		}
+		imports = append(imports, storage.DocumentImport{Alias: alias, Path: importPath})
 	}
 	return imports, nil
+}
+
+// addValues extracts each name a package-level var or const declaration binds. Its shape is the
+// declared type alone, so a new value is a content change and a new type a signature change.
+func (indexed *File) addValues(pathKey string, declaration *ast.GenDecl) error {
+	if declaration.Tok != token.VAR && declaration.Tok != token.CONST {
+		return nil
+	}
+	for _, rawSpec := range declaration.Specs {
+		spec := rawSpec.(*ast.ValueSpec)
+		nativeType := ""
+		if spec.Type != nil {
+			formatted, err := FormatNode(indexed.fileSet, spec.Type)
+			if err != nil {
+				return fmt.Errorf("format type of %s in %q: %w", spec.Names[0].Name, pathKey, err)
+			}
+			nativeType = formatted
+		}
+		start, end := SpecExtent(declaration, spec)
+		for _, name := range spec.Names {
+			if name.Name == "_" {
+				continue
+			}
+			identifier := uir.Identifier{Package: indexed.PackagePath, Field: name.Name, NodeType: uir.NodeTypePackageVariable}
+			shape := strings.TrimSpace(declaration.Tok.String() + " " + name.Name + " " + nativeType)
+			facts, err := indexed.declaration(declaration.Tok.String(), ast.IsExported(name.Name), shape, name, start, end)
+			if err != nil {
+				return fmt.Errorf("describe %s %s in %q: %w", declaration.Tok, name.Name, pathKey, err)
+			}
+			node := uir.NewRecordField(name.Name, uir.RecordFieldType(nativeType), identifier).Build()
+			node.Visibility = goVisibility(name.Name)
+			indexed.Nodes = append(indexed.Nodes, newNode(node, "", len(indexed.Nodes), "", facts))
+		}
+	}
+	return nil
+}
+
+// SpecExtent is where one spec of a declaration starts and ends: the whole declaration when it is
+// ungrouped, else the spec with its doc comment.
+func SpecExtent(declaration *ast.GenDecl, spec ast.Spec) (token.Pos, token.Pos) {
+	if !declaration.Lparen.IsValid() {
+		return DocumentStart(declaration.Doc, declaration.Pos()), declaration.End()
+	}
+	switch spec := spec.(type) {
+	case *ast.TypeSpec:
+		return DocumentStart(spec.Doc, spec.Pos()), spec.End()
+	case *ast.ValueSpec:
+		return DocumentStart(spec.Doc, spec.Pos()), spec.End()
+	}
+	return spec.Pos(), spec.End()
 }
 
 func (indexed *File) addTypes(pathKey string, declaration *ast.GenDecl) error {
