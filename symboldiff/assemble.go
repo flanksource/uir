@@ -14,8 +14,9 @@ var manifestNames = []string{"go.mod", "go.sum"}
 
 // assemble groups rows under their files and files under their packages, filters by visibility
 // while counting hidden rows, and totals line counts. A file whose bytes are equal on both sides and
-// that reports no row is omitted.
-func assemble(files []changedFile, rows []reportedRow, attribution *lineAttribution, markers coverageMarkers, manifests []FileDiff, rootKey string) []PackageDiff {
+// that reports no row is omitted. With hideEmptyFiles (a change-type filter), so is every file left
+// with no visible row, counted in its package's HiddenFiles; package totals still include it.
+func assemble(files []changedFile, rows []reportedRow, attribution *lineAttribution, markers coverageMarkers, manifests []FileDiff, rootKey string, hideEmptyFiles bool) []PackageDiff {
 	byPath := map[string]*FileDiff{}
 	packageOf := map[string]string{}
 	rowsOf := map[string][]reportedRow{}
@@ -54,7 +55,7 @@ func assemble(files []changedFile, rows []reportedRow, attribution *lineAttribut
 		}
 		pkg.Files = append(pkg.Files, *file)
 	}
-	return sortedPackages(packages, attribution != nil)
+	return sortedPackages(packages, attribution != nil, hideEmptyFiles)
 }
 
 func (file changedFile) reported() *fileSide {
@@ -81,7 +82,8 @@ func newFileDiff(file changedFile, markers coverageMarkers) FileDiff {
 }
 
 // totalFile sums every row reported under the file, hidden ones included, plus its file scope. Any
-// row whose segments could not be read fails the file's counts with the reason.
+// row whose segments could not be read fails the file's counts with the reason. A moved-away row
+// counts under the file the symbol moved to, so it adds nothing here.
 func totalFile(diff *FileDiff, rows []reportedRow, attribution lineAttribution) {
 	if reason := attribution.failures[diff.Path]; reason != "" {
 		diff.LinesError = reason
@@ -90,6 +92,9 @@ func totalFile(diff *FileDiff, rows []reportedRow, attribution lineAttribution) 
 	scope := attribution.fileScope[diff.Path]
 	total := scope
 	for _, row := range rows {
+		if row.row.MovedAway {
+			continue
+		}
 		if reason := attribution.pairFailures[row.pair]; reason != "" {
 			diff.LinesError = reason
 			return
@@ -101,7 +106,7 @@ func totalFile(diff *FileDiff, rows []reportedRow, attribution lineAttribution) 
 	diff.FileScope, diff.Lines = &scope, &total
 }
 
-func sortedPackages(packages map[string]*PackageDiff, stat bool) []PackageDiff {
+func sortedPackages(packages map[string]*PackageDiff, stat, hideEmptyFiles bool) []PackageDiff {
 	result := make([]PackageDiff, 0, len(packages))
 	for _, pkg := range packages {
 		sort.Slice(pkg.Files, func(i, j int) bool { return pkg.Files[i].Path < pkg.Files[j].Path })
@@ -117,6 +122,18 @@ func sortedPackages(packages map[string]*PackageDiff, stat bool) []PackageDiff {
 			}
 			if complete {
 				pkg.Lines = &total
+			}
+		}
+		if hideEmptyFiles {
+			shown := pkg.Files[:0]
+			for _, file := range pkg.Files {
+				if len(file.Rows) > 0 {
+					shown = append(shown, file)
+				}
+			}
+			pkg.HiddenFiles, pkg.Files = len(pkg.Files)-len(shown), shown
+			if len(pkg.Files) == 0 {
+				continue
 			}
 		}
 		result = append(result, *pkg)

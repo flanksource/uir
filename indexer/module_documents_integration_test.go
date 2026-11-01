@@ -61,6 +61,40 @@ func mustJSON(value any) storage.JSON {
 	return storage.JSON(encoded)
 }
 
+// documentDeltas lists a snapshot's document deltas as "operation path", in path order.
+func documentDeltas(database *gorm.DB, snapshotID string) []string {
+	GinkgoHelper()
+	var rows []storage.DocumentDelta
+	Expect(database.Where("snapshot_ordinal = ?", loadSnapshot(database, snapshotID).Ordinal).Order("path_key").Find(&rows).Error).To(Succeed())
+	deltas := make([]string, len(rows))
+	for i, row := range rows {
+		deltas[i] = string(row.Operation) + " " + row.PathKey
+	}
+	return deltas
+}
+
+func coverageInputHash(database *gorm.DB, snapshotID, packagePath string) string {
+	GinkgoHelper()
+	var coverage storage.PackageCoverage
+	Expect(database.Where("snapshot_id = ? AND package_path = ?", snapshotID, packagePath).Take(&coverage).Error).To(Succeed())
+	return coverage.InputHash
+}
+
+// activeContents is each active document's coverage and decoded content, which do not depend on
+// database-local ids.
+func activeContents(ctx context.Context, database *gorm.DB, snapshotID string) map[string]any {
+	GinkgoHelper()
+	active, err := storage.ActiveDocuments(ctx, database, uuid.MustParse(snapshotID), storage.ActiveDocumentOptions{Content: true})
+	Expect(err).ToNot(HaveOccurred())
+	contents := map[string]any{}
+	for path, document := range active {
+		var content any
+		Expect(json.Unmarshal(document.Document.Content, &content)).To(Succeed())
+		contents[path] = []any{document.Document.Coverage, content}
+	}
+	return contents
+}
+
 func activeDocumentIDs(ctx context.Context, database *gorm.DB, snapshotID string) map[string]uuid.UUID {
 	GinkgoHelper()
 	active, err := storage.ActiveDocuments(ctx, database, uuid.MustParse(snapshotID), storage.ActiveDocumentOptions{Content: true})
@@ -116,12 +150,55 @@ var _ = Describe("document publication", func() {
 			writeFile(filepath.Join(workspace, "checkout.go"), "package shop\n\nfunc Checkout(c *Cart) int { return 2 * len(c.Items) }\n")
 			edited, err := engine.IndexModules(ctx, ModuleOptions{Path: workspace, Reason: storage.ReasonAdd})
 			Expect(err).ToNot(HaveOccurred())
-			Expect([]int{edited[0].ParsedFiles, edited[0].ReusedFiles}).To(Equal([]int{2, 1}), "an edit re-extracts its whole package")
+			Expect([]int{edited[0].ParsedFiles, edited[0].ReusedFiles}).To(Equal([]int{1, 2}),
+				"an edit re-renders its package and inserts only the changed file's document")
 			current := activeDocumentIDs(ctx, database, edited[0].SnapshotID)
 			Expect(current["tax/tax.go"]).To(Equal(original["tax/tax.go"]))
-			Expect(current["cart.go"]).ToNot(Equal(original["cart.go"]))
-			Expect(countRows(database, &storage.Document{}, "1 = 1")).To(Equal(int64(5)))
+			Expect(current["cart.go"]).To(Equal(original["cart.go"]), "an unchanged file of a re-keyed package keeps its document")
+			Expect(current["checkout.go"]).ToNot(Equal(original["checkout.go"]))
+			Expect(countRows(database, &storage.Document{}, "1 = 1")).To(Equal(int64(4)))
+			Expect(documentDeltas(database, edited[0].SnapshotID)).To(Equal([]string{"set checkout.go"}))
 			Expect(activeDocumentIDs(ctx, database, first[0].SnapshotID)).To(Equal(original), "history keeps its documents")
+		},
+		Entry("SQLite", indexerSQLiteOptions),
+		Entry("PostgreSQL", indexerPostgresOptions),
+	)
+
+	DescribeTable("keeps the documents and postings of a package re-keyed by an API change it does not read, and matches a full index",
+		func(ctx SpecContext, options func() storage.DBOptions) {
+			database := openIndexerDB(ctx, options())
+			workspace := GinkgoT().TempDir()
+			Expect(os.MkdirAll(filepath.Join(workspace, "q"), 0o755)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(workspace, "p"), 0o755)).To(Succeed())
+			writeFile(filepath.Join(workspace, "go.mod"), "module example.org/rates\n\ngo 1.26\n")
+			writeFile(filepath.Join(workspace, "q", "q.go"), "package q\n\nfunc Rate() int { return 20 }\n")
+			writeFile(filepath.Join(workspace, "p", "price.go"), "package p\n\nimport \"example.org/rates/q\"\n\nfunc Price(n int) int { return n * q.Rate() }\n")
+			writeFile(filepath.Join(workspace, "p", "total.go"), "package p\n\nfunc Total(items []int) (sum int) {\n\tfor _, item := range items {\n\t\tsum += Price(item)\n\t}\n\treturn sum\n}\n")
+			engine, err := New(database)
+			Expect(err).ToNot(HaveOccurred())
+			first := indexOnce(ctx, engine, workspace)
+			original := activeDocumentIDs(ctx, database, first.SnapshotID)
+			documents, postings := countRows(database, &storage.Document{}, "1 = 1"), countRows(database, &storage.SymbolPosting{}, "1 = 1")
+
+			writeFile(filepath.Join(workspace, "q", "q.go"), "package q\n\nfunc Rate() int { return 20 }\n\nfunc Extra() int { return 1 }\n")
+			second := indexOnce(ctx, engine, workspace)
+			Expect([]int{second.ParsedFiles, second.ReusedFiles}).To(Equal([]int{1, 2}))
+			Expect(coverageInputHash(database, second.SnapshotID, "example.org/rates/p")).ToNot(Equal(coverageInputHash(database, first.SnapshotID, "example.org/rates/p")),
+				"q's export shape re-keys its importer p")
+			current := activeDocumentIDs(ctx, database, second.SnapshotID)
+			Expect([]uuid.UUID{current["p/price.go"], current["p/total.go"]}).To(Equal([]uuid.UUID{original["p/price.go"], original["p/total.go"]}))
+			Expect(documentDeltas(database, second.SnapshotID)).To(Equal([]string{"set q/q.go"}))
+			Expect(countRows(database, &storage.Document{}, "1 = 1")).To(Equal(documents + 1))
+			ordinals, err := storage.DocumentOrdinals(ctx, database, []uuid.UUID{current["q/q.go"]})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(countRows(database, &storage.SymbolPosting{}, "1 = 1")).To(Equal(postings+countRows(database, &storage.SymbolPosting{}, "document_ordinal = ?", ordinals[current["q/q.go"]])),
+				"only q's new document gets postings")
+
+			full := openIndexerDB(ctx, indexerSQLiteOptions())
+			fullEngine, err := New(full)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(activeContents(ctx, database, second.SnapshotID)).To(Equal(activeContents(ctx, full, indexOnce(ctx, fullEngine, workspace).SnapshotID)),
+				"incremental membership binds the documents a full index renders")
 		},
 		Entry("SQLite", indexerSQLiteOptions),
 		Entry("PostgreSQL", indexerPostgresOptions),

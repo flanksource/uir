@@ -33,6 +33,7 @@ const (
 
 // ModuleSnapshotView is one snapshot of a checkout. Its change counts are against BaseSnapshotID.
 type ModuleSnapshotView struct {
+	AnalysisMode   AnalysisMode   `json:"analysis_mode,omitempty"`
 	ID             uuid.UUID      `json:"id"`
 	RootKey        string         `json:"root_key"`
 	CanonicalPath  string         `json:"canonical_path"`
@@ -151,7 +152,8 @@ func ModuleSnapshots(ctx context.Context, database *gorm.DB, options ModuleSnaps
 			return nil, 0, err
 		}
 		row := ModuleSnapshotView{
-			ID: snapshot.ID, RootKey: root.RootKey, CanonicalPath: location.CanonicalPath,
+			AnalysisMode: snapshot.AnalysisMode,
+			ID:           snapshot.ID, RootKey: root.RootKey, CanonicalPath: location.CanonicalPath,
 			BaseSnapshotID: snapshot.BaseSnapshotID, Revision: snapshot.Revision, GitCommit: snapshot.GitCommit,
 			ModuleVersion: snapshot.ModuleVersion, LastModifiedAt: snapshot.LastModifiedAt,
 			WorktreeState: snapshot.WorktreeState, Coverage: snapshot.Coverage, Reason: snapshot.Reason, IndexStartedAt: snapshot.IndexStartedAt,

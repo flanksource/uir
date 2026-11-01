@@ -1,3 +1,5 @@
+//go:build hack
+
 package main
 
 import (
@@ -29,7 +31,7 @@ func executeCase(ctx context.Context, descriptor string) (returnErr error) {
 		}
 		returnErr = errors.Join(returnErr, writeJSON(filepath.Join(entry.Directory, "result.json"), result), json.NewEncoder(os.Stdout).Encode(result))
 	}()
-	stop, err := startProfiles(&result, entry.Producer == "go")
+	stop, err := startProfiles(&result, entry.Producer == "go", true)
 	if err != nil {
 		return err
 	}

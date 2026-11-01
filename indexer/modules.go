@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/flanksource/gavel/models"
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -36,6 +37,10 @@ type ModuleResult struct {
 	ParsedFiles int    `json:"parsed_files"`
 	ReusedFiles int    `json:"reused_files"`
 	Unchanged   bool   `json:"unchanged"`
+	// Warnings are the snapshot's diagnostics in lint's shape, with root-relative files: a uir/index
+	// warning for each file published with a degraded document, a uir/coverage warning for each load
+	// or type error. They do not fail the module.
+	Warnings []models.Violation `json:"warnings,omitempty" pretty:"hide"`
 	// Error is why a module of a task run failed; its other counts are then zero.
 	Error string `json:"error,omitempty"`
 }
@@ -159,8 +164,23 @@ func (indexer *Indexer) extractOrReuse(ctx context.Context, check *headCheck, ro
 		_, err := check.confirmSnapshot(ctx, root.LocalPath, head)
 		return moduleExtraction{root: root, reusedHead: head}, err
 	}
-	extraction, err := extractModule(ctx, indexer.loadPackages, root, options.IncludeTests)
+	var base storage.ModuleSnapshot
+	var packages map[string]basePackage
+	if !options.Force {
+		var found bool
+		var err error
+		if base, found, err = loadHead(ctx, indexer.database, root); err != nil {
+			return moduleExtraction{}, err
+		}
+		if found {
+			if packages, err = basePackages(ctx, indexer.database, base); err != nil {
+				return moduleExtraction{}, err
+			}
+		}
+	}
+	extraction, err := indexer.extractFromBase(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: options.IncludeTests, base: packages, baseSnapshot: base})
 	if err == nil {
+		extraction.baseSnapshotID = base.ID
 		check.confirmExtraction(extraction)
 	}
 	return extraction, err
@@ -211,7 +231,7 @@ func countDependencies(ctx context.Context, roots []discoveredRoot) {
 
 func discoverRequestedModules(ctx context.Context, options ModuleOptions) ([]discoveredRoot, error) {
 	if options.ExactLocation == "" {
-		return discoverModules(ctx, options.Path, options.IncludeTests)
+		return discoverModules(ctx, options.Path, discoveryOptions{IncludeTests: options.IncludeTests})
 	}
 	root, err := discoverModule(ctx, options.Path, options.ExactLocation, options.IncludeTests)
 	if err != nil {

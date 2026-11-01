@@ -124,15 +124,19 @@ var PersistentBodies = []PersistentBodyMixin{
 
 type MethodNode struct {
 	nodeBase
-	Visibility  Visibility     `json:"visibility,omitempty"`
-	Params      ParamsDef      `json:"params,omitempty" gorm:"type:text"`
-	Returns     ParamsDef      `json:"returns,omitempty" gorm:"type:text"`
-	Errors      []ASTError     `json:"errors,omitempty" gorm:"serializer:json"`
-	Body        *BlockStmt     `json:"body,omitempty" gorm:"serializer:json"`
-	IsAsync     bool           `json:"isAsync,omitempty"`
-	IsGenerator bool           `json:"isGenerator,omitempty"`
-	TypeParams  []TypeParam    `json:"typeParams,omitempty" gorm:"serializer:json"`
-	ReturnType  *TypeReference `json:"returnType,omitempty" gorm:"serializer:json"`
+	SQLDependencies []SQLDependency `json:"sqlDependencies,omitempty"`
+	// SQLRuntimeDependencies and SQLQuotedIdentifierOff describe a SQL module.
+	SQLRuntimeDependencies []SQLRuntimeDependency `json:"sqlRuntimeDependencies,omitempty"`
+	SQLQuotedIdentifierOff bool                   `json:"sqlQuotedIdentifierOff,omitempty"`
+	Visibility             Visibility             `json:"visibility,omitempty"`
+	Params                 ParamsDef              `json:"params,omitempty" gorm:"type:text"`
+	Returns                ParamsDef              `json:"returns,omitempty" gorm:"type:text"`
+	Errors                 []ASTError             `json:"errors,omitempty" gorm:"serializer:json"`
+	Body                   *BlockStmt             `json:"body,omitempty" gorm:"serializer:json"`
+	IsAsync                bool                   `json:"isAsync,omitempty"`
+	IsGenerator            bool                   `json:"isGenerator,omitempty"`
+	TypeParams             []TypeParam            `json:"typeParams,omitempty" gorm:"serializer:json"`
+	ReturnType             *TypeReference         `json:"returnType,omitempty" gorm:"serializer:json"`
 }
 
 func (m MethodNode) IsPrivate() bool {

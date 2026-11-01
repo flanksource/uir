@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/flanksource/commons-db/connection"
+	"github.com/flanksource/commons-db/cmd/query/connections"
+	"github.com/flanksource/commons-db/cmd/query/profiles"
+	dbcontext "github.com/flanksource/commons-db/context"
+	dbquery "github.com/flanksource/commons-db/query"
 	"github.com/flanksource/uir/databasecatalog"
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
@@ -22,52 +28,52 @@ type databaseCapture struct {
 	Ordinal   int64     `json:"ordinal"`
 }
 
+// The commons-db connection service registers its `connection` entity in clicky's process-wide
+// registry, so it is built once and resolves the database through the runtime of the command tree
+// built last.
+var (
+	boundConnectionRuntime atomic.Pointer[commandRuntime]
+	connectionServiceOnce  sync.Once
+	connectionService      *connections.Service
+	connectionServiceErr   error
+)
+
+// bindConnectionService binds the connection service to runtime, creating it and registering its
+// clicky entity on first use. Neither opens the database.
+func bindConnectionService(runtime *commandRuntime) (*connections.Service, error) {
+	boundConnectionRuntime.Store(runtime)
+	connectionServiceOnce.Do(func() {
+		connectionService, connectionServiceErr = connections.New(connections.Options{
+			Database: func() (*gorm.DB, error) {
+				return boundConnectionRuntime.Load().Database(context.Background())
+			},
+			Context:    func() dbcontext.Context { return boundConnectionRuntime.Load().connectionContext() },
+			DecodeBody: profiles.DecodeRequestBody,
+			// UIR has no profile store, so the dashboard counts no profiles for any connection.
+			Profiles: func(context.Context) ([]dbquery.Profile, error) { return []dbquery.Profile{}, nil },
+		})
+		if connectionServiceErr == nil {
+			connectionService.RegisterClicky()
+		}
+	})
+	return connectionService, connectionServiceErr
+}
+
+// connectionContext carries the database once it is open, as the query app's runtime context does;
+// the service opens the database through its Database provider before any call that needs it here.
+func (runtime *commandRuntime) connectionContext() dbcontext.Context {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	ctx := dbcontext.New()
+	if runtime.database != nil {
+		ctx = ctx.WithDB(runtime.database, nil)
+	}
+	return ctx
+}
+
 func registerConnectionRoutes(mux *http.ServeMux, runtime *commandRuntime) {
-	mux.HandleFunc("/api/v1/connections/schema", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			methodNotAllowed(w)
-			return
-		}
-		writeJSON(w, http.StatusOK, databasecatalog.ConnectionSchemas())
-	})
-	mux.HandleFunc("/api/v1/connections", func(w http.ResponseWriter, r *http.Request) {
-		database, ok := connectionDatabase(w, r, runtime)
-		if !ok {
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			items, err := storage.ListConnections(r.Context(), database)
-			if err != nil {
-				apiFailure(w, http.StatusInternalServerError, "list_failed", "Could not list connections")
-				return
-			}
-			views := make([]databasecatalog.ConnectionView, 0, len(items))
-			for _, item := range items {
-				views = append(views, databasecatalog.ViewConnection(item))
-			}
-			writeJSON(w, http.StatusOK, views)
-		case http.MethodPost:
-			var input databasecatalog.ConnectionInput
-			if !decodeBody(w, r, &input) {
-				return
-			}
-			item, err := databasecatalog.ApplyConnection(nil, input)
-			if err != nil {
-				apiFailure(w, http.StatusBadRequest, "invalid_connection", err.Error())
-				return
-			}
-			if err := storage.CreateConnection(r.Context(), database, &item); err != nil {
-				apiFailure(w, http.StatusConflict, "save_failed", "Could not save connection; check its name and type")
-				return
-			}
-			writeJSON(w, http.StatusCreated, databasecatalog.ViewConnection(item))
-		default:
-			methodNotAllowed(w)
-		}
-	})
-	mux.HandleFunc("/api/v1/connections/", func(w http.ResponseWriter, r *http.Request) {
-		connectionItem(w, r, runtime)
+	mux.HandleFunc("/api/v1/database-modules/connections/", func(w http.ResponseWriter, r *http.Request) {
+		connectionDatabases(w, r, runtime)
 	})
 	mux.HandleFunc("/api/v1/database-modules/diff", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -148,8 +154,18 @@ func connectionDatabase(w http.ResponseWriter, r *http.Request, runtime *command
 	return database, true
 }
 
-func connectionItem(w http.ResponseWriter, r *http.Request, runtime *commandRuntime) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/connections/"), "/")
+// connectionDatabases lists the databases a saved SQL connection can reach, for registering one as a
+// database module.
+func connectionDatabases(w http.ResponseWriter, r *http.Request, runtime *commandRuntime) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/database-modules/connections/"), "/")
+	if len(parts) != 2 || parts[1] != "databases" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
 	id, err := uuid.Parse(parts[0])
 	if err != nil {
 		apiFailure(w, http.StatusBadRequest, "invalid_id", "Connection ID must be a UUID")
@@ -164,81 +180,16 @@ func connectionItem(w http.ResponseWriter, r *http.Request, runtime *commandRunt
 		apiFailure(w, http.StatusNotFound, "not_found", "Connection was not found")
 		return
 	}
-	if len(parts) == 2 {
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w)
-			return
-		}
-		switch parts[1] {
-		case "test":
-			result, err := connection.ProbeModel(r.Context(), item)
-			if err != nil {
-				apiFailure(w, http.StatusUnprocessableEntity, "connection_test_failed", "Connection test failed for "+item.Type+"; check its endpoint and credentials")
-				return
-			}
-			writeJSON(w, http.StatusOK, result)
-		case "databases":
-			if !databasecatalog.IsSQL(item.Type) {
-				apiFailure(w, http.StatusBadRequest, "not_sql", "This connection has no databases to select")
-				return
-			}
-			databases, err := databasecatalog.Databases(r.Context(), item)
-			if err != nil {
-				apiFailure(w, http.StatusUnprocessableEntity, "database_list_failed", "Could not list databases for this connection")
-				return
-			}
-			writeJSON(w, http.StatusOK, databases)
-		default:
-			http.NotFound(w, r)
-		}
+	if !databasecatalog.IsSQL(item.Type) {
+		apiFailure(w, http.StatusBadRequest, "not_sql", "This connection has no databases to select")
 		return
 	}
-	if len(parts) != 1 {
-		http.NotFound(w, r)
+	databases, err := databasecatalog.Databases(r.Context(), item)
+	if err != nil {
+		apiFailure(w, http.StatusUnprocessableEntity, "database_list_failed", "Could not list databases for this connection")
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, databasecatalog.ViewConnection(item))
-	case http.MethodPut:
-		var input databasecatalog.ConnectionInput
-		if !decodeBody(w, r, &input) {
-			return
-		}
-		updated, err := databasecatalog.ApplyConnection(&item, input)
-		if err != nil {
-			apiFailure(w, http.StatusBadRequest, "invalid_connection", err.Error())
-			return
-		}
-		if updated.Type != item.Type || updated.URL != item.URL {
-			var count int64
-			if err := database.WithContext(r.Context()).Model(&storage.DatabaseModule{}).Where("connection_id = ?", id).Count(&count).Error; err != nil {
-				apiFailure(w, http.StatusInternalServerError, "lookup_failed", "Could not check dependent modules")
-				return
-			}
-			if count != 0 {
-				apiFailure(w, http.StatusConflict, "dependent_modules", "Remove dependent database modules before changing the endpoint or type")
-				return
-			}
-		}
-		if err := storage.UpdateConnection(r.Context(), database, updated); err != nil {
-			apiFailure(w, http.StatusInternalServerError, "save_failed", "Could not update connection")
-			return
-		}
-		writeJSON(w, http.StatusOK, databasecatalog.ViewConnection(updated))
-	case http.MethodDelete:
-		if err := storage.DeleteConnection(r.Context(), database, id); err != nil {
-			status := http.StatusInternalServerError
-			if strings.Contains(err.Error(), "database modules") {
-				status = http.StatusConflict
-			}
-			apiFailure(w, status, "delete_failed", "Remove dependent database modules before deleting this connection")
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		methodNotAllowed(w)
-	}
+	writeJSON(w, http.StatusOK, databases)
 }
 
 func createDatabaseModule(w http.ResponseWriter, r *http.Request, database *gorm.DB) {

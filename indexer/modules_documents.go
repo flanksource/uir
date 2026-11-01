@@ -3,13 +3,11 @@ package indexer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"sort"
 
 	"github.com/flanksource/uir/storage"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -77,129 +75,6 @@ func createSiblingShapes(ctx context.Context, database *gorm.DB, snapshot storag
 	return nil
 }
 
-// pendingDocument is a document publication will insert or, under force, verify.
-type pendingDocument struct {
-	document  storage.Document
-	extracted extractedDocument
-	existing  *storage.Document
-}
-
-// publishDocuments ensures the document keyed (root, path, package input hash) exists for every
-// file. An existing document is reused unless force re-verifies it, in which case the fresh
-// extraction must equal it: a different result needs a new indexer version. New documents get their
-// symbol rows and handles first, then the next document ordinals, then their postings; postings of a
-// document another writer inserted are never written twice. It returns the handle of every symbol the
-// new documents name.
-func publishDocuments(ctx context.Context, database *gorm.DB, publication snapshotPublication, current map[string]storage.SourceRevision, result *ModuleResult) (map[string]int64, error) {
-	pending, err := pendingDocuments(ctx, database, publication, current, result)
-	if err != nil {
-		return nil, err
-	}
-	handles, err := ensureSymbols(ctx, database, publication.extraction.symbols, pending)
-	if err != nil {
-		return nil, err
-	}
-	if err := assignDocumentOrdinals(ctx, database, pending); err != nil {
-		return nil, err
-	}
-	for _, next := range pending {
-		if err := publishDocument(ctx, database, next, publication.root.Ordinal, handles); err != nil {
-			return nil, err
-		}
-		result.ParsedFiles++
-	}
-	return handles, nil
-}
-
-// pendingDocuments validates every file's document against its revision and the database's kind
-// registry, and returns the ones the publication must insert, or verify under force, counting the rest
-// as reused.
-func pendingDocuments(ctx context.Context, database *gorm.DB, publication snapshotPublication, current map[string]storage.SourceRevision, result *ModuleResult) ([]pendingDocument, error) {
-	extraction := publication.extraction
-	if extraction.indexerVersion == "" {
-		return nil, fmt.Errorf("publish module %q: extraction names no indexer version", extraction.root.RootKey)
-	}
-	kinds, err := storage.LoadSymbolKinds(ctx, database)
-	if err != nil {
-		return nil, err
-	}
-	var pending []pendingDocument
-	for _, file := range extraction.root.Files {
-		extracted, found := extraction.documents[file.PathKey]
-		if !found {
-			return nil, fmt.Errorf("no document was extracted for %q", file.PathKey)
-		}
-		revision := current[file.PathKey]
-		document := storage.Document{
-			ID: uuid.New(), RootID: revision.RootID, PathKey: file.PathKey, SourceRevisionID: revision.ID,
-			PackagePath: file.PackagePath, InputHash: extracted.inputHash, IndexerVersion: extraction.indexerVersion,
-			Coverage: extracted.coverage, SymbolCount: extracted.symbolCount, OccurrenceCount: extracted.occurrenceCount,
-			Content: extracted.content,
-		}
-		if _, err := storage.DecodeDocument(document, revision, storage.WithKinds(kinds)); err != nil {
-			return nil, fmt.Errorf("validate extracted document: %w", err)
-		}
-		existing, found, err := loadDocument(ctx, database, revision.RootID, file.PathKey, extracted.inputHash)
-		if err != nil {
-			return nil, err
-		}
-		if found && existing.SourceRevisionID != revision.ID {
-			return nil, fmt.Errorf("document %s for %q describes revision %s, expected %s", existing.ID, file.PathKey, existing.SourceRevisionID, revision.ID)
-		}
-		switch {
-		case !found:
-			pending = append(pending, pendingDocument{document: document, extracted: extracted})
-		case publication.force:
-			pending = append(pending, pendingDocument{document: document, extracted: extracted, existing: &existing})
-		default:
-			result.ReusedFiles++
-		}
-	}
-	return pending, nil
-}
-
-// assignDocumentOrdinals numbers the documents this publication inserts from one past the largest
-// stored ordinal, in file order.
-func assignDocumentOrdinals(ctx context.Context, database *gorm.DB, pending []pendingDocument) error {
-	next, err := storage.NextDocumentOrdinal(ctx, database)
-	if err != nil {
-		return err
-	}
-	for i := range pending {
-		if pending[i].existing == nil {
-			pending[i].document.Ordinal = next
-			next++
-		}
-	}
-	return nil
-}
-
-func publishDocument(ctx context.Context, database *gorm.DB, next pendingDocument, rootOrdinal int32, handles map[string]int64) error {
-	document := next.document
-	if next.existing == nil {
-		inserted, err := storage.CreateDocument(ctx, database, &document)
-		if err != nil {
-			return err
-		}
-		if inserted {
-			return createPostings(ctx, database, document, rootOrdinal, next.extracted.postings, handles)
-		}
-		stored, found, err := loadDocument(ctx, database, document.RootID, document.PathKey, document.InputHash)
-		if err != nil || !found {
-			return errors.Join(fmt.Errorf("load the document another publisher stored for %q", document.PathKey), err)
-		}
-		next.existing = &stored
-	}
-	same, err := sameJSON(next.existing.Content, document.Content)
-	if err != nil {
-		return fmt.Errorf("compare document for %q: %w", document.PathKey, err)
-	}
-	if !same || next.existing.Coverage != document.Coverage {
-		return fmt.Errorf("document for %q under input hash %s changed without an indexer version change", document.PathKey, document.InputHash)
-	}
-	return nil
-}
-
 // createPostings writes a new document's postings under its ordinal, its root's ordinal, and each
 // symbol's handle.
 func createPostings(ctx context.Context, database *gorm.DB, document storage.Document, rootOrdinal int32, postings []extractedPosting, handles map[string]int64) error {
@@ -222,16 +97,50 @@ func createPostings(ctx context.Context, database *gorm.DB, document storage.Doc
 	return nil
 }
 
-// ensureSymbols gives the symbol rows the pending documents need their handles and upserts them,
-// owners before the symbols they own, refreshing the derived search_name and visibility of existing
-// rows, and re-reads them: an existing row must carry exactly the expected canonical key, facts, and
-// handle. It returns each needed symbol's handle.
-func ensureSymbols(ctx context.Context, database *gorm.DB, symbols map[string]storage.Symbol, pending []pendingDocument) (map[string]int64, error) {
-	needed := map[string]storage.Symbol{}
+// neededSymbols is every symbol id the pending documents name, and every id an implements fact names
+// that no stored row has yet, with its owners; stored are the handles of the implements ids that
+// already have rows, which publication does not rewrite.
+func neededSymbols(ctx context.Context, database *gorm.DB, extraction moduleExtraction, pending []pendingDocument) (map[string]bool, map[string]int64, error) {
+	needed := map[string]bool{}
 	for _, next := range pending {
 		for _, id := range next.extracted.symbolIDs {
-			needed[id] = symbols[id]
+			needed[id] = true
 		}
+	}
+	facts := map[string]bool{}
+	for _, fact := range extraction.implements {
+		for _, id := range []string{fact.typeID, fact.interfaceID} {
+			if !needed[id] {
+				facts[id] = true
+			}
+		}
+	}
+	stored, err := storage.StoredSymbolHandles(ctx, database, sortedKeys(facts))
+	if err != nil {
+		return nil, nil, err
+	}
+	for id := range facts {
+		if _, found := stored[id]; found {
+			continue
+		}
+		if _, known := extraction.symbols[id]; !known {
+			return nil, nil, fmt.Errorf("implements fact names symbol %s, which extraction did not resolve", id)
+		}
+		for owner := &id; owner != nil && !needed[*owner]; owner = extraction.symbols[*owner].OwnerID {
+			needed[*owner] = true
+		}
+	}
+	return needed, stored, nil
+}
+
+// ensureSymbols gives the needed symbol rows their handles and upserts them, owners before the
+// symbols they own, refreshing the derived search_name and visibility of existing rows, and re-reads
+// them: an existing row must carry exactly the expected canonical key, facts, and handle. It returns
+// each needed symbol's handle.
+func ensureSymbols(ctx context.Context, database *gorm.DB, symbols map[string]storage.Symbol, wanted map[string]bool) (map[string]int64, error) {
+	needed := map[string]storage.Symbol{}
+	for id := range wanted {
+		needed[id] = symbols[id]
 	}
 	if len(needed) == 0 {
 		return map[string]int64{}, nil
@@ -297,18 +206,6 @@ func sameSymbol(stored, expected storage.Symbol) error {
 		return fmt.Errorf("symbol %s (%s) is stored with different facts than extraction derived", stored.ID, expected.CanonicalKey)
 	}
 	return nil
-}
-
-func loadDocument(ctx context.Context, database *gorm.DB, rootID uuid.UUID, pathKey, inputHash string) (storage.Document, bool, error) {
-	var document storage.Document
-	err := database.WithContext(ctx).Where("root_id = ? AND path_key = ? AND input_hash = ?", rootID, pathKey, inputHash).First(&document).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return storage.Document{}, false, nil
-	}
-	if err != nil {
-		return storage.Document{}, false, fmt.Errorf("load document for %q: %w", pathKey, err)
-	}
-	return document, true, nil
 }
 
 func sameJSON(left, right storage.JSON) (bool, error) {

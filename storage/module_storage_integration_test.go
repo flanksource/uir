@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"gorm.io/gorm"
 )
 
 func digest(value string) string {
@@ -41,10 +42,26 @@ func sourceRevision(root storage.ModuleRoot, path, content string) storage.Sourc
 var documentOrdinals atomic.Int64
 
 func syntaxDocument(revision storage.SourceRevision, inputHash string) storage.Document {
-	return storage.Document{
+	GinkgoHelper()
+	document := storage.Document{
 		ID: uuid.New(), RootID: revision.RootID, PathKey: revision.PathKey, SourceRevisionID: revision.ID,
 		PackagePath: revision.PackagePath, InputHash: inputHash, IndexerVersion: "test", Coverage: storage.CoverageSyntax,
 		Content: storage.JSON(`{"version":1}`), Ordinal: documentOrdinals.Add(1),
+	}
+	documentDigest, err := storage.DocumentDigest(document)
+	Expect(err).ToNot(HaveOccurred())
+	document.ContentDigest = &documentDigest
+	return document
+}
+
+// bindDocuments writes a set document delta binding each document's path in the snapshot.
+func bindDocuments(database *gorm.DB, snapshot storage.ModuleSnapshot, documents ...storage.Document) {
+	GinkgoHelper()
+	for _, document := range documents {
+		ordinal := document.Ordinal
+		Expect(database.Create(&storage.DocumentDelta{
+			SnapshotOrdinal: snapshot.Ordinal, RootID: snapshot.RootID, PathKey: document.PathKey, DocumentOrdinal: &ordinal, Operation: storage.SourceSet,
+		}).Error).To(Succeed())
 	}
 }
 
@@ -73,7 +90,7 @@ var _ = Describe("module root storage", func() {
 		} {
 			Expect(database.Create(&delta).Error).To(Succeed())
 		}
-		sources, err := storage.EffectiveSources(ctx, database, child.ID)
+		sources, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: child.ID})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(sources).To(Equal(map[string]storage.SourceRevision{"service.go": changed}))
 		mismatched := storage.SourceDelta{SnapshotID: child.ID, RootID: root.ID, PathKey: "renamed.go", RevisionID: &original.ID, Operation: storage.SourceSet}

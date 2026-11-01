@@ -9,6 +9,7 @@ import (
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/clicky/api/icons"
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/indexer/syntax"
 )
 
 type moduleQueryDisplay struct {
@@ -77,9 +78,6 @@ func (display moduleQueryDisplay) Tree() api.TreeNode {
 	}
 	for _, coverage := range display.result.Coverage {
 		root.children = append(root.children, &moduleQueryTreeNode{label: api.Text{}.Add(icons.Warning).Space().Append(coverage.PackagePath, uir.StyleWarning).Space().Append(coverage.Coverage, uir.StyleMuted)})
-	}
-	for _, warning := range display.result.Warnings {
-		root.children = append(root.children, &moduleQueryTreeNode{label: missingHeadLabel(warning)})
 	}
 	return root
 }
@@ -244,6 +242,9 @@ func querySymbolName(row moduleQueryRow) string {
 		name := row.identifier.GetName()
 		if row.identifier.Type != "" && row.identifier.Method != "" {
 			name = row.identifier.Type + "." + name
+		}
+		if syntax.PackageInit(row.identifier) {
+			return name
 		}
 		return name + row.identifier.Signature
 	}

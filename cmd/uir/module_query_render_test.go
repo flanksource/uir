@@ -7,12 +7,23 @@ import (
 	"strings"
 
 	"github.com/flanksource/clicky"
+	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/query"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("query symbol rendering", func() {
+	It("names a func init without the discriminator its signature slot holds", func() {
+		names := []string{}
+		for _, identifier := range []uir.Identifier{
+			{NodeType: uir.NodeTypeMethod, Package: "example.org/shop", Method: "init", Signature: "a.go#1"},
+			{NodeType: uir.NodeTypeMethod, Package: "example.org/shop", Method: "Total", Type: "Cart", Signature: "() int"},
+		} {
+			names = append(names, querySymbolName(moduleQueryRow{identifier: identifier}))
+		}
+		Expect(names).To(Equal([]string{"init", "Cart.Total() int"}))
+	})
 	It("accepts ordered grouping levels and rejects duplicates and unknown levels", func() {
 		groups, err := parseQueryGroupBy("")
 		Expect(err).NotTo(HaveOccurred())
@@ -157,8 +168,8 @@ var _ = Describe("query symbol rendering", func() {
 		Expect(cliRows).To(Equal(result.Matches))
 	})
 
-	It("shows empty results, incomplete coverage, and missing-head warnings", func() {
-		result := moduleQueryResult{groupBy: []string{"module", "package", "file"}, Coverage: []query.ModuleCoverage{{RootKey: "example.org/service", PackagePath: "example.org/service/api", Coverage: "partial"}}, Warnings: []query.MissingHeadWarning{{RootKey: "example.org/other", Location: "/checkout/other", Message: "not indexed"}}}
+	It("shows empty results and incomplete coverage", func() {
+		result := moduleQueryResult{groupBy: []string{"module", "package", "file"}, Coverage: []query.ModuleCoverage{{RootKey: "example.org/service", PackagePath: "example.org/service/api", Coverage: "partial"}}}
 		output := moduleQueryDisplay{result: result, rows: result.Matches}.Tree().Pretty().String()
 		Expect(output).To(ContainSubstring("0 matches"))
 		tree := moduleQueryDisplay{result: result, rows: result.Matches}.Tree()
@@ -166,7 +177,7 @@ var _ = Describe("query symbol rendering", func() {
 		for _, child := range tree.GetChildren() {
 			labels = append(labels, child.Pretty().String())
 		}
-		Expect(strings.Join(labels, " ")).To(And(ContainSubstring("partial"), ContainSubstring("not indexed")))
+		Expect(strings.Join(labels, " ")).To(ContainSubstring("partial"))
 	})
 
 	It("keeps checkouts identifiable when module grouping is omitted and shows truncation", func() {

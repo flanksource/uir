@@ -22,6 +22,7 @@ import (
 // a Publication names, whose LocalPath is then its URI and Kind storage.LocationExternal. Name is the
 // root's display name when publication registers it.
 type discoveredRoot struct {
+	AnalysisMode      storage.AnalysisMode
 	RootKey           string
 	Name              string
 	ParentRootKey     string
@@ -45,6 +46,7 @@ type discoveredRoot struct {
 }
 
 type discoveredFile struct {
+	retained     bool
 	AbsolutePath string
 	PathKey      string
 	PackagePath  string
@@ -52,21 +54,48 @@ type discoveredFile struct {
 	ContentHash  string
 	SizeBytes    int64
 	ModifiedAt   time.Time
+	GitPath      string
 }
 
-func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, includeTests bool) error {
-	root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
-	root.Revision = root.GitCommit
-	root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
+func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, options discoveryOptions) error {
+	if options.Source == nil {
+		if err := observeCheckpoint(ctx, root.LocalPath); err != nil {
+			return err
+		}
+	}
+	if options.Source == nil {
+		root.GitCommit = gitValue(ctx, root.LocalPath, "rev-parse", "HEAD")
+		root.Revision = root.GitCommit
+		root.RepositoryURI = gitValue(ctx, root.LocalPath, "remote", "get-url", "origin")
+	} else {
+		setSourceIdentity(root, *options.Source)
+	}
+	visible, err := discoveryVisibility(ctx, root.LocalPath, options.Source)
+	if err != nil {
+		return err
+	}
 	moduleCache := map[string]string{}
-	err := filepath.WalkDir(root.LocalPath, func(current string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root.LocalPath, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
+			if root.AnalysisMode != "" && current != root.LocalPath {
+				if _, err := os.Stat(filepath.Join(current, "go.mod")); err == nil {
+					return filepath.SkipDir
+				} else if !os.IsNotExist(err) {
+					return err
+				}
+			}
+			if current != root.LocalPath && !visible.Contains(current) {
+				return filepath.SkipDir
+			}
 			return rootDirectoryAction(current, entry.Name(), root.LocalPath, roots)
 		}
-		if filepath.Ext(entry.Name()) != ".go" || (!includeTests && strings.HasSuffix(entry.Name(), "_test.go")) {
+		if filepath.Ext(entry.Name()) != ".go" || (!options.IncludeTests && strings.HasSuffix(entry.Name(), "_test.go")) {
+			return nil
+		}
+		if !visible.Contains(current) {
 			return nil
 		}
 		file, err := readDiscoveredFile(current, root.LocalPath, entry, moduleCache)
@@ -80,10 +109,12 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		return fmt.Errorf("discover Go sources in root %q: %w", root.RootKey, err)
 	}
 	sort.Slice(root.Files, func(i, j int) bool { return root.Files[i].PathKey < root.Files[j].PathKey })
-	if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.GitCommit, root.Files); err != nil {
-		return err
+	if options.Source == nil {
+		if root.WorktreeState, err = worktreeState(ctx, root.LocalPath, root.GitCommit, root.Files); err != nil {
+			return err
+		}
 	}
-	environment, err := readGoEnvironment(ctx, root.LocalPath)
+	environment, err := readGoEnvironmentWithWork(ctx, root.LocalPath, options.Source != nil)
 	if err != nil {
 		return fmt.Errorf("root %q: %w", root.RootKey, err)
 	}
@@ -102,7 +133,7 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 			root.LastModifiedAt = manifest.ModifiedAt
 		}
 	}
-	if root.GitCommit != "" && environment.WorkFile != "" {
+	if options.Source == nil && root.GitCommit != "" && environment.WorkFile != "" {
 		dirty, err := workspaceManifestDirty(ctx, root.LocalPath, root.GitCommit, environment.WorkFile)
 		if err != nil {
 			return err
@@ -111,11 +142,17 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 			root.WorktreeState = storage.WorktreeDirty
 		}
 	}
-	if root.WorktreeState == storage.WorktreeDirty {
+	if options.Source == nil && root.WorktreeState == storage.WorktreeDirty {
 		root.Revision = dirtyRevision(root.GitCommit, root.LastModifiedAt)
 	}
-	root.ConfigurationHash = configurationHash(includeTests, environment.Variant)
+	environment.Variant.BuildTags = options.Tags
+	root.ConfigurationHash = configurationHash(options.IncludeTests, environment.Variant)
 	root.Variant, root.WorkFile = environment.Variant, environment.WorkFile
+	if options.Source == nil && root.AnalysisMode == "" {
+		if err := observeCheckpointWorkspace(ctx, *root); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -266,9 +303,8 @@ func gitValue(ctx context.Context, directory string, args ...string) string {
 }
 
 // worktreeState reports whether the module's files are exactly its revision's files: Git reports no
-// change under the directory and every indexed file is tracked, since Git's status omits the ignored
-// files discovery still indexes. Without a revision the module is not in a Git checkout (or the
-// checkout has no commit), so the state is unknown.
+// change under the directory and every indexed file is tracked. Without a revision the module is not
+// in a Git checkout (or the checkout has no commit), so the state is unknown.
 func worktreeState(ctx context.Context, directory, revision string, files []discoveredFile) (storage.WorktreeState, error) {
 	if revision == "" {
 		return storage.WorktreeUnknown, nil

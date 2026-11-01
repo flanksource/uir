@@ -7,10 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
@@ -24,76 +21,97 @@ type ModuleSourceContent struct {
 	SnapshotID string `json:"snapshot_id"`
 }
 
-var pinnedGitRevision = regexp.MustCompile(`^[a-fA-F0-9]{40,64}$`)
-
+// ReadModuleSource reads one source of a snapshot, as ReadModuleSources reads many.
 func (pipeline *Pipeline) ReadModuleSource(ctx context.Context, snapshotID, path string) (ModuleSourceContent, error) {
-	if pipeline == nil || pipeline.database == nil {
-		return ModuleSourceContent{}, errors.New("UIR query database is required")
-	}
-	if !filepath.IsLocal(path) {
-		return ModuleSourceContent{}, fmt.Errorf("source path %q must be local to its module root", path)
-	}
-	selection, err := pipeline.moduleScopes(ctx, ModuleScopeOptions{SnapshotID: snapshotID}, false)
-	scopes := selection.scopes
+	contents, err := pipeline.ReadModuleSources(ctx, ModuleSourcesOptions{SnapshotID: snapshotID, Paths: []string{path}})
 	if err != nil {
 		return ModuleSourceContent{}, err
 	}
-	scope := scopes[0]
-	sources, err := storage.EffectiveSources(ctx, pipeline.database, scope.snapshot.ID)
-	if err != nil {
-		return ModuleSourceContent{}, err
-	}
-	source, ok := sources[filepath.ToSlash(path)]
-	if !ok {
-		return ModuleSourceContent{}, fmt.Errorf("source %q is not in snapshot %s", path, snapshotID)
-	}
-	content, origin, err := readVerifiedSource(ctx, pipeline.database, scope, verifiedSource{path: path, hash: source.ContentHash, snapshot: snapshotID})
-	if err != nil {
-		return ModuleSourceContent{}, err
-	}
-	return ModuleSourceContent{Path: path, Content: string(content), Origin: origin, Revision: scope.snapshot.Revision, SnapshotID: snapshotID}, nil
+	return contents[0], nil
 }
 
-// verifiedSource names the bytes readVerifiedSource must find: a module-relative path whose content
+// verifiedSource names the bytes readVerifiedSources must find: a module-relative path whose content
 // has the SHA-256 the snapshot indexed. snapshot is how the caller spelled the snapshot, for errors.
 type verifiedSource struct {
 	path     string
 	hash     string
 	snapshot string
+	revision *storage.SourceRevision
 }
 
-// readVerifiedSource returns the indexed bytes of a source and where they came from: the local file
-// while it still has the indexed hash, else the stored blob of a dirty or non-Git snapshot, else the
-// pinned Git blob. An external location is a producer's URI, not a checkout, so its sources are only
-// the blobs its publication stored. Bytes with any other hash are never returned.
-func readVerifiedSource(ctx context.Context, database *gorm.DB, scope moduleScope, source verifiedSource) ([]byte, string, error) {
+// sourceRead is one source's indexed bytes and where they came from, or why they could not be recovered.
+type sourceRead struct {
+	content []byte
+	origin  string
+	err     error
+}
+
+// readVerifiedSources returns the indexed bytes of each source of one scope and where they came from:
+// the local file while it still has the indexed hash, else the stored blob of a dirty or non-Git
+// snapshot, else the pinned Git blob, every Git blob through one git cat-file process. An external
+// location is a producer's URI, so its sources use explicit Git bindings or stored
+// blobs. Bytes with any other hash are never returned; a source that cannot be recovered carries the
+// error naming it, and the others are still read.
+func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleScope, sources []verifiedSource, gitReader GitSourceReader) []sourceRead {
+	reads := make([]sourceRead, len(sources))
 	if scope.location.Kind == storage.LocationExternal {
-		content, err := storage.ReadSourceBlob(ctx, database, source.hash)
-		if err != nil {
-			return nil, "", fmt.Errorf("source %q of external snapshot %s: %w", source.path, source.snapshot, err)
-		}
-		return content, "snapshot", nil
+		return readExternalSources(ctx, database, scope, sources, gitReader)
 	}
-	modulePath := filepath.Join(scope.location.CanonicalPath, filepath.FromSlash(source.path))
-	resolvedRoot, err := filepath.EvalSymlinks(scope.location.CanonicalPath)
+	resolvedRoot, gitDirectory, err := resolveModuleSourceLocation(scope.location.CanonicalPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve module location %q: %w", scope.location.CanonicalPath, err)
+		for index := range reads {
+			reads[index].err = fmt.Errorf("resolve module location %q: %w", scope.location.CanonicalPath, err)
+		}
+		return reads
 	}
+	var pending []int
+	for index, source := range sources {
+		read, fromGit := readCheckoutSource(ctx, database, scope, resolvedRoot, source)
+		reads[index] = read
+		if fromGit {
+			pending = append(pending, index)
+		}
+	}
+	(&gitSources{scope: scope, resolvedRoot: gitDirectory, sources: sources, reads: reads}).read(ctx, pending)
+	return reads
+}
+
+// Historical modules can be absent from the checkout; Git lookup starts at their nearest existing parent.
+func resolveModuleSourceLocation(directory string) (root, existing string, err error) {
+	for current := directory; ; current = filepath.Dir(current) {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			relative, err := filepath.Rel(current, directory)
+			if err != nil {
+				return "", "", err
+			}
+			return filepath.Join(resolved, relative), resolved, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) || current == filepath.Dir(current) {
+			return "", "", err
+		}
+	}
+}
+
+// readCheckoutSource reads a source from the checkout or the snapshot's stored blob, reporting true
+// when neither holds the indexed bytes and only the pinned Git blob can.
+func readCheckoutSource(ctx context.Context, database *gorm.DB, scope moduleScope, resolvedRoot string, source verifiedSource) (sourceRead, bool) {
+	modulePath := filepath.Join(scope.location.CanonicalPath, filepath.FromSlash(source.path))
 	content, found, err := readLocalSource(resolvedRoot, modulePath, source)
 	if err != nil || found {
-		return content, "local", err
+		return sourceRead{content: content, origin: "local", err: err}, false
 	}
-	if scope.snapshot.WorktreeState != storage.WorktreeClean {
-		content, err = storage.ReadSourceBlob(ctx, database, source.hash)
-		if err == nil {
-			return content, "snapshot", nil
-		}
-		if !errors.Is(err, storage.ErrSourceBlobNotStored) {
-			return nil, "", fmt.Errorf("source %q of snapshot %s: %w", source.path, source.snapshot, err)
-		}
+	if scope.snapshot.WorktreeState == storage.WorktreeClean {
+		return sourceRead{}, true
 	}
-	content, err = readGitSource(ctx, scope, resolvedRoot, modulePath, source)
-	return content, "git", err
+	content, err = storage.ReadSourceBlob(ctx, database, source.hash)
+	if err == nil {
+		return sourceRead{content: content, origin: "snapshot"}, false
+	}
+	if !errors.Is(err, storage.ErrSourceBlobNotStored) {
+		return sourceRead{err: fmt.Errorf("source %q of snapshot %s: %w", source.path, source.snapshot, err)}, false
+	}
+	return sourceRead{}, true
 }
 
 // readLocalSource reads the checkout's file and reports whether it still has the indexed hash.
@@ -114,38 +132,6 @@ func readLocalSource(resolvedRoot, modulePath string, source verifiedSource) ([]
 		return nil, false, fmt.Errorf("read source %q: %w", source.path, err)
 	}
 	return content, contentHash(content) == source.hash, nil
-}
-
-func readGitSource(ctx context.Context, scope moduleScope, resolvedRoot, modulePath string, source verifiedSource) ([]byte, error) {
-	commit := scope.snapshot.GitCommit
-	if commit == "" && scope.snapshot.WorktreeState == storage.WorktreeClean {
-		commit = scope.snapshot.Revision
-	}
-	if !pinnedGitRevision.MatchString(commit) {
-		return nil, fmt.Errorf("source %q has changed since snapshot %s and no pinned Git revision can recover it", source.path, source.snapshot)
-	}
-	command := exec.CommandContext(ctx, "git", "-C", resolvedRoot, "rev-parse", "--show-toplevel")
-	repoTop, err := command.Output()
-	if err != nil {
-		return nil, fmt.Errorf("locate Git repository for source %q: %w", source.path, err)
-	}
-	repoRoot, err := filepath.EvalSymlinks(strings.TrimSpace(string(repoTop)))
-	if err != nil {
-		return nil, fmt.Errorf("resolve Git repository for source %q: %w", source.path, err)
-	}
-	relative, err := filepath.Rel(repoRoot, modulePath)
-	if err != nil || !filepath.IsLocal(relative) {
-		return nil, fmt.Errorf("source %q escapes Git repository %q", source.path, repoRoot)
-	}
-	command = exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "blob", commit+":"+filepath.ToSlash(relative))
-	content, err := command.Output()
-	if err != nil {
-		return nil, fmt.Errorf("read Git source %q at %s: %w", source.path, commit, err)
-	}
-	if contentHash(content) != source.hash {
-		return nil, fmt.Errorf("git source %q at %s does not match indexed content hash", source.path, commit)
-	}
-	return content, nil
 }
 
 func contentHash(content []byte) string {

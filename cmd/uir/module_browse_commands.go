@@ -12,9 +12,10 @@ import (
 )
 
 type moduleBrowseOptions struct {
-	RootKey    string `flag:"root" help:"Module path"`
-	Location   string `flag:"location" help:"Registered checkout path"`
+	RootKey    string `flag:"root" help:"Module path; defaults to the module of the current checkout"`
+	Location   string `flag:"location" help:"Registered checkout path; defaults to the current checkout"`
 	SnapshotID string `flag:"snapshot" help:"Immutable snapshot UUID"`
+	allRootsOption
 }
 
 type moduleContentOptions struct {
@@ -42,18 +43,16 @@ func registerModuleBrowseCommands(root *cobra.Command) {
 	setModuleRoute(dependencies, "modules/dependencies")
 	dependencies.Annotations["clicky/operation-method"] = http.MethodGet
 
-	heads := clicky.AddNamedCommandWithContext("heads", root, struct{}{}, func(ctx context.Context, _ struct{}) (query.ItemsWithWarnings[query.ModuleHeadFiles], error) {
+	heads := clicky.AddNamedCommandWithContext("heads", root, struct{}{}, func(ctx context.Context, _ struct{}) ([]query.ModuleHeadFiles, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleHeadFiles]{}, err
+			return nil, err
 		}
 		pipeline, err := query.NewPipeline(database)
 		if err != nil {
-			return query.ItemsWithWarnings[query.ModuleHeadFiles]{}, err
+			return nil, err
 		}
-		result, err := pipeline.BrowseModuleHeads(ctx)
-		warnMissingHeads(ctx, result.Warnings)
-		return result, err
+		return pipeline.BrowseModuleHeads(ctx)
 	})
 	heads.Short = "List files from every published module checkout head"
 	setModuleRoute(heads, "modules/heads")
@@ -68,7 +67,11 @@ func registerModuleBrowseCommands(root *cobra.Command) {
 		if err != nil {
 			return query.ModuleBrowseResult{}, err
 		}
-		return pipeline.BrowseModules(ctx, query.ModuleScopeOptions{RootKey: options.RootKey, Location: options.Location, SnapshotID: options.SnapshotID})
+		scope, err := moduleScope(ctx, database, checkoutDefaults{Root: options.RootKey, Location: options.Location, Snapshot: options.SnapshotID, All: options.All})
+		if err != nil {
+			return query.ModuleBrowseResult{}, err
+		}
+		return pipeline.BrowseModules(ctx, scope)
 	})
 	browse.Short = "Browse effective sources and symbols in one module snapshot"
 	setModuleRoute(browse, "modules/browse")

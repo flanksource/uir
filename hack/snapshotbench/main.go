@@ -1,3 +1,5 @@
+//go:build hack
+
 package main
 
 import (
@@ -19,6 +21,30 @@ func dispatch(ctx context.Context, args []string) error {
 		return fmt.Errorf("usage: go run ./hack/snapshotbench run|case|verify <options>")
 	}
 	switch args[0] {
+	case "save-runner":
+		if len(args) != 2 {
+			return fmt.Errorf("save-runner requires one new executable path")
+		}
+		source, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return copyExecutable(source, args[1])
+	case "impact":
+		return runImpact(ctx, args[1:])
+	case "impact-report":
+		return reportImpact(args[1:])
+	case "captain":
+		return runCaptain(ctx, args[1:])
+	case "trace-paths":
+		if len(args) != 3 {
+			return fmt.Errorf("trace-paths requires a trace and output JSON path")
+		}
+		_, paths, err := tracePhaseBreakdown(args[1])
+		if err != nil {
+			return err
+		}
+		return writeJSON(args[2], paths)
 	case "run":
 		return run(ctx, args[1:])
 	case "case":

@@ -6,7 +6,10 @@ package symboldiff
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/flanksource/commons/collections"
 )
 
 // Visibility selects which rows a diff reports. A row is kept when the symbol's visibility on either
@@ -41,9 +44,47 @@ func (visibility Visibility) shows(class Class, symbol string) bool {
 	return symbol == string(visibility)
 }
 
+// ChangeTypes selects the row classes a diff reports, as commons collections.MatchItems patterns: a
+// class name, * wildcards, and ! exclusions, which take precedence. Empty reports every class. It
+// filters rows after symbols are paired, so it never changes how a symbol is classified.
+type ChangeTypes []string
+
+var classes = []Class{ClassAdded, ClassRemoved, ClassSignature, ClassStructure, ClassBody, ClassFormat, ClassMoved, ClassImport}
+
+// ParseChangeTypes validates --change-type patterns: each, without its !, must match at least one class.
+func ParseChangeTypes(patterns []string) (ChangeTypes, error) {
+	for _, pattern := range patterns {
+		bare := strings.TrimPrefix(strings.TrimSpace(pattern), "!")
+		if bare == "" || !slices.ContainsFunc(classes, func(class Class) bool { return collections.MatchItems(string(class), bare) }) {
+			return nil, fmt.Errorf("change type %q matches none of %s", pattern, joinClasses())
+		}
+	}
+	return ChangeTypes(patterns), nil
+}
+
+func joinClasses() string {
+	names := make([]string, len(classes))
+	for index, class := range classes {
+		names[index] = string(class)
+	}
+	return strings.Join(names, ", ")
+}
+
+func (types ChangeTypes) shows(class Class) bool {
+	return collections.MatchItems(string(class), types...)
+}
+
+// rowFilter is what decides whether a row is reported or counted as hidden.
+type rowFilter struct {
+	visibility  Visibility
+	changeTypes ChangeTypes
+}
+
 // Class is how a symbol changed between the two commits. Of a symbol on both sides, the class names the
 // outermost layer whose hash differs: signature the public layer, structure the private layer only,
-// body the content layer only.
+// body the content layer only. format is a symbol whose hashes are all equal but whose source bytes
+// changed: comments, whitespace, or layout. import is one import of a file whose path changed under
+// its alias, or that only one side has.
 type Class string
 
 const (
@@ -52,8 +93,13 @@ const (
 	ClassSignature Class = "signature"
 	ClassStructure Class = "structure"
 	ClassBody      Class = "body"
+	ClassFormat    Class = "format"
 	ClassMoved     Class = "moved"
+	ClassImport    Class = "import"
 )
+
+// importVisibility is the visibility of every import row: an import binds a name in its file only.
+const importVisibility = "internal"
 
 // changedClass is the class of a symbol declared on both sides from which of its layers differ and
 // whether its defining path changed; empty when nothing did.
@@ -79,17 +125,16 @@ const (
 	MarkerManifest = "manifest"
 )
 
-// NoteLayoutOnly marks a body row whose hashes are equal but whose lines changed: comments or layout.
-const NoteLayoutOnly = "comments or layout only; content_hash unchanged"
-
-// Options selects the root, the two commits, and what the diff reports.
+// Options selects the root, the revisions to compare, and what the diff reports.
 type Options struct {
-	RootKey      string
-	From         string
-	To           string
+	RootKey string
+	// Revisions is what git diff takes: one spec (A..B, A.., ..B, A...B, A^!, A^-n, or a single
+	// revision, compared against the worktree) or two revisions. pr:N names a pull request's head.
+	Revisions    []string
 	SnapshotFrom string
 	SnapshotTo   string
 	Visibility   Visibility
+	ChangeTypes  ChangeTypes
 	Stat         bool
 	AutoIndex    bool
 	IncludeTests bool
@@ -100,19 +145,6 @@ type Options struct {
 	// Location is the registered checkout to resolve and index commits from; empty means the primary
 	// checkout first, then any other that has the commit.
 	Location string
-}
-
-// ParseRange splits "<from>..<to>" into its two commits; both must be non-empty.
-func ParseRange(spec string) (string, string, error) {
-	from, to, found := strings.Cut(spec, "..")
-	if !found || strings.HasPrefix(to, ".") {
-		return "", "", fmt.Errorf("commit range %q is not <from>..<to>", spec)
-	}
-	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
-	if from == "" || to == "" {
-		return "", "", fmt.Errorf("commit range %q has an empty revision", spec)
-	}
-	return from, to, nil
 }
 
 // Side is one end of the diff: the resolved commit and the snapshot selected for it.
@@ -138,13 +170,14 @@ func (count *LineCount) add(other LineCount) {
 // LinesError is set when a commit has no registered checkout: every file then carries it too, and
 // manifests cannot be compared.
 type Result struct {
-	RootKey    string        `json:"root_key"`
-	From       Side          `json:"from"`
-	To         Side          `json:"to"`
-	Visibility Visibility    `json:"visibility"`
-	Stat       bool          `json:"stat"`
-	LinesError string        `json:"lines_error,omitempty"`
-	Packages   []PackageDiff `json:"packages"`
+	RootKey     string        `json:"root_key"`
+	From        Side          `json:"from"`
+	To          Side          `json:"to"`
+	Visibility  Visibility    `json:"visibility"`
+	ChangeTypes ChangeTypes   `json:"change_types,omitempty"`
+	Stat        bool          `json:"stat"`
+	LinesError  string        `json:"lines_error,omitempty"`
+	Packages    []PackageDiff `json:"packages"`
 }
 
 // PackageDiff is one package's changed files. Lines is the sum of its files, and is absent when any
@@ -152,7 +185,9 @@ type Result struct {
 type PackageDiff struct {
 	Path  string     `json:"path"`
 	Lines *LineCount `json:"lines,omitempty"`
-	Files []FileDiff `json:"files"`
+	// HiddenFiles is how many changed files a change-type filter left without a row; Lines still counts them.
+	HiddenFiles int        `json:"hidden_files,omitempty"`
+	Files       []FileDiff `json:"files"`
 }
 
 // FileStatus says whether a file exists on one side only or on both.
@@ -197,6 +232,9 @@ type Row struct {
 	Coverage    []string   `json:"coverage,omitempty"`
 	Group       string     `json:"group,omitempty"`
 	Note        string     `json:"note,omitempty"`
+	// MovedAway marks the copy of a row reported under the file a symbol left: a symbol declared in
+	// another file on the new side is reported under both files. Its lines count under the new file only.
+	MovedAway bool `json:"moved_away,omitempty"`
 }
 
 // DisplayName is Owner.Name, or Name for a package-level symbol.

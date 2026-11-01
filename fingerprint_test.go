@@ -195,6 +195,16 @@ var _ = Describe("Fingerprint", func() {
 		Expect(uir.Fingerprint(after).Private).NotTo(Equal(uir.Fingerprint(before).Private))
 	})
 
+	It("ignores a system-named default's per-database name but not a user-named one", func() {
+		withDefault := func(name string, systemNamed bool) uir.RecordColumn {
+			c := uir.NewColumn("row_id", "uniqueidentifier", uir.RecordFieldTypeUUID)
+			c.SQLDefault = &uir.SQLDefault{Name: name, Expression: "(newsequentialid())", SystemNamed: systemNamed}
+			return c
+		}
+		Expect(uir.Fingerprint(withDefault("DF__orders__row_id__1A2B3C4D", true))).To(Equal(uir.Fingerprint(withDefault("DF__orders__row_id__5E6F7A8B", true))))
+		Expect(uir.Fingerprint(withDefault("DF_orders_row_id", false)).Private).NotTo(Equal(uir.Fingerprint(withDefault("DF_orders_row_guid", false)).Private))
+	})
+
 	It("handles every registered node type, by value and by pointer", func() {
 		for _, node := range uir.Nodes {
 			pointer := reflect.New(reflect.TypeOf(node))
@@ -252,6 +262,33 @@ var _ = Describe("TypedNode", func() {
 			names = append(names, uir.MemberName(child))
 		}
 		Expect(names).To(Equal([]string{"Balance", "ledger", "NewAccount", "Charge"}))
+	})
+})
+
+var _ = Describe("TypeBuilder", func() {
+	It("qualifies members with their type whatever order the builder is called in, so a shared member name keeps distinct symbol keys", func() {
+		build := func(typeName string) uir.TypedNode {
+			return uir.NewType(typeName).
+				WithVariables(uir.Field("id", uir.RecordFieldTypeString)).
+				WithMethod(uir.NewMethod("Save").Build()).
+				WithConstructor(uir.NewMethod(typeName, uir.Identifier{NodeType: uir.NodeTypeConstructor}).Build()).
+				WithDestructor(uir.NewMethod("close").Build()).
+				WithModule("example.org/app").WithPackage("example.org/app/billing").Build()
+		}
+		account, invoice := build("Account"), build("Invoice")
+		owner := uir.Identifier{Module: "example.org/app", Package: "example.org/app/billing", Type: "Account"}
+
+		Expect([]uir.Identifier{
+			account.Variables[0].Identifier, account.Methods[0].Identifier,
+			account.Constructor.Identifier, account.Destructor.Identifier,
+		}).To(Equal([]uir.Identifier{
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Field: "id", NodeType: uir.NodeTypeField},
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Method: "Save", NodeType: uir.NodeTypeMethod},
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Method: "Account", NodeType: uir.NodeTypeConstructor},
+			{Module: owner.Module, Package: owner.Package, Type: owner.Type, Method: "close", NodeType: uir.NodeTypeMethod},
+		}))
+		Expect(account.Variables[0].SymbolKey()).NotTo(Equal(invoice.Variables[0].SymbolKey()))
+		Expect(account.Methods[0].SymbolKey()).NotTo(Equal(invoice.Methods[0].SymbolKey()))
 	})
 })
 

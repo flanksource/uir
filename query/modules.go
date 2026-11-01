@@ -17,12 +17,13 @@ const (
 )
 
 type ModuleScopeOptions struct {
-	Structured StructuredOptions
-	Language   Language
-	RootKey    string
-	Location   string
-	SnapshotID string
-	Limit      int
+	Structured  StructuredOptions
+	Language    Language
+	RootKey     string
+	Location    string
+	SnapshotID  string
+	SnapshotIDs []string
+	Limit       int
 }
 
 type ModuleMatch struct {
@@ -67,18 +68,17 @@ type CallPath struct {
 }
 
 type ModuleQueryResult struct {
-	Columns      []QueryColumn        `json:"columns,omitempty"`
-	Rows         []map[string]any     `json:"rows,omitempty"`
-	Graph        *GraphResult         `json:"graph,omitempty"`
-	Operation    Operation            `json:"operation"`
-	Matches      []ModuleMatch        `json:"matches"`
-	Stages       []ResolutionStage    `json:"stages"`
-	Total        int                  `json:"total"`
-	Symbols      []ModuleSymbol       `json:"symbols,omitempty"`
-	Declarations []ModuleMatch        `json:"declarations,omitempty"`
-	Coverage     []ModuleCoverage     `json:"coverage"`
-	Warnings     []MissingHeadWarning `json:"warnings"`
-	Path         *CallPath            `json:"path,omitempty"`
+	Columns      []QueryColumn     `json:"columns,omitempty"`
+	Rows         []map[string]any  `json:"rows,omitempty"`
+	Graph        *GraphResult      `json:"graph,omitempty"`
+	Operation    Operation         `json:"operation"`
+	Matches      []ModuleMatch     `json:"matches"`
+	Stages       []ResolutionStage `json:"stages"`
+	Total        int               `json:"total"`
+	Symbols      []ModuleSymbol    `json:"symbols,omitempty"`
+	Declarations []ModuleMatch     `json:"declarations,omitempty"`
+	Coverage     []ModuleCoverage  `json:"coverage"`
+	Path         *CallPath         `json:"path,omitempty"`
 }
 
 type moduleScope struct {
@@ -133,7 +133,7 @@ func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options
 		return ModuleQueryResult{}, err
 	}
 	clock.lap("coverage")
-	result := ModuleQueryResult{Operation: expressionOperation(expression), Matches: []ModuleMatch{}, Coverage: coverage, Warnings: selection.warnings, Stages: []ResolutionStage{
+	result := ModuleQueryResult{Operation: expressionOperation(expression), Matches: []ModuleMatch{}, Coverage: coverage, Stages: []ResolutionStage{
 		{Name: "parse", Value: string(expressionOperation(expression))}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))},
 		selectionCoverageStage(selection, coverage),
 	}}
@@ -156,7 +156,7 @@ func (pipeline *Pipeline) execute(ctx context.Context, expression *Expr, selecti
 	}
 	err := pipeline.runCompact(ctx, expression, selection.scopes, result, clock)
 	var unresolved *UnresolvedSymbolError
-	if len(selection.warnings) > 0 && errors.As(err, &unresolved) {
+	if selection.missingHeads > 0 && errors.As(err, &unresolved) {
 		result.Total = 0
 		return nil
 	}
@@ -167,12 +167,12 @@ func (pipeline *Pipeline) execute(ctx context.Context, expression *Expr, selecti
 // indexed head first.
 func selectionCoverageStage(selection moduleScopeSelection, coverage []ModuleCoverage) ResolutionStage {
 	stage := coverageStage(coverage)
-	if len(selection.warnings) == 0 {
+	if selection.missingHeads == 0 {
 		return stage
 	}
-	stage.Value = fmt.Sprintf("incomplete: %d registered checkout without an indexed head", len(selection.warnings))
-	if len(selection.warnings) > 1 {
-		stage.Value = fmt.Sprintf("incomplete: %d registered checkouts without indexed heads", len(selection.warnings))
+	stage.Value = fmt.Sprintf("incomplete: %d registered checkout without an indexed head", selection.missingHeads)
+	if selection.missingHeads > 1 {
+		stage.Value = fmt.Sprintf("incomplete: %d registered checkouts without indexed heads", selection.missingHeads)
 	}
 	if len(coverage) > 0 {
 		stage.Value += "; " + coverageSummary(coverage)

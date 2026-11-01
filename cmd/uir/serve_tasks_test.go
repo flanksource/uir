@@ -92,7 +92,7 @@ var _ = Describe("serve task runs", func() {
 		runtime, handler := servedRuntime(ctx)
 		workspace := browserModule()
 
-		added := startedRun(postJSON(ctx, handler, "/api/v1/modules/add", `{"args":["`+workspace+`"],"no-workspace-uses":true}`))
+		added := startedRun(postJSON(ctx, handler, "/api/v1/modules/add", `{"args":["`+workspace+`"]}`))
 		addRun := finishedRun(handler, added)
 		reindexed := startedRun(postJSON(ctx, handler, "/api/v1/modules/reindex", `{"args":["`+workspace+`"]}`))
 		reindexRun := finishedRun(handler, reindexed)
@@ -126,7 +126,7 @@ var _ = Describe("serve task runs", func() {
 		runtime, handler := servedRuntime(ctx)
 		request, cancel := context.WithCancel(ctx)
 
-		id := startedRun(postJSON(request, handler, "/api/v1/modules/add", `{"args":["`+browserModule()+`"],"no-workspace-uses":true}`))
+		id := startedRun(postJSON(request, handler, "/api/v1/modules/add", `{"args":["`+browserModule()+`"]}`))
 		cancel()
 
 		Expect(finishedRun(handler, id)[0].Status).To(Equal(string(clickytask.StatusSuccess)))
@@ -158,7 +158,7 @@ var _ = Describe("serve task runs", func() {
 		handler, err := newServeHandler(newRootCommand(runtime), runtime, http.NotFoundHandler())
 		Expect(err).To(Succeed())
 
-		response := postJSON(ctx, handler, "/api/v1/modules/add", `{"args":["`+browserModule()+`"],"no-workspace-uses":true}`)
+		response := postJSON(ctx, handler, "/api/v1/modules/add", `{"args":["`+browserModule()+`"]}`)
 
 		Expect(response.Code).To(Equal(http.StatusInternalServerError), response.Body.String())
 		Expect(listedRuns(handler)).ToNot(ContainElement(HaveField("Labels", HaveKeyWithValue("path", ContainSubstring("browser")))))
@@ -166,7 +166,7 @@ var _ = Describe("serve task runs", func() {
 
 	It("marks indexed commits in history and diffs from the checkout a request names", func(ctx SpecContext) {
 		runtime, handler := servedRuntime(ctx)
-		from, to := indexedCommits(ctx, runtime.database)
+		from, to, _ := indexedCommits(ctx, runtime.database)
 		locations, err := storage.ModuleLocations(ctx, runtime.database, diffRoot)
 		Expect(err).To(Succeed())
 		checkout := locations[0].CanonicalPath

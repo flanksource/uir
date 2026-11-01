@@ -28,6 +28,7 @@ var _ = Describe("diff support reads", func() {
 				&storage.SourceDelta{SnapshotID: snapshot.ID, RootID: fixture.root.ID, PathKey: "beta.go", RevisionID: &beta.ID, Operation: storage.SourceSet},
 				&storage.PackageCoverage{SnapshotID: snapshot.ID, RootID: fixture.root.ID, PackagePath: fixture.root.RootKey,
 					InputHash: inputHash, Coverage: storage.CoverageSyntax, FileCount: 2, Diagnostics: storage.JSON(`[]`)})
+			bindDocuments(database, snapshot, documents...)
 
 			headers, err := storage.ActiveDocuments(ctx, database, snapshot.ID, storage.ActiveDocumentOptions{})
 			Expect(err).ToNot(HaveOccurred())

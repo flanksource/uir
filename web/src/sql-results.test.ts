@@ -9,7 +9,7 @@ describe("SQL result projections", () => {
     const route = readRoute({ pathname: "/query", search: "?language=sql" });
     const markup = renderToStaticMarkup(createElement(QueryView, { route, examples: [], onRoute: () => {}, query: { loading: false, data: {
       operation: "sql",
-      total: 1, matches: [], symbols: [], declarations: [], coverage: [], warnings: [], stages: [],
+      total: 1, matches: [], symbols: [], declarations: [], coverage: [], stages: [],
       columns: [{ name: "r.method", field: "symbol.props.method", type: "string" }, { name: "r.path", field: "symbol.props.path", type: "string" }, { name: "r.description", field: "symbol.props.description", type: "string" }, { name: "__row", field: "symbol.id", type: "string" }],
       rows: [{ "r.method": "POST", "r.path": "/orders/new", "r.description": null, __row: "route identity" }],
     } } }));

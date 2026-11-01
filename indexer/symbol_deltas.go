@@ -77,32 +77,30 @@ func (collected declarations) folded() map[string]storage.SymbolFingerprints {
 	return folded
 }
 
-// createSymbolDeltas records how the snapshot's defined-symbol set differs from its base's. A path's
-// active document is keyed by its package input hash, so only paths whose key differs between base
-// and snapshot (added, removed, or re-extracted) are compared; unchanged documents are never read. The
-// base side decodes the changed paths' stored documents, the snapshot side uses the extraction. A
-// symbol declared on both sides with equal fingerprints, including one that moved between two changed
-// files, gets no row; a new or changed one a set row, and one only the base declared a delete row.
-// Without a base every declared symbol is a set.
-func createSymbolDeltas(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, publication snapshotPublication, previous map[string]storage.SourceRevision, known map[string]int64) error {
-	baseKeys, err := baseDocumentKeys(ctx, database, publication.base.snapshot, previous)
-	if err != nil {
-		return err
-	}
+// createSymbolDeltas records how the snapshot's defined-symbol set differs from its base's. Only the
+// packages with a path whose bound document differs between base and snapshot (added, removed, or
+// rebound) are compared; documents of every other package are never read. A changed package is compared
+// whole, every file on both sides, because one id (each func init) may be declared in several of its
+// files, and its fingerprints fold across all of them. The base side decodes its stored documents, the
+// snapshot side uses the extraction. A symbol declared on both sides with equal fingerprints, including
+// one that moved between two files, gets no row; a new or changed one a set row, and one only the base
+// declared a delete row. Without a base every declared symbol is a set.
+func createSymbolDeltas(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, publication snapshotPublication, membership snapshotMembership, known map[string]int64) error {
+	changed := changedPackages(membership)
 	extraction := publication.extraction
-	currentKeys, packages := map[string]string{}, map[string]string{}
-	for _, file := range extraction.root.Files {
-		currentKeys[file.PathKey], packages[file.PathKey] = extraction.documents[file.PathKey].inputHash, file.PackagePath
-	}
 	after := newDeclarations()
-	for path, key := range currentKeys {
-		if baseKeys[path] != key {
-			if err := after.add(packages[path], extraction.documents[path].definitions, declarations{}); err != nil {
-				return err
-			}
+	for _, file := range extraction.root.Files {
+		if !changed[file.PackagePath] {
+			continue
+		}
+		if extraction.documents[file.PathKey].reused {
+			return fmt.Errorf("document for %q was reused from the base, but package %q changed in snapshot %s", file.PathKey, file.PackagePath, snapshot.ID)
+		}
+		if err := after.add(file.PackagePath, extraction.documents[file.PathKey].definitions, declarations{}); err != nil {
+			return err
 		}
 	}
-	before, err := baseDeclarations(ctx, database, snapshot.RootID, changedKeys(baseKeys, currentKeys), after)
+	before, err := baseDeclarations(ctx, database, membership.base, changed, after)
 	if err != nil {
 		return err
 	}
@@ -117,70 +115,49 @@ func createSymbolDeltas(ctx context.Context, database *gorm.DB, snapshot storage
 	return nil
 }
 
-// baseDocumentKeys maps each path of the base snapshot to the input hash of its active document.
-func baseDocumentKeys(ctx context.Context, database *gorm.DB, base storage.ModuleSnapshot, previous map[string]storage.SourceRevision) (map[string]string, error) {
-	keys := map[string]string{}
-	if base.ID == uuid.Nil {
-		return keys, nil
-	}
-	var coverage []storage.PackageCoverage
-	if err := database.WithContext(ctx).Select("package_path", "input_hash").Where("snapshot_id = ?", base.ID).Find(&coverage).Error; err != nil {
-		return nil, fmt.Errorf("load package input hashes of base snapshot %s: %w", base.ID, err)
-	}
-	hashes := make(map[string]string, len(coverage))
-	for _, row := range coverage {
-		hashes[row.PackagePath] = row.InputHash
-	}
-	for path, revision := range previous {
-		hash, found := hashes[revision.PackagePath]
-		if !found {
-			return nil, fmt.Errorf("base snapshot %s has no package coverage for %q of %q", base.ID, revision.PackagePath, path)
+// changedPackages are the package paths with a path whose bound document the snapshot adds, rebinds, or
+// removes against its base.
+func changedPackages(membership snapshotMembership) map[string]bool {
+	changed := map[string]bool{}
+	for path, ordinal := range membership.bindings {
+		prior, found := membership.base[path]
+		if !found || prior.Document.Ordinal != ordinal {
+			changed[membership.current[path].PackagePath] = true
+			if found {
+				changed[prior.Source.PackagePath] = true
+			}
 		}
-		keys[path] = hash
 	}
-	return keys, nil
-}
-
-// changedKeys is the base's path → input hash for the paths whose active document the snapshot replaces
-// or removes.
-func changedKeys(baseKeys, currentKeys map[string]string) map[string]string {
-	changed := map[string]string{}
-	for path, key := range baseKeys {
-		if currentKeys[path] != key {
-			changed[path] = key
+	for path, prior := range membership.base {
+		if _, served := membership.bindings[path]; !served {
+			changed[prior.Source.PackagePath] = true
 		}
 	}
 	return changed
 }
 
-// baseDeclarations reads the definitions of the base's changed documents in batches.
-func baseDeclarations(ctx context.Context, database *gorm.DB, rootID uuid.UUID, changed map[string]string, after declarations) (declarations, error) {
+// baseDeclarations reads the definitions of the base's documents of the changed packages.
+func baseDeclarations(ctx context.Context, database *gorm.DB, base map[string]storage.ActiveDocument, changed map[string]bool, after declarations) (declarations, error) {
 	before := newDeclarations()
-	paths := sortedKeys(changed)
-	found := 0
-	for start := 0; start < len(paths); start += publicationBatch {
-		batch := paths[start:min(start+publicationBatch, len(paths))]
-		hashes := make([]string, len(batch))
-		for i, path := range batch {
-			hashes[i] = changed[path]
-		}
-		var documents []storage.Document
-		if err := database.WithContext(ctx).Select("path_key", "input_hash", "package_path", "content").
-			Where("root_id = ? AND path_key IN ? AND input_hash IN ?", rootID, batch, hashes).Find(&documents).Error; err != nil {
-			return declarations{}, fmt.Errorf("load changed base documents: %w", err)
-		}
-		for _, document := range documents {
-			if changed[document.PathKey] != document.InputHash {
-				continue
-			}
-			found++
-			if err := before.addStored(document, after); err != nil {
-				return declarations{}, err
-			}
+	var ids []uuid.UUID
+	for _, path := range sortedKeys(base) {
+		if changed[base[path].Source.PackagePath] {
+			ids = append(ids, base[path].Document.ID)
 		}
 	}
-	if found != len(paths) {
-		return declarations{}, fmt.Errorf("base has %d changed documents, found %d", len(paths), found)
+	contents, err := storage.DocumentContents(ctx, database, ids)
+	if err != nil {
+		return declarations{}, fmt.Errorf("load changed base documents: %w", err)
+	}
+	for _, path := range sortedKeys(base) {
+		document := base[path].Document
+		if !changed[base[path].Source.PackagePath] {
+			continue
+		}
+		document.Content = contents[document.ID]
+		if err := before.addStored(document, after); err != nil {
+			return declarations{}, err
+		}
 	}
 	return before, nil
 }

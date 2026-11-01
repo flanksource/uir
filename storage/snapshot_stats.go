@@ -53,7 +53,7 @@ type SnapshotFile struct {
 
 // RecordSnapshotStats counts a published snapshot's stats from options and the symbol deltas its
 // publication wrote, and stores them on the snapshot row. Publication calls it inside its transaction,
-// after every row is written; the storage backfill and prune's rebase call it with derived options.
+// after every row is written; the storage backfill calls it with derived options.
 func RecordSnapshotStats(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID, options SnapshotStatsOptions) (SnapshotStats, error) {
 	if options.Base == nil || options.Files == nil {
 		return SnapshotStats{}, fmt.Errorf("record stats of snapshot %s: base sources and files are required, empty when there are none", snapshotID)
@@ -95,7 +95,7 @@ func DeriveSnapshotStatsOptions(ctx context.Context, database *gorm.DB, snapshot
 		return SnapshotStatsOptions{}, fmt.Errorf("load snapshot %s: %w", snapshotID, err)
 	}
 	if snapshot.BaseSnapshotID != nil {
-		if options.Base, err = EffectiveSources(ctx, database, *snapshot.BaseSnapshotID); err != nil {
+		if options.Base, err = EffectiveSources(ctx, database, EffectiveSourcesOptions{SnapshotID: *snapshot.BaseSnapshotID}); err != nil {
 			return SnapshotStatsOptions{}, fmt.Errorf("base of snapshot %s: %w", snapshotID, err)
 		}
 	}

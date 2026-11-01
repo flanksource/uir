@@ -55,7 +55,7 @@ func methodLayers(m MethodNode) layers {
 		content = m.Body.Hash()
 	}
 	return leafLayers(ShapeKind(m), methodFacts(m, LayerPublic),
-		methodFacts(m, LayerPrivate)+declarationText(m.Properties), content)
+		methodFacts(m, LayerPrivate)+declarationText(m.Properties)+sqlDependenciesText(m.SQLDependencies)+sqlModuleText(m.SQLQuotedIdentifierOff, m.SQLRuntimeDependencies), content)
 }
 
 // methodFacts renders a signature; parameters carry their private facts (such as
@@ -85,7 +85,7 @@ func paramsText(params []RecordField, layer Layer) string {
 // declarationText renders a trigger's event and timing.
 func declarationText(properties map[string]any) string {
 	text := ""
-	for _, key := range []string{TriggerEventProperty, TriggerTimingProperty} {
+	for _, key := range []string{TriggerEventProperty, TriggerTimingProperty, TriggerDisabledProperty} {
 		if value, ok := properties[key]; ok {
 			text += " " + key + "=" + fmt.Sprint(value)
 		}

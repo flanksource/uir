@@ -57,6 +57,9 @@ func sqlSourceKinds(source *sqlSource, kinds symbolhandle.Kinds) ([]string, erro
 }
 
 func sqlPropertyFields(source *sqlSource, kinds symbolhandle.Kinds, catalog storage.DomainCatalog) (map[string]string, error) {
+	if source.function.Name == "files" {
+		return maps.Clone(sqlFileFields), nil
+	}
 	fields := maps.Clone(sqlFields)
 	fields["symbol.props"] = "object"
 	fields["relationship.props"] = "object"
@@ -78,6 +81,14 @@ func sqlPropertyFields(source *sqlSource, kinds symbolhandle.Kinds, catalog stor
 				kind = "mixed"
 			}
 			fields[field] = kind
+		}
+	}
+	for kind, metrics := range catalog.Metrics {
+		if !slices.Contains(selected, kind) {
+			continue
+		}
+		for name := range metrics {
+			fields["symbol.metrics."+name] = "integer"
 		}
 	}
 	for _, kind := range catalog.Relationships {

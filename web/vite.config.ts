@@ -1,10 +1,15 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
 
-const clickyRoot = fileURLToPath(new URL("../../clicky-ui/", import.meta.url));
+const webDir = fileURLToPath(new URL(".", import.meta.url)).replace(/\/$/, "");
+const clickyRoot = process.env.CLICKY_UI_ROOT
+  ? `${resolve(process.env.CLICKY_UI_ROOT)}/`
+  : fileURLToPath(new URL("../../clicky-ui/", import.meta.url));
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const clickySource = resolve(clickyRoot, "packages/ui/src");
 
 const clickyEntries = {
@@ -12,6 +17,7 @@ const clickyEntries = {
   "expressions/playground": "expressions/playground.ts",
   "ai/runtime-profile": "runtime-profile.ts",
   components: "components.ts",
+  connections: "connections.ts",
   data: "data.ts",
   icons: "icons.ts",
   rpc: "rpc.ts",
@@ -30,8 +36,11 @@ const clickyEntries = {
   ai: "ai.ts",
 } as const;
 
-export default defineConfig(({ command, mode }) => {
-  const localClicky = command === "serve" && mode === "development";
+// `uir serve --dev` and vitest both run Vite's serve command and resolve clicky-ui from the sibling
+// checkout (or CLICKY_UI_ROOT), so local clicky-ui changes need no publish or install. `vite build`,
+// and any serve without that checkout such as CI, use the published package pinned in package.json.
+export default defineConfig(({ command }) => {
+  const localClicky = command === "serve" && existsSync(clickySource);
   return {
     plugins: [react(), tailwindcss()],
     resolve: localClicky
@@ -54,7 +63,7 @@ export default defineConfig(({ command, mode }) => {
               replacement: resolve(clickySource, "index.ts"),
             },
           ],
-          dedupe: ["react", "react-dom", "monaco-editor"],
+          dedupe: ["react", "react-dom", "react/jsx-runtime", "@tanstack/react-query", "monaco-editor"],
         }
       : undefined,
     server: {
@@ -66,7 +75,10 @@ export default defineConfig(({ command, mode }) => {
       emptyOutDir: true,
     },
     test: {
-      include: ["src/**/*.test.ts"],
+      include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+      // The aliased clicky-ui source imports packages installed in the checkout's own node_modules.
+      // Node would load those externally with that tree's React; inlining them lets Vite dedupe React.
+      server: { deps: { inline: [new RegExp(`^(?!${escapeRegExp(webDir)}/)`)] } },
     },
   };
 });

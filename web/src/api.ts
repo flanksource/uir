@@ -1,5 +1,4 @@
 import { parseServerTiming, type ServerTimingMetric } from "@flanksource/clicky-ui/data";
-import type { JsonSchemaObject } from "@flanksource/clicky-ui/components";
 
 export type TimedResponse<T> = { data: T; timing: ServerTimingMetric[] };
 
@@ -46,9 +45,10 @@ export type SnapshotReason = "unknown" | "add" | "reindex" | "refactor" | "local
 
 export type SnapshotKind = "head" | "historical" | "versioned";
 
-// ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts are against
-// base_snapshot_id; index_started_at is absent on snapshots published before it was recorded.
+// ModuleSnapshot is one snapshot of a checkout. Its files_* and symbols_changed counts describe
+// its original publication, including after rebasing; index_started_at is absent on older snapshots.
 export type ModuleSnapshot = {
+  analysis_mode?: "syntax" | "typed";
   id: string;
   root_key: string;
   canonical_path: string;
@@ -166,9 +166,11 @@ export type ModuleQuerySymbol = {
   visibility: string;
   parameter_types: unknown;
 };
-export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: number };
-export type MissingHeadWarning = { root_key: string; location: string; message: string };
-export type ItemsWithWarnings<T> = { items: T[]; warnings: MissingHeadWarning[] };
+/** One persisted package diagnostic; rule is "uir/index" for a file indexed degraded and absent for a load or type error. */
+export type PackageDiagnostic = { path?: string; range?: [number, number, number, number]; rule?: string; message: string };
+export type ModuleQueryCoverage = { root_key: string; location: string; snapshot_id: string; package_path: string; coverage: string; diagnostics: PackageDiagnostic[] };
+export type MissingHead = { root_key: string; location: string; message: string };
+export type ModuleStatus = { missing_heads: MissingHead[] };
 export type ModuleQueryResult = {
   operation: unknown;
   total: number;
@@ -176,7 +178,6 @@ export type ModuleQueryResult = {
   declarations: ModuleQueryRow[];
   symbols: ModuleQuerySymbol[];
   coverage: ModuleQueryCoverage[];
-  warnings: MissingHeadWarning[];
   stages: { name: string; value: string }[];
   path?: { symbols: ModuleQuerySymbol[]; calls: ModuleQueryRow[] };
   columns?: { name: string; field: string; type: string }[];
@@ -222,13 +223,35 @@ export type ModuleGraphResult = ModuleGraph & {
   /** The effective exclusion patterns. */
   exclude: string[];
   packages: ModuleGraphPackage[];
-  stages: { name: string; value: string }[]; warnings: MissingHeadWarning[]; candidates: ModuleQuerySymbol[];
+  stages: { name: string; value: string }[]; candidates: ModuleQuerySymbol[];
+  /** The answer of a change query, present only when `since` was sent. */
+  since?: ModuleGraphChanges;
+};
+export type ModuleGraphChangeReason = "added" | "removed" | "signature" | "structure" | "body" | "dependency-version";
+/** A changed node reached in either snapshot; `snapshot_id` selects the graph containing `path`. */
+export type ModuleGraphChangedNode = { id: string; reason: ModuleGraphChangeReason; snapshot_id: string; module?: string; path: string[] };
+export type ModuleGraphChangedEdge = { id: string; reason: "added" | "removed"; snapshot_id: string; path: string[] };
+export type ModuleGraphDependencyChange = { module: string; from?: string; to?: string; excluded?: boolean };
+export type ModuleGraphChanges = {
+  revision: string; from_snapshot_id: string; to_snapshot_id: string;
+  /** Whether either walk reaches a changed symbol, or an edge or reached dependency changed. */
+  changed: boolean;
+  /** The earlier bounded graph, absent when the root was added. */
+  before?: ModuleGraph;
+  nodes: ModuleGraphChangedNode[];
+  edges: ModuleGraphChangedEdge[];
+  symbols: Partial<Record<ModuleGraphChangeReason, number>>;
+  dependencies: ModuleGraphDependencyChange[];
 };
 export type ModuleGraphOptions = {
   selector?: string; symbol?: string; direction?: ModuleGraphDirection; depth?: number; limit?: number;
   /** Package patterns to leave out; empty or absent takes the server defaults, ["none"] excludes nothing. */
   exclude?: string[];
   root?: string; location?: string; snapshot?: string;
+  /** A revision to compare against: the graph becomes a change query over the root's callees. */
+  since?: string;
+  /** A snapshot UUID to use for `since` instead of its newest clean snapshot. */
+  "since-snapshot"?: string;
 };
 export type ModuleIndexResult = {
   root_key: string;
@@ -239,9 +262,14 @@ export type ModuleIndexResult = {
   parsed_files: number;
   reused_files: number;
   unchanged: boolean;
+  /** The snapshot's diagnostics in lint's shape, files relative to the module; they do not fail it. */
+  warnings?: IndexWarning[];
   /** Why this module of the run failed; its counts are then zero. */
   error?: string;
 };
+/** A lint-shaped warning: rule.method is "uir/index" for a file indexed degraded, "uir/coverage" for a load or type error. */
+export type IndexWarning = { file?: string; line?: number; column?: number; message?: string; source?: string;
+  rule?: { type?: string; package?: string; method?: string }; severity?: "error" | "warning" | "info" };
 /** An add or reindex answers 202 Accepted with the task run that indexes in the background. */
 export type ModuleIndexRun = { run_id: string };
 export type GitRef = { name: string; commit: string };
@@ -253,10 +281,12 @@ export type GitHistory = { root_key: string; location: string; branches: GitRef[
 export type SymbolChange = { class: "added" | "removed" | "signature" | "structure" | "body" | "moved"; kind: string;
   owner?: string; name: string; visibility: string; shape_before?: string; shape_after?: string;
   shape_diff?: { op: string; text: string; paired?: boolean; tokenizer?: "go" | "text"; tokens: { op: string; text: string }[] }[];
-  path_before?: string; path_after?: string; lines?: { added: number; removed: number }; coverage?: string[]; note?: string };
+  path_before?: string; path_after?: string; lines?: { added: number; removed: number }; coverage?: string[]; note?: string;
+  /** The copy of a moved row reported under the file the symbol left. */
+  moved_away?: boolean };
 export type SymbolDiff = { root_key: string; from: { commit: string; snapshot_id: string; worktree_state: string };
-  to: { commit: string; snapshot_id: string; worktree_state: string }; visibility: string; stat: boolean;
-  lines_error?: string; packages: { path: string; lines?: { added: number; removed: number };
+  to: { commit: string; snapshot_id: string; worktree_state: string }; visibility: string; change_types?: string[]; stat: boolean;
+  lines_error?: string; packages: { path: string; lines?: { added: number; removed: number }; hidden_files?: number;
     files: { path: string; status: string; coverage?: string[]; excluded?: string;
       lines?: { added: number; removed: number }; lines_error?: string; hidden_rows?: number; rows: SymbolChange[] }[] }[] };
 export type Page<T> = { data: T[]; page: { limit: number; offset: number; total: number } };
@@ -268,26 +298,10 @@ export type SystemInfo = {
   database_size_bytes: number;
 };
 
-export type ConnectionType = "git" | "github" | "azure_devops" | "gitlab" | "postgres" | "sql_server" | "sqlite" | "s3" | "mysql";
-export type ConnectionView = {
-  id: string;
-  name: string;
-  namespace: string;
-  type: ConnectionType;
-  url?: string;
-  username?: string;
-  password?: string;
-  certificate?: string;
-  properties?: Record<string, string>;
-  insecure_tls: boolean;
-  has_url: boolean;
-  has_username: boolean;
-  has_password: boolean;
-  has_certificate: boolean;
-  literal_credentials: boolean;
-  warnings: string[];
-};
-export type ConnectionInput = Partial<Pick<ConnectionView, "name" | "namespace" | "type" | "url" | "username" | "password" | "certificate" | "properties" | "insecure_tls">>;
+/** A saved connection as the commons-db connection service lists it; the service owns the full shape. */
+export type Connection = { id: string; name: string; namespace?: string; type: string };
+/** The connection types a database module can capture schema metadata from. */
+export const SQL_CONNECTION_TYPES = ["postgres", "mysql", "sql_server", "sqlite"] as const;
 export type DatabaseModule = { id: string; connection_id: string; database_name: string; name: string; root_key: string; created_at: string };
 export type DatabaseCapture = { id: string; started_at: string; revision: string; ordinal: number };
 export type DatabaseModuleCreated = { module: DatabaseModule; capture?: ModuleIndexResult; capture_error?: string };
@@ -327,32 +341,12 @@ async function timedRequest<T>(path: string, options?: RequestInit): Promise<Tim
   return { data: await response.json() as T, timing: parseServerTiming(header) };
 }
 
-export function listConnectionSchemas(): Promise<Record<ConnectionType, JsonSchemaObject>> {
-  return request("/api/v1/connections/schema");
-}
-
-export function listConnections(): Promise<ConnectionView[]> {
-  return request("/api/v1/connections");
-}
-
-export function createConnection(input: ConnectionInput): Promise<ConnectionView> {
-  return request("/api/v1/connections", { method: "POST", body: JSON.stringify(input) });
-}
-
-export function updateConnection(id: string, input: ConnectionInput): Promise<ConnectionView> {
-  return request(`/api/v1/connections/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) });
-}
-
-export async function deleteConnection(id: string): Promise<void> {
-  await requestResponse(`/api/v1/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-
-export function testConnection(id: string): Promise<{ ok: boolean }> {
-  return request(`/api/v1/connections/${encodeURIComponent(id)}/test`, { method: "POST" });
+export function listSQLConnections(): Promise<Connection[]> {
+  return request(`/api/v1/connection?types=${SQL_CONNECTION_TYPES.join(",")}`);
 }
 
 export function listConnectionDatabases(id: string): Promise<string[]> {
-  return request(`/api/v1/connections/${encodeURIComponent(id)}/databases`, { method: "POST" });
+  return request(`/api/v1/database-modules/connections/${encodeURIComponent(id)}/databases`, { method: "POST" });
 }
 
 export function listDatabaseModules(): Promise<DatabaseModule[]> {
@@ -392,8 +386,12 @@ export function listModuleRoots(): Promise<ModuleRoot[]> {
   return request(moduleURL(""));
 }
 
-export function listModuleHeads(): Promise<ItemsWithWarnings<ModuleHead>> {
+export function listModuleHeads(): Promise<ModuleHead[]> {
   return request(moduleURL("heads"));
+}
+
+export function getModuleStatus(): Promise<ModuleStatus> {
+  return request(moduleURL("status"));
 }
 
 export function getSystemInfo(): Promise<SystemInfo> {
@@ -454,21 +452,21 @@ export async function runModuleQuery(expression: string, root: string, snapshot:
   return { data: result.data, timing: result.timing };
 }
 
-export async function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
-  return (await request<ItemsWithWarnings<ModuleQuerySymbol>>(moduleURL("suggest", { prefix, root, snapshot }), { signal })).items;
+export function suggestModuleSymbols(prefix: string, root: string, snapshot: string, signal?: AbortSignal): Promise<ModuleQuerySymbol[]> {
+  return request<ModuleQuerySymbol[]>(moduleURL("suggest", { prefix, root, snapshot }), { signal });
 }
 
-export async function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal, language?: QueryLanguage): Promise<string[]> {
-  return (await request<ItemsWithWarnings<string>>(moduleURL("suggest-selectors", { prefix, root, snapshot, ...(language ? { language } : {}) }), { signal })).items;
+export function suggestTypedSelectors(prefix: string, root: string, snapshot: string, signal?: AbortSignal, language?: QueryLanguage): Promise<string[]> {
+  return request<string[]>(moduleURL("suggest-selectors", { prefix, root, snapshot, ...(language ? { language } : {}) }), { signal });
 }
 
 function isQueryResult(value: unknown): value is ModuleQueryResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
-  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "warnings", "stages"].every((key) => Array.isArray(result[key]));
+  return typeof result.total === "number" && ["matches", "declarations", "symbols", "coverage", "stages"].every((key) => Array.isArray(result[key]));
 }
 
-const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot"] as const;
+const graphParameters = ["selector", "symbol", "direction", "depth", "limit", "exclude", "root", "location", "snapshot", "since", "since-snapshot"] as const;
 
 export async function getModuleGraph(options: ModuleGraphOptions, signal?: AbortSignal): Promise<TimedResponse<ModuleGraphResult>> {
   const params: Record<string, string> = {};
@@ -486,11 +484,11 @@ function isGraphResult(value: unknown): value is ModuleGraphResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
   return typeof result.omitted === "object" && result.omitted !== null
-    && ["roots", "nodes", "edges", "exclude", "packages", "stages", "warnings", "candidates"].every((key) => Array.isArray(result[key]));
+    && ["roots", "nodes", "edges", "exclude", "packages", "stages", "candidates"].every((key) => Array.isArray(result[key]));
 }
 
 export function addModules(path: string, includeTests: boolean): Promise<ModuleIndexRun> {
-  return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests, "no-workspace-uses": true }) });
+  return request(moduleURL("add"), { method: "POST", body: JSON.stringify({ args: [path], "include-tests": includeTests }) });
 }
 
 export function reindexModules(options: { path?: string; includeTests?: boolean; force?: boolean; all?: boolean }): Promise<ModuleIndexRun> {

@@ -155,6 +155,9 @@ func (source *indexGraphSource) Out(ctx context.Context, id string) ([]graph.Ste
 	if err := source.remember(ctx, targets); err != nil {
 		return nil, err
 	}
+	if err := source.guards.prefetch(ctx, calls); err != nil {
+		return nil, err
+	}
 	steps := make([]graph.Step, 0, len(calls))
 	for _, edge := range edges {
 		if steps, err = source.step(ctx, steps, source.nodes[edge.symbol.ID], edge.call); err != nil {
@@ -214,6 +217,9 @@ func (source *indexGraphSource) enclosingSteps(ctx context.Context, rows []Modul
 		return nil, err
 	}
 	if err := source.remember(ctx, users); err != nil {
+		return nil, err
+	}
+	if err := source.guards.prefetch(ctx, rows); err != nil {
 		return nil, err
 	}
 	steps := make([]graph.Step, 0, len(rows))

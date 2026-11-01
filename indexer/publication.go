@@ -32,10 +32,26 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
 	}
-	result := ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: len(discovered.Files)}
+	result := ModuleResult{RootKey: root.RootKey, Location: location.CanonicalPath, Files: extraction.fileCount()}
 	base, err := loadModuleBase(ctx, database, root, location)
 	if err != nil {
 		return ModuleResult{}, storage.ModuleLocation{}, err
+	}
+	if extraction.requestedBase != uuid.Nil {
+		if options.Reason != storage.ReasonHistorical {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("explicit base snapshot requires historical publication")
+		}
+		var selected storage.ModuleSnapshot
+		if err := database.WithContext(ctx).Where("id = ?", extraction.requestedBase).First(&selected).Error; err != nil {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("load explicit base snapshot %s: %w", extraction.requestedBase, err)
+		}
+		if selected.RootID != root.ID || selected.ConfigurationHash != discovered.ConfigurationHash {
+			return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("explicit base snapshot %s has root %s and configuration %s; expected root %s and configuration %s", selected.ID, selected.RootID, selected.ConfigurationHash, root.ID, discovered.ConfigurationHash)
+		}
+		base.snapshot = selected
+	}
+	if extraction.baseSnapshotID != uuid.Nil && extraction.baseSnapshotID != base.snapshot.ID {
+		return ModuleResult{}, storage.ModuleLocation{}, fmt.Errorf("location %s head moved from extraction base %s: %w", location.ID, extraction.baseSnapshotID, ErrIndexInputsChanged)
 	}
 	if options.Reason == storage.ReasonHistorical && !options.Force {
 		existing, found, err := matchingHistoricalSnapshot(ctx, database, location, extraction)
@@ -44,7 +60,7 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 		}
 		if found {
 			result.SnapshotID, result.HeadVersion = existing.ID.String(), base.head.Version
-			result.ReusedFiles, result.Unchanged = len(discovered.Files), true
+			result.ReusedFiles, result.Unchanged = extraction.fileCount(), true
 			return result, location, nil
 		}
 	}
@@ -60,7 +76,10 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 		unchanged = true
 	}
 	if unchanged {
-		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, len(discovered.Files), true
+		result.SnapshotID, result.HeadVersion, result.ReusedFiles, result.Unchanged = base.snapshot.ID.String(), base.head.Version, extraction.fileCount(), true
+		if result.Warnings, err = snapshotWarnings(base.snapshot.Diagnostics); err != nil {
+			return ModuleResult{}, storage.ModuleLocation{}, err
+		}
 		return result, location, createSiblingShapes(ctx, database, base.snapshot, extraction.siblingShapes)
 	}
 	snapshot, err := publishSnapshot(ctx, database, snapshotPublication{
@@ -98,22 +117,19 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if publication.extraction.indexStartedAt.IsZero() {
 		return storage.ModuleSnapshot{}, fmt.Errorf("publish module %q: extraction has no start time", publication.root.RootKey)
 	}
-	previous := map[string]storage.SourceRevision{}
-	if publication.base.snapshot.ID != uuid.Nil {
-		if err := Phase(ctx, "effective-sources", func(ctx context.Context) (err error) {
-			previous, err = storage.EffectiveSources(ctx, database, publication.base.snapshot.ID)
-			return err
-		}); err != nil {
-			return storage.ModuleSnapshot{}, err
-		}
+	if publication.extraction.carried != nil {
+		return publishCarried(ctx, database, publication, result)
 	}
-	var current map[string]storage.SourceRevision
+	membership, err := baseMembership(ctx, database, publication.base.snapshot, publication.extraction)
+	if err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
 	var handles map[string]int64
 	if err := Phase(ctx, "documents", func(ctx context.Context) (err error) {
-		if current, err = sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, previous); err != nil {
+		if membership.current, err = sourceRevisions(ctx, database, publication.root.ID, publication.extraction.root.Files, membership.previous); err != nil {
 			return err
 		}
-		handles, err = publishDocuments(ctx, database, publication, current, result)
+		handles, err = publishDocuments(ctx, database, &publication, &membership, result)
 		PhaseCount(ctx, "parsed", int64(result.ParsedFiles))
 		PhaseCount(ctx, "reused", int64(result.ReusedFiles))
 		return err
@@ -125,30 +141,89 @@ func publishSnapshot(ctx context.Context, database *gorm.DB, publication snapsho
 	if err := storage.CreateSnapshot(ctx, database, &snapshot); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
+	if result.Warnings, err = snapshotWarnings(snapshot.Diagnostics); err != nil {
+		return storage.ModuleSnapshot{}, err
+	}
 	if err := publishBlobsAndEdges(ctx, database, publication, snapshot); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if err := publishSnapshotRows(ctx, database, publication, snapshot, previous, current, handles); err != nil {
+	if err := publishSnapshotRows(ctx, database, publication, snapshot, membership, handles); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
-	if publication.preserveHead {
-		result.HeadVersion = publication.base.head.Version
-		return snapshot, nil
-	}
-	if err := Phase(ctx, "advance-head", func(ctx context.Context) (err error) {
-		result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot)
-		return err
-	}); err != nil {
+	if err := publication.advance(ctx, database, snapshot, result); err != nil {
 		return storage.ModuleSnapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// publishSnapshotRows writes the rows a created snapshot derives from its sources and symbols: its
-// source deltas, package coverage, symbol deltas, and stats.
-func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot, previous, current map[string]storage.SourceRevision, handles map[string]int64) error {
+// advance moves the location head to the published snapshot, unless the publication preserves it.
+func (publication snapshotPublication) advance(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, result *ModuleResult) error {
+	if publication.preserveHead {
+		result.HeadVersion = publication.base.head.Version
+		return nil
+	}
+	return Phase(ctx, "advance-head", func(ctx context.Context) (err error) {
+		result.HeadVersion, err = advanceHead(ctx, database, publication.base, snapshot)
+		return err
+	})
+}
+
+// snapshotMembership is what a publication binds against its base: the base's active documents and
+// effective sources, empty without a base, the snapshot's effective sources, and its path → document
+// ordinal bindings.
+type snapshotMembership struct {
+	base     map[string]storage.ActiveDocument
+	previous map[string]storage.SourceRevision
+	current  map[string]storage.SourceRevision
+	bindings map[string]int64
+}
+
+// baseMembership loads the base snapshot's active documents, without content, and its effective
+// sources, or takes the documents the extraction already read of that base.
+func baseMembership(ctx context.Context, database *gorm.DB, base storage.ModuleSnapshot, extraction moduleExtraction) (snapshotMembership, error) {
+	membership := snapshotMembership{base: map[string]storage.ActiveDocument{}, previous: map[string]storage.SourceRevision{}}
+	if base.ID == uuid.Nil {
+		return membership, nil
+	}
+	err := Phase(ctx, "base-documents", func(ctx context.Context) (err error) {
+		membership.base = extraction.baseActive
+		if extraction.baseActiveOf != base.ID {
+			if membership.base, err = storage.ActiveDocuments(ctx, database, base.ID, storage.ActiveDocumentOptions{}); err != nil {
+				return err
+			}
+		}
+		for path, active := range membership.base {
+			membership.previous[path] = active.Source
+		}
+		return nil
+	})
+	return membership, err
+}
+
+// baseOrdinals is the base's path → document ordinal membership.
+func (membership snapshotMembership) baseOrdinals() map[string]int64 {
+	ordinals := make(map[string]int64, len(membership.base))
+	for path, active := range membership.base {
+		ordinals[path] = active.Document.Ordinal
+	}
+	return ordinals
+}
+
+// publishSnapshotRows writes the rows a created snapshot derives from its sources, documents, and
+// symbols: its source and document deltas, package coverage, symbol deltas, and stats.
+func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot, membership snapshotMembership, handles map[string]int64) error {
+	previous, current := membership.previous, membership.current
 	if err := Phase(ctx, "source-deltas", func(ctx context.Context) error {
 		return createSourceDeltas(ctx, database, snapshot, previous, current)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "document-deltas", func(ctx context.Context) error {
+		written, err := storage.CreateDocumentDeltas(ctx, database, storage.DocumentDeltaOptions{
+			SnapshotOrdinal: snapshot.Ordinal, RootID: snapshot.RootID, Base: membership.baseOrdinals(), Current: membership.bindings,
+		})
+		PhaseCount(ctx, "rows", int64(written))
+		return err
 	}); err != nil {
 		return err
 	}
@@ -161,7 +236,12 @@ func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication sna
 		return err
 	}
 	if err := Phase(ctx, "symbol-deltas", func(ctx context.Context) error {
-		return createSymbolDeltas(ctx, database, snapshot, publication, previous, handles)
+		return createSymbolDeltas(ctx, database, snapshot, publication, membership, handles)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "implements-deltas", func(ctx context.Context) error {
+		return createImplementsDeltas(ctx, database, snapshot, publication, handles)
 	}); err != nil {
 		return err
 	}
@@ -182,8 +262,11 @@ func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication sna
 // publishBlobsAndEdges stores the bytes of a snapshot that is not a clean commit, and its dependency
 // edges, or queues the edges when the caller publishes them once every snapshot of a cycle exists.
 func publishBlobsAndEdges(ctx context.Context, database *gorm.DB, publication snapshotPublication, snapshot storage.ModuleSnapshot) error {
-	if snapshot.WorktreeState != storage.WorktreeClean {
+	if snapshot.WorktreeState != storage.WorktreeClean || snapshot.AnalysisMode != "" {
 		for _, file := range publication.extraction.root.Files {
+			if file.GitPath != "" || file.retained {
+				continue
+			}
 			blob := storage.SourceBlob{ContentHash: file.ContentHash, Content: file.Content}
 			if err := database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&blob).Error; err != nil {
 				return fmt.Errorf("store source %q of snapshot %s: %w", file.PathKey, snapshot.ID, err)
@@ -207,12 +290,14 @@ func publishBlobsAndEdges(ctx context.Context, database *gorm.DB, publication sn
 func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 	discovered := publication.extraction.root
 	snapshot := storage.ModuleSnapshot{
-		ID: publication.snapshotID, RootID: publication.root.ID, LocationID: publication.location.ID,
+		AnalysisMode: discovered.AnalysisMode,
+		ID:           publication.snapshotID, RootID: publication.root.ID, LocationID: publication.location.ID,
 		Revision: discovered.Revision, GitCommit: discovered.GitCommit, ModuleVersion: discovered.ModuleVersion, WorktreeState: discovered.WorktreeState,
 		ContentSetHash: discovered.ContentSetHash, ConfigurationHash: discovered.ConfigurationHash,
 		ContextHash: publication.extraction.contextHash, Coverage: publication.extraction.coverage,
 		PackageCount: len(publication.extraction.packages), Diagnostics: publication.extraction.diagnostics,
 		StartedAt: publication.startedAt, CompletedAt: time.Now().UTC(), Reason: publication.reason,
+		CoverageDeterministic: &publication.extraction.coverageDeterministic,
 	}
 	indexStartedAt := publication.extraction.indexStartedAt
 	snapshot.IndexStartedAt = &indexStartedAt
@@ -223,8 +308,10 @@ func (publication snapshotPublication) snapshot() storage.ModuleSnapshot {
 		modified := discovered.LastModifiedAt
 		snapshot.LastModifiedAt = &modified
 	}
-	hash := dependencyHash(discovered.Dependencies)
-	snapshot.DependencySetHash = &hash
+	if discovered.AnalysisMode == "" {
+		hash := dependencyHash(discovered.Dependencies)
+		snapshot.DependencySetHash = &hash
+	}
 	if publication.base.snapshot.ID != uuid.Nil {
 		baseID := publication.base.snapshot.ID
 		snapshot.BaseSnapshotID = &baseID

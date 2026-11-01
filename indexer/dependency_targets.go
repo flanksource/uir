@@ -11,8 +11,6 @@ import (
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"golang.org/x/mod/module"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var errVersionUnavailable = errors.New("versioned dependency snapshot unavailable")
@@ -209,22 +207,26 @@ func (indexer *Indexer) versionTag(ctx context.Context, memo *runMemo, modulePat
 	})
 }
 
-// storedVersionSnapshot is the newest clean snapshot of modulePath at version, a complete one before
-// any degraded one. A caller that reuses it without extracting must check its coverage.
+// storedVersionSnapshot is the newest clean snapshot of modulePath at version whose coverage is
+// settled (CoverageSettled), or else the newest clean one. A caller that reuses it without extracting
+// must check its coverage.
 func (indexer *Indexer) storedVersionSnapshot(ctx context.Context, modulePath, version string) (storage.ModuleSnapshot, bool, error) {
-	var snapshot storage.ModuleSnapshot
-	err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
+	var snapshots []storage.ModuleSnapshot
+	if err := indexer.database.WithContext(ctx).Table("snapshots AS snapshot").Select("snapshot.*").
 		Joins("JOIN modules AS root ON root.id = snapshot.root_id").
-		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ?", modulePath, version, storage.WorktreeClean).
-		Order(clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN snapshot.coverage IN ? THEN 0 ELSE 1 END, snapshot.completed_at DESC", Vars: []any{storage.CompleteCoverages}}}).
-		Take(&snapshot).Error
-	if err == nil {
-		return snapshot, true, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		Where("root.root_key = ? AND snapshot.module_version = ? AND snapshot.worktree_state = ? AND snapshot.analysis_mode = ''", modulePath, version, storage.WorktreeClean).
+		Order("snapshot.completed_at DESC").Find(&snapshots).Error; err != nil {
 		return storage.ModuleSnapshot{}, false, fmt.Errorf("find indexed version %s@%s: %w", modulePath, version, err)
 	}
-	return storage.ModuleSnapshot{}, false, nil
+	if len(snapshots) == 0 {
+		return storage.ModuleSnapshot{}, false, nil
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.CoverageSettled() {
+			return snapshot, true, nil
+		}
+	}
+	return snapshots[0], true, nil
 }
 
 // versionedClosureMiss is why the closure of snapshotID, every snapshot reachable from it through
@@ -310,6 +312,9 @@ func (indexer *Indexer) unlinkedEdgeResolvable(ctx context.Context, memo *runMem
 }
 
 func versionCommit(ctx context.Context, checkout, version string) (string, error) {
+	if err := observeCheckpoint(ctx, checkout); err != nil {
+		return "", err
+	}
 	top, err := revisionGit(ctx, checkout, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err

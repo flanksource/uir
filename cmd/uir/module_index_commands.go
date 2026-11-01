@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 
 	"github.com/flanksource/clicky"
-	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/commons/logger"
+	"github.com/flanksource/gavel/linters"
+	"github.com/flanksource/gavel/models"
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/storage"
 	"github.com/spf13/cobra"
@@ -15,11 +17,10 @@ import (
 )
 
 type moduleAddOptions struct {
-	Path                 string `args:"true"`
-	IncludeTests         bool   `flag:"include-tests" help:"Index Go test files"`
-	Force                bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
-	IncludeWorkspaceUses bool   `flag:"include-workspace-uses" help:"Also add go.work use paths outside the requested directory"`
-	NoWorkspaceUses      bool   `flag:"no-workspace-uses" help:"Do not add go.work use paths outside the requested directory"`
+	Path         string `args:"true"`
+	IncludeTests bool   `flag:"include-tests" help:"Index Go test files"`
+	Force        bool   `flag:"force" help:"Reparse all sources and publish a new snapshot"`
+	All          bool   `flag:"all" help:"Also add go.work use paths outside the requested directory"`
 }
 
 type moduleReindexOptions struct {
@@ -30,11 +31,31 @@ type moduleReindexOptions struct {
 }
 
 // moduleIndexRun answers add and reindex. An HTTP request gets the run id with 202 Accepted while the
-// run continues under the serve context; the CLI waits and gets every module's result as well.
+// run continues under the serve context; the CLI waits and gets every module's result as well, and
+// below them every module's warnings grouped by file, as `uir lint` groups its findings.
 type moduleIndexRun struct {
 	RunID    string                 `json:"run_id"`
 	Results  []indexer.ModuleResult `json:"results,omitempty"`
+	Warnings *linters.LinterResult  `json:"-"`
 	accepted bool
+}
+
+// indexWarnings are the warnings of every module in results as one lint result, each file joined to
+// its module's location, or nil when there are none.
+func indexWarnings(results []indexer.ModuleResult) *linters.LinterResult {
+	var warnings []models.Violation
+	for _, result := range results {
+		for _, warning := range result.Warnings {
+			if warning.File != "" {
+				warning.File = filepath.Join(result.Location, warning.File)
+			}
+			warnings = append(warnings, warning)
+		}
+	}
+	if len(warnings) == 0 {
+		return nil
+	}
+	return &linters.LinterResult{Linter: "uir index", Success: true, Violations: warnings}
 }
 
 func (run moduleIndexRun) ResponseStatus() int {
@@ -52,17 +73,12 @@ func registerModuleIndexCommands(root *cobra.Command) {
 }
 
 func registerAddCommand(root *cobra.Command) {
-	var add *cobra.Command
-	add = clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) (moduleIndexRun, error) {
+	add := clicky.AddNamedCommandWithContext("add", root, moduleAddOptions{}, func(ctx context.Context, options moduleAddOptions) (moduleIndexRun, error) {
 		path := options.Path
 		if path == "" {
 			path = "."
 		}
-		pathOptions := addPathOptions{Path: path, IncludeWorkspaceUses: options.IncludeWorkspaceUses, NoWorkspaceUses: options.NoWorkspaceUses}
-		if entity.OperationSurfaceFromContext(ctx) == "cli" {
-			pathOptions.Input, pathOptions.Prompt = add.InOrStdin(), add.ErrOrStderr()
-		}
-		paths, err := addPaths(pathOptions)
+		paths, err := addPaths(addPathOptions{Path: path, All: options.All})
 		if err != nil {
 			return moduleIndexRun{}, err
 		}
@@ -144,7 +160,7 @@ func startModuleIndex(ctx context.Context, start func(context.Context, *indexer.
 		return moduleIndexRun{RunID: run.ID(), accepted: true}, nil
 	}
 	results, err := run.Wait(ctx)
-	return moduleIndexRun{RunID: run.ID(), Results: results}, err
+	return moduleIndexRun{RunID: run.ID(), Results: results, Warnings: indexWarnings(results)}, err
 }
 
 // addModules indexes the modules below path as the CLI does, for callers that need them indexed.

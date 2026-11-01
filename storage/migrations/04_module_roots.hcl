@@ -91,6 +91,11 @@ table "locations" {
 table "snapshots" {
   schema = schema.public
 
+  column "analysis_mode" {
+    type = text
+    default = ""
+  }
+
   column "id" {
     type = uuid
     null = false
@@ -216,6 +221,14 @@ table "snapshots" {
     type = text
     null = true
   }
+  // Whether extracting the snapshot's commit under its configuration and dependency set again must
+  // reach the same coverage: every load error was a fact of the sources and the module versions they
+  // pin, not of the network, module cache or file system. Null only on rows published before it was
+  // recorded; those are not deterministic, so a degraded one is never reused without extracting.
+  column "coverage_deterministic" {
+    type = boolean
+    null = true
+  }
 
   primary_key { columns = [column.id] }
   foreign_key "snapshots_root_id_fkey" {
@@ -239,10 +252,12 @@ table "snapshots" {
   unique "snapshots_root_id_id_key" { columns = [column.root_id, column.id] }
   unique "snapshots_location_id_id_key" { columns = [column.location_id, column.id] }
   unique "snapshots_ordinal_key" { columns = [column.ordinal] }
+  unique "snapshots_root_id_ordinal_key" { columns = [column.root_id, column.ordinal] }
   index "snapshots_location_started_idx" { columns = [column.location_id, column.started_at] }
   index "snapshots_base_idx" { columns = [column.base_snapshot_id] }
   index "snapshots_root_revision_idx" { columns = [column.root_id, column.revision] }
   check "snapshots_worktree_state_check" { expr = "worktree_state IN ('clean', 'dirty', 'unknown')" }
+  check "snapshots_analysis_mode_check" { expr = "analysis_mode IN ('', 'syntax', 'typed')" }
   check "snapshots_revision_check" { expr = "(worktree_state = 'unknown') OR length(revision) > 0" }
   check "snapshots_context_hash_check" { expr = "length(context_hash) = 64" }
   check "snapshots_coverage_check" { expr = "coverage IN ('indexed', 'partial', 'syntax', 'excluded')" }
