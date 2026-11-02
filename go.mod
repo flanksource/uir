@@ -143,7 +143,7 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
 	github.com/firebase/genkit/go v1.13.1 // indirect
-	github.com/flanksource/captain v0.0.72-0.20261023035220-26c09a9de22f // indirect
+	github.com/flanksource/captain v0.0.72 // indirect
 	github.com/flanksource/clicky/aichat v1.21.89 // indirect
 	github.com/flanksource/clicky/valkey v1.21.89 // indirect
 	github.com/flanksource/commons-db/recordstore v0.1.69 // indirect

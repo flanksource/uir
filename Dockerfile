@@ -9,7 +9,7 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm run build
 
-FROM golang:1.26.1-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 ENV GOWORK=off
 WORKDIR /src
 COPY go.mod go.sum ./
