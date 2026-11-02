@@ -111,7 +111,7 @@ Coverage has one vocabulary at every level. `indexed`: type-checked without diag
 
 ```json
 {
-  "version": 11,
+  "version": 12,
   "package_path": "example.org/service/invoices",
   "symbols": [
     {
