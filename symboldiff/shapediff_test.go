@@ -32,7 +32,7 @@ var _ = Describe("shape diff", func() {
 		}))
 		Expect(diff.String()).To(Equal("- " + saveBefore + "\n+ " + saveAfter + "\n"))
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
-			"~ func (s \\*Store) Save(ctx context.Context, inv Invoice~~) error~~**, opts ...SaveOption) (Receipt, error)**\n"))
+			"\\~ func (s \\*Store) Save(ctx context.Context, inv Invoice~~) error~~**, opts ...SaveOption) (Receipt, error)**\n"))
 		Expect(diff.Markdown()).To(And(ContainSubstring("~~) error~~"), ContainSubstring("**, opts ...SaveOption) (Receipt, error)**")))
 		ansi := diff.ANSI()
 		Expect(ansi).To(HavePrefix("~ " + savePrefix))
@@ -53,7 +53,7 @@ var _ = Describe("shape diff", func() {
 		}))
 		Expect(diff.String()).To(Equal("  type Invoice struct {\n  \tID    InvoiceID\n- \tTotal int\n+ \tTotal Money\n+ \tNotes string\n  }\n"))
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
-			"  type Invoice struct {\n  \tID    InvoiceID\n~ \tTotal ~~int~~**Money**\n+ \t**Notes string**\n  }\n"))
+			"  type Invoice struct {\n  \tID    InvoiceID\n\\~ \tTotal ~~int~~**Money**\n\\+ \t**Notes string**\n  }\n"))
 		Expect(diff.ANSI()).To(And(MatchRegexp(`\x1b\[9m\x1b\[[0-9;]+mint`), MatchRegexp(`\x1b\[1;[0-9;]*mMoney`), MatchRegexp(`\+ \t\x1b\[1;[0-9;]*mNotes string`)))
 	})
 
@@ -61,13 +61,13 @@ var _ = Describe("shape diff", func() {
 		diff := DiffShapes("type T struct {\n\tA int\n\tB string\n}", "type T struct {\n\tX float\n\tB Text\n}", TokenizerGo)
 		Expect(diff.String()).To(Equal("  type T struct {\n- \tA int\n+ \tX float\n- \tB string\n+ \tB Text\n  }\n"))
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
-			"  type T struct {\n- \t~~A int~~\n+ \t**X float**\n~ \tB ~~string~~**Text**\n  }\n"))
+			"  type T struct {\n\\- \t~~A int~~\n\\+ \t**X float**\n\\~ \tB ~~string~~**Text**\n  }\n"))
 	})
 
 	It("escapes markdown metacharacters of token text so they render literally", func() {
 		diff := DiffShapes("func Pick(m map[string]*_Item) `tag`", "func Pick(m map[string]*_Entry) `tag`", TokenizerGo)
 		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal(
-			"~ func Pick(m map\\[string\\]\\*~~\\_Item~~**\\_Entry**) \\`tag\\`\n"))
+			"\\~ func Pick(m map\\[string\\]\\*~~\\_Item~~**\\_Entry**) \\`tag\\`\n"))
 		Expect(diff.String()).To(Equal("- func Pick(m map[string]*_Item) `tag`\n+ func Pick(m map[string]*_Entry) `tag`\n"))
 	})
 
@@ -78,7 +78,7 @@ var _ = Describe("shape diff", func() {
 			{Op: OpInsert, Paired: true, Tokenizer: TokenizerGo, Text: "func Half(a *Amount) Amount", Tokens: tokens("equal", "func Half(a ", "insert", "*", "equal", "Amount) Amount")},
 		}))
 		Expect(diff.String()).To(Equal("- func Half(a Amount) Amount\n+ func Half(a *Amount) Amount\n"))
-		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal("~ func Half(a **\\***Amount) Amount\n"))
+		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal("\\~ func Half(a **\\***Amount) Amount\n"))
 		Expect(diff.ANSI()).To(MatchRegexp(`func Half\(a \x1b\[1;[0-9;]*m\*\x1b\[0mAmount\) Amount`))
 	})
 
@@ -103,7 +103,7 @@ var _ = Describe("shape diff", func() {
 			{Op: OpDelete, Paired: true, Tokenizer: TokenizerText, Text: before, Tokens: tokens("delete", "@p1", "equal", " VARCHAR(10) DEFAULT ", "delete", "'new'")},
 			{Op: OpInsert, Paired: true, Tokenizer: TokenizerText, Text: after, Tokens: tokens("insert", "@p2", "equal", " VARCHAR(10) DEFAULT ", "insert", "'open'")},
 		}))
-		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal("~ ~~@p1~~**@p2** VARCHAR(10) DEFAULT ~~'new'~~**'open'**\n"),
+		Expect(diff.MarkdownWithOptions(api.MarkdownOptions{NoColor: true})).To(Equal("\\~ ~~@p1~~**@p2** VARCHAR(10) DEFAULT ~~'new'~~**'open'**\n"),
 			"the rich form re-diffs the pair with the tokenizer it was built with")
 		Expect(DiffShapes(before, after, TokenizerGo)[0].Tokens[0]).To(Equal(Token{Op: OpEqual, Text: "@"}), "go/scanner splits the parameter sigil off")
 	})

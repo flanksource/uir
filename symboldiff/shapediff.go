@@ -341,38 +341,31 @@ func (diff ShapeDiff) plain(indent string) string {
 
 // rich renders a replaced pair as one "~ " line with token marks: removed tokens red and struck
 // through, added tokens green and bold. Unpaired lines keep their prefix and whole-line style.
-// clicky's markdown renderer does not escape text content, so markdown escapes token text here.
-func (diff ShapeDiff) rich(indent string, markdown bool) api.Text {
+func (diff ShapeDiff) rich(indent string) api.Text {
 	text := api.Text{}
 	for index := 0; index < len(diff); index++ {
 		line := diff[index]
 		if line.Paired && line.Op == OpDelete && index+1 < len(diff) && diff[index+1].Paired {
 			text = text.Append(indent + "~ ")
 			for _, segment := range tokenDiff(line.Text, diff[index+1].Text, line.Tokenizer) {
-				text = text.Add(styledToken(segment.Op, segment.Text, markdown))
+				text = text.Add(styledToken(segment.Op, segment.Text))
 			}
 			text = text.Append("\n")
 			index++
 			continue
 		}
-		text = text.Append(indent + linePrefixes[line.Op]).Add(styledToken(line.Op, line.Text, markdown)).Append("\n")
+		text = text.Append(indent + linePrefixes[line.Op]).Add(styledToken(line.Op, line.Text)).Append("\n")
 	}
 	return text
 }
 
-var markdownEscaper = strings.NewReplacer(
-	`\`, `\\`, "`", "\\`", `*`, `\*`, `_`, `\_`, `~`, `\~`, `[`, `\[`, `]`, `\]`, `<`, `\<`, `>`, `\>`)
-
 // styledToken marks a deleted or inserted run, keeping its surrounding whitespace outside the
 // mark so emphasis delimiters stay adjacent to the text they wrap.
-func styledToken(op Op, value string, markdown bool) api.Text {
+func styledToken(op Op, value string) api.Text {
 	core := strings.TrimLeft(value, " \t")
 	leading := value[:len(value)-len(core)]
 	trimmed := strings.TrimRight(core, " \t")
 	trailing := core[len(trimmed):]
-	if markdown {
-		trimmed = markdownEscaper.Replace(trimmed)
-	}
 	var marked api.Text
 	switch op {
 	case OpDelete:
@@ -396,17 +389,17 @@ func styledToken(op Op, value string, markdown bool) api.Text {
 func (diff ShapeDiff) String() string { return diff.plain("") }
 
 // ANSI renders token marks for the terminal.
-func (diff ShapeDiff) ANSI() string { return diff.rich("", false).ANSI() }
+func (diff ShapeDiff) ANSI() string { return diff.rich("").ANSI() }
 
 // HTML renders token marks as HTML.
-func (diff ShapeDiff) HTML() string { return diff.rich("", false).HTML() }
+func (diff ShapeDiff) HTML() string { return diff.rich("").HTML() }
 
 // Markdown renders token marks as ~~removed~~ and **added**, with token text escaped.
-func (diff ShapeDiff) Markdown() string { return diff.rich("", true).Markdown() }
+func (diff ShapeDiff) Markdown() string { return diff.rich("").Markdown() }
 
 // MarkdownWithOptions renders markdown with clicky's options (NoColor drops colour spans).
 func (diff ShapeDiff) MarkdownWithOptions(options api.MarkdownOptions) string {
-	return diff.rich("", true).MarkdownWithOptions(options)
+	return diff.rich("").MarkdownWithOptions(options)
 }
 
 // indentedShapeDiff places a shape diff under a row: the plain form for String, token marks for
@@ -417,11 +410,11 @@ type indentedShapeDiff struct {
 }
 
 func (shape indentedShapeDiff) String() string { return shape.diff.plain(shape.indent) }
-func (shape indentedShapeDiff) ANSI() string   { return shape.diff.rich(shape.indent, false).ANSI() }
-func (shape indentedShapeDiff) HTML() string   { return shape.diff.rich(shape.indent, false).HTML() }
+func (shape indentedShapeDiff) ANSI() string   { return shape.diff.rich(shape.indent).ANSI() }
+func (shape indentedShapeDiff) HTML() string   { return shape.diff.rich(shape.indent).HTML() }
 func (shape indentedShapeDiff) Markdown() string {
-	return shape.diff.rich(shape.indent, true).Markdown()
+	return shape.diff.rich(shape.indent).Markdown()
 }
 func (shape indentedShapeDiff) MarkdownWithOptions(options api.MarkdownOptions) string {
-	return shape.diff.rich(shape.indent, true).MarkdownWithOptions(options)
+	return shape.diff.rich(shape.indent).MarkdownWithOptions(options)
 }
