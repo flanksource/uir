@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@flanksource/facet": "0.1.73",
+    "@flanksource/facet": "0.1.74",
     "react": "~19.3.0",
     "react-dom": "~19.3.0",
     "tailwindcss": "^4.3.3",
