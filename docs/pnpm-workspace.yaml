@@ -7,3 +7,6 @@ allowBuilds:
   esbuild: true
   es5-ext: true
   vue-demi: true
+
+minimumReleaseAgeExclude:
+  - '@flanksource/facet@0.1.74'
