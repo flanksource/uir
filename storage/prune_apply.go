@@ -44,7 +44,8 @@ func (plan prunePlan) apply(ctx context.Context, tx *gorm.DB, result *PruneResul
 }
 
 // rebaseSnapshot makes a kept snapshot whose base is deleted stand alone: one set delta per path,
-// document binding, and symbol it serves replaces its own deltas, and it loses its base. Its recorded
+// document binding, and symbol it serves replaces its own deltas, and it loses its base. Each symbol's
+// set keeps the content generation it had, so later links continue counting from it. Its recorded
 // publication stats remain unchanged. The handles its old symbol deltas named become orphan candidates.
 func rebaseSnapshot(ctx context.Context, tx *gorm.DB, root ModuleRoot, rebased rebasedSnapshot, candidates map[int64]bool) error {
 	snapshot := rebased.snapshot
@@ -96,6 +97,7 @@ func createRebasedDeltas(ctx context.Context, tx *gorm.DB, root ModuleRoot, reba
 		symbols = append(symbols, SymbolDelta{
 			SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: root.Ordinal, SymbolHandle: symbol.Handle,
 			Operation: SourceSet, PublicFP: symbol.PublicFP, PrivateFP: symbol.PrivateFP, ContentFP: symbol.ContentFP,
+			ContentGeneration: &symbol.ContentGeneration,
 		})
 	}
 	if len(sources) > 0 {

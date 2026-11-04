@@ -64,6 +64,9 @@ func OpenReadOnly(ctx context.Context, options DBOptions) (*gorm.DB, error) {
 	if err := requireDocumentMembership(ctx, database); err != nil {
 		return nil, errors.Join(err, closeDatabase(database))
 	}
+	if err := requireSymbolGenerations(ctx, database); err != nil {
+		return nil, errors.Join(err, closeDatabase(database))
+	}
 	return database, nil
 }
 
