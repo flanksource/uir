@@ -45,7 +45,7 @@ var generationNames = map[indexGeneration]string{generationPreHandle: "pre-handl
 // task_runs and symbol_kinds, which describe no handle.
 var indexTables = []string{
 	"analysis_heads", "declaration_measures", "declaration_metrics", "source_metrics",
-	"document_membership", "document_deltas", "implements_facts", "implements_deltas", "snapshot_sibling_shapes", "symbol_deltas", "symbol_postings", "snapshot_dependencies", "package_coverage", "documents", "symbols", "symbol_packages",
+	"symbol_generation_backfill", "document_membership", "document_deltas", "implements_facts", "implements_deltas", "snapshot_sibling_shapes", "symbol_deltas", "symbol_postings", "snapshot_dependencies", "package_coverage", "documents", "symbols", "symbol_packages",
 	"symbol_modules", "source_deltas", "source_revisions", "location_heads", "snapshots", "source_blobs",
 }
 

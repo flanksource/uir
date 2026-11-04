@@ -137,14 +137,18 @@ func (SymbolPackage) TableName() string { return "symbol_packages" }
 // SymbolDelta is one change of a snapshot's defined-symbol set against its base: a set with the
 // symbol's public, private, and content fingerprints, or a delete tombstone without them. It shares the
 // set/delete vocabulary of source deltas, and is keyed by the snapshot's and root's ordinals.
+// ContentGeneration is the symbol's content generation at this snapshot (see NextContentGeneration); a
+// delete carries the generation the symbol ended at. Publication always writes it; it is nil only on a
+// row published before it existed, until the symbol generation cutover fills it.
 type SymbolDelta struct {
-	SnapshotOrdinal int64           `gorm:"column:snapshot_ordinal;primaryKey;autoIncrement:false"`
-	RootOrdinal     int32           `gorm:"column:root_ordinal"`
-	SymbolHandle    int64           `gorm:"column:symbol_handle;primaryKey;autoIncrement:false"`
-	Operation       SourceOperation `gorm:"column:operation"`
-	PublicFP        *int64          `gorm:"column:public_fp"`
-	PrivateFP       *int64          `gorm:"column:private_fp"`
-	ContentFP       *int64          `gorm:"column:content_fp"`
+	SnapshotOrdinal   int64           `gorm:"column:snapshot_ordinal;primaryKey;autoIncrement:false"`
+	RootOrdinal       int32           `gorm:"column:root_ordinal"`
+	SymbolHandle      int64           `gorm:"column:symbol_handle;primaryKey;autoIncrement:false"`
+	Operation         SourceOperation `gorm:"column:operation"`
+	PublicFP          *int64          `gorm:"column:public_fp"`
+	PrivateFP         *int64          `gorm:"column:private_fp"`
+	ContentFP         *int64          `gorm:"column:content_fp"`
+	ContentGeneration *int64          `gorm:"column:content_generation"`
 }
 
 func (SymbolDelta) TableName() string { return "symbol_deltas" }

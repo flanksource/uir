@@ -82,6 +82,10 @@ func expectEffectiveSymbols(ctx context.Context, database *gorm.DB, snapshot typ
 	slices.SortFunc(expected, func(left, right storage.EffectiveSymbol) int { return cmp.Compare(left.Handle, right.Handle) })
 	actual, err := storage.EffectiveSymbols(ctx, database, uuid.MustParse(snapshot.id))
 	Expect(err).ToNot(HaveOccurred())
+	for i := range actual {
+		Expect(actual[i].ContentGeneration).To(BeNumerically(">=", 1))
+		actual[i].ContentGeneration = 0
+	}
 	Expect(actual).To(Equal(expected))
 }
 

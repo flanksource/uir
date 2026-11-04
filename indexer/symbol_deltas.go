@@ -84,7 +84,8 @@ func (collected declarations) folded() map[string]storage.SymbolFingerprints {
 // files, and its fingerprints fold across all of them. The base side decodes its stored documents, the
 // snapshot side uses the extraction. A symbol declared on both sides with equal fingerprints, including
 // one that moved between two files, gets no row; a new or changed one a set row, and one only the base
-// declared a delete row. Without a base every declared symbol is a set.
+// declared a delete row. Without a base every declared symbol is a set. Every row carries its content
+// generation, read from the base for the handles that get a row (storage.NextContentGeneration).
 func createSymbolDeltas(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, publication snapshotPublication, membership snapshotMembership, known map[string]int64) error {
 	changed := changedPackages(membership)
 	extraction := publication.extraction
@@ -105,7 +106,7 @@ func createSymbolDeltas(ctx context.Context, database *gorm.DB, snapshot storage
 		return err
 	}
 	key := storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: publication.root.Ordinal}
-	rows, err := deltaRows(ctx, database, key, before.folded(), after.folded(), known)
+	rows, err := deltaRows(ctx, database, key, snapshot.BaseSnapshotID, before.folded(), after.folded(), known)
 	if err != nil || len(rows) == 0 {
 		return err
 	}
@@ -179,8 +180,8 @@ func (collected declarations) addStored(document storage.Document, after declara
 }
 
 // deltaRows compares the changed documents' folded definitions, sorted by handle; every row carries the
-// snapshot and root ordinals of key.
-func deltaRows(ctx context.Context, database *gorm.DB, key storage.SymbolDelta, before, after map[string]storage.SymbolFingerprints, known map[string]int64) ([]storage.SymbolDelta, error) {
+// snapshot and root ordinals of key, and its content generation on top of the base's (none without one).
+func deltaRows(ctx context.Context, database *gorm.DB, key storage.SymbolDelta, base *uuid.UUID, before, after map[string]storage.SymbolFingerprints, known map[string]int64) ([]storage.SymbolDelta, error) {
 	var missing []string
 	for _, side := range []map[string]storage.SymbolFingerprints{before, after} {
 		for id := range side {
@@ -216,5 +217,23 @@ func deltaRows(ctx context.Context, database *gorm.DB, key storage.SymbolDelta, 
 		}
 	}
 	slices.SortFunc(rows, func(left, right storage.SymbolDelta) int { return cmp.Compare(left.SymbolHandle, right.SymbolHandle) })
+	prior := map[int64]storage.SymbolGeneration{}
+	if base != nil && len(rows) > 0 {
+		changed := make([]int64, len(rows))
+		for i, row := range rows {
+			changed[i] = row.SymbolHandle
+		}
+		if prior, err = storage.SymbolGenerations(ctx, database, *base, changed); err != nil {
+			return nil, err
+		}
+	}
+	for i := range rows {
+		known, found := prior[rows[i].SymbolHandle]
+		generation, err := storage.NextContentGeneration(known, found, rows[i].Operation, rows[i].ContentFP)
+		if err != nil {
+			return nil, fmt.Errorf("symbol handle %d: %w", rows[i].SymbolHandle, err)
+		}
+		rows[i].ContentGeneration = &generation
+	}
 	return rows, nil
 }

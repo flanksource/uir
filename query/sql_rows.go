@@ -16,7 +16,7 @@ var sqlFields = map[string]string{
 	"path": "string", "line": "number", "column": "number", "package": "string", "module": "string", "role": "string",
 	"dispatch": "boolean", "depth": "number", "snapshot": "string", "relationship.kind": "string", "relationship.resolution": "string",
 	"symbol.metrics.param_count": "integer", "symbol.metrics.body_lines": "integer",
-	"symbol.type": "string",
+	"symbol.type": "string", "symbol.generation": "integer",
 }
 
 var sqlWildcardFields = []string{"symbol", "symbol.id", "symbol.kind", "symbol.name", "symbol.query_name", "symbol.module", "symbol.package", "symbol.owner", "symbol.visibility", "symbol.props", "path", "line", "column", "package", "module", "role", "dispatch", "depth", "snapshot", "relationship.kind", "relationship.resolution", "relationship.props"}

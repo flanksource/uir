@@ -4,6 +4,12 @@
 // and the snapshot does not. Rows are keyed by the snapshot's and root's ordinals rather than their
 // uuids. It replaces the two-layer table 07 declared (shape_fp, body_fp): a database that still has
 // that table is discarded by the fingerprint cutover before migration and reindexed.
+//
+// content_generation counts the symbol's distinct implementations along the snapshot's base chain: 1
+// where the chain first defines it, one more at every later set that changes content_fp or re-adds it
+// after a tombstone, and unchanged otherwise. A delete carries the generation it ended at, so a re-added
+// symbol continues its count. It is nullable only for rows published before it existed, which the
+// symbol generation cutover (23_symbol_generations.hcl) backfills; every publication writes it.
 table "symbol_deltas" {
   schema = schema.public
 
@@ -35,6 +41,10 @@ table "symbol_deltas" {
     type = bigint
     null = true
   }
+  column "content_generation" {
+    type = bigint
+    null = true
+  }
 
   primary_key { columns = [column.snapshot_ordinal, column.symbol_handle] }
   foreign_key "symbol_deltas_snapshot_fkey" {
@@ -59,4 +69,5 @@ table "symbol_deltas" {
   check "symbol_deltas_operation_check" {
     expr = "((operation = 'set' AND public_fp IS NOT NULL AND private_fp IS NOT NULL AND content_fp IS NOT NULL) OR (operation = 'delete' AND public_fp IS NULL AND private_fp IS NULL AND content_fp IS NULL))"
   }
+  check "symbol_deltas_content_generation_check" { expr = "content_generation IS NULL OR content_generation >= 1" }
 }

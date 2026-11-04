@@ -15,16 +15,16 @@ import (
 func setSymbol(snapshot storage.ModuleSnapshot, handle, shape, body int64) storage.SymbolDelta {
 	private := shape + 100
 	return storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: handle, Operation: storage.SourceSet,
-		PublicFP: &shape, PrivateFP: &private, ContentFP: &body}
+		PublicFP: &shape, PrivateFP: &private, ContentFP: &body, ContentGeneration: new(int64(1))}
 }
 
 func deleteSymbol(snapshot storage.ModuleSnapshot, handle int64) storage.SymbolDelta {
-	return storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: handle, Operation: storage.SourceDelete}
+	return storage.SymbolDelta{SnapshotOrdinal: snapshot.Ordinal, RootOrdinal: fixtureRootOrdinal, SymbolHandle: handle, Operation: storage.SourceDelete, ContentGeneration: new(int64(1))}
 }
 
 func effective(handle, shape, body int64) storage.EffectiveSymbol {
 	private := shape + 100
-	return storage.EffectiveSymbol{Handle: handle, PublicFP: &shape, PrivateFP: &private, ContentFP: &body}
+	return storage.EffectiveSymbol{Handle: handle, PublicFP: &shape, PrivateFP: &private, ContentFP: &body, ContentGeneration: 1}
 }
 
 var _ = Describe("effective symbols", func() {

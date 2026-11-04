@@ -58,6 +58,16 @@ WHERE symbol.type = 'context.Context' OR symbol.type = '*gorm.io/gorm.DB'
 
 Types use canonical import paths and preserve pointers/composites. Import aliases and type aliases resolve to their targets; distinct named types keep their identity. Local variables and fields are outside this initial type field; non-variable symbols return `NULL`. Request the field explicitly; `SELECT *` is unchanged. Types come from immutable document declarations in format 8, never from current source files. Queries requesting types require complete typed coverage and fail before filtering if a variable's type was not recorded; reindex or republish with type facts. Historical snapshots retain their original availability. External producers may supply a nonempty `declared_type` string on a proven `var` declaration in format 8. Metric-only queries retain their document-free path; type queries use the existing decoded document cache.
 
+## Content generations
+
+`symbol.generation` (integer) counts the distinct implementations a symbol has had along the base chain of the snapshot that declares it: 1 where the chain first defines it, plus one at every later snapshot whose `content_fp` differs. A signature-only change (a parameter rename), a comment-only edit and a move between files keep it; a re-add after a delete continues the count. It is read from `symbol_deltas` without decoding documents, and symbols no selected snapshot declares, such as standard library callees, read `NULL`. Request it explicitly; `SELECT *` is unchanged.
+
+```sql
+SELECT symbol.name, path, symbol.generation FROM func:* WHERE symbol.generation > 10 ORDER BY symbol.generation DESC
+```
+
+`uir history symbol <selector>` lists the snapshots, with their commits, at which one symbol's generation advanced. The selector must match exactly one declaration in the current checkout. Generations follow publication order: a historical import published on top of a newer head counts in import order, not commit order.
+
 ## Build constraints
 
 Inspect the explicit modern Go build constraint, including files excluded from the indexed build:
