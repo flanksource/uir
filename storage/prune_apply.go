@@ -188,6 +188,8 @@ var (
 	symbolDeltaHandles         = handleColumn{"symbol_deltas", "symbol_handle"}
 	implementsTypeHandles      = handleColumn{"implements_deltas", "type_handle"}
 	implementsInterfaceHandles = handleColumn{"implements_deltas", "interface_handle"}
+	// testCaseHandles link tests to the declarations they are; a linked symbol is never an orphan.
+	testCaseHandles = handleColumn{"test_cases", "symbol_handle"}
 	// snapshotHandles are the handle columns of rows keyed by snapshot ordinal.
 	snapshotHandles = []handleColumn{symbolDeltaHandles, implementsTypeHandles, implementsInterfaceHandles}
 )

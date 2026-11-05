@@ -228,6 +228,11 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 			return ModuleQueryResult{}, err
 		}
 	}
+	if rows.required["symbol.test_coverage"] || rows.required["symbol.test_coverage_generation"] {
+		if err := index.sqlRecordCoverage(ctx, records); err != nil {
+			return ModuleQueryResult{}, err
+		}
+	}
 	if err := rows.project(records, limit, &result); err != nil {
 		return result, err
 	}

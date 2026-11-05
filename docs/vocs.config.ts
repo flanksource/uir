@@ -23,6 +23,7 @@ export default defineConfig({
         { text: 'Call graphs', link: '/graph' },
         { text: 'Symbol diffs', link: '/diff' },
         { text: 'Historical imports', link: '/historical-import' },
+        { text: 'Test runs and flakiness', link: '/tests' },
         { text: 'Browser and API', link: '/serve' },
       ],
     },

@@ -104,6 +104,7 @@ func newRootCommand(runtime *commandRuntime) *cobra.Command {
 	registerRefactorCommands(root, runtime)
 	registerDiffCommand(root)
 	registerHistoryCommand(root)
+	registerTestsCommand(root)
 	registerSystemInfoCommand(root)
 	root.AddCommand(newServeCommand(runtime))
 	versionCommand := &cobra.Command{

@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// deleteOrphanSymbols deletes the candidate symbols that no posting and no symbol or implements delta names, except an
+// deleteOrphanSymbols deletes the candidate symbols that no posting, test case, and no symbol or implements delta names, except an
 // owner of a symbol that stays, such as a record whose field another document still reads. A symbol is
 // deleted after every orphan it owns, since symbols.owner_id references it.
 func deleteOrphanSymbols(ctx context.Context, tx *gorm.DB, candidates []int64, result *PruneResult) error {
@@ -57,7 +57,7 @@ func unreferencedSymbols(ctx context.Context, tx *gorm.DB, handles []int64) (map
 	orphans := map[string]Symbol{}
 	err := inBatches(handles, func(batch []int64) error {
 		referenced := map[int64]bool{}
-		for _, source := range append([]handleColumn{postingHandles}, snapshotHandles...) {
+		for _, source := range append([]handleColumn{postingHandles, testCaseHandles}, snapshotHandles...) {
 			if err := collectHandles(ctx, tx, source, source.handle, batch, referenced); err != nil {
 				return err
 			}
