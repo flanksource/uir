@@ -4,7 +4,7 @@ UIR provides a Go model library and a CLI for indexing, querying, and comparing 
 
 ## Install the CLI
 
-Build from a checkout with Go, Node.js, and pnpm available:
+Build from a checkout with Go 1.27.1 or newer, Node.js 24, and the pnpm version pinned in the root `package.json`:
 
 ```bash
 git clone https://github.com/flanksource/uir.git
@@ -17,30 +17,42 @@ The CLI is written to `.bin/uir`. Run `make install` to install it into your Go 
 
 ## Index a Go module
 
-From the repository root, index a module directory:
+From the repository root, index the included sample module in a separate SQLite database:
 
 ```bash
-.bin/uir add /path/to/module
-.bin/uir list
+mkdir -p .tmp
+.bin/uir --dsn .tmp/quickstart.db add docs/examples/sql-go
+.bin/uir --dsn .tmp/quickstart.db list
 ```
 
 `add` keeps discovery within the selected directory. Use `--all` when you also want the modules referenced by an enclosing `go.work`. See [module indexing](/module-indexing) for checkout discovery, snapshots, and reindexing.
 
 ## Query symbols
 
-Select a function by name, then follow its references. Replace `Run` with a name in the indexed module:
+Select the sample's `Run` function, then follow its references:
 
 ```bash
-.bin/uir query 'func:Run'
-.bin/uir query 'func:Run <'
+.bin/uir --dsn .tmp/quickstart.db query 'func:Run' --root example.org/service
+.bin/uir --dsn .tmp/quickstart.db query 'func:Run <' --root example.org/service
+.bin/uir --dsn .tmp/quickstart.db query 'func:Run :uses' --root example.org/service
 ```
 
-The [query guide](/query) explains selectors and relation operators. [SQL navigation](/sql-query) provides an alternative syntax for navigating code and custom domains.
+The first query returns the `Run` declaration in `service.go`; the callers query finds `Entry` and `Replay`. The [query guide](/query) explains selectors and relation operators. [SQL navigation](/sql-query) provides an alternative syntax for navigating code and custom domains.
+
+## Compare changes and lint
+
+From the repository root, compare its current tracked changes with HEAD without indexing:
+
+```bash
+.bin/uir diff HEAD --visibility all --stat
+```
+
+The [diff guide](/diff) also covers indexed commit ranges, imports, and formatting changes. To enforce SQL architecture rules, add a `.uir.yaml` using the [lint guide](/lint), then run `uir lint`. Rules select syntax or typed analysis automatically; `--changed`, `--staged`, and `--tags` restrict the source or build configuration being checked.
 
 ## Open the browser
 
 ```bash
-.bin/uir serve
+.bin/uir --dsn .tmp/quickstart.db serve
 ```
 
 Open the local URL printed by the server to explore saved snapshots, source files, and symbols. The same server exposes a structured HTTP API; see [browser and API](/serve).
@@ -52,3 +64,7 @@ go get github.com/flanksource/uir
 ```
 
 Use the root package for node types and builders, `diff` for structural comparison, and `render` for tree output. The [model reference](/model) describes the shared JSON contract and the node and statement hierarchy.
+
+## Troubleshooting installation
+
+Check `go version`, `node --version`, and `pnpm --version` against the prerequisites above. If Go reports that the module requires a newer Go version, install the required toolchain. If pnpm reports an unsupported Node version, switch to Node.js 24. For a failed frozen-lockfile install, check the reported network or registry error, then rerun `pnpm --dir web install --frozen-lockfile` before `make build`.

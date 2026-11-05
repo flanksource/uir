@@ -29,7 +29,7 @@ set -euo pipefail
 mkdir -p .tmp
 SQL_FIXTURE_DIR=$(mktemp -d .tmp/sql-query.XXXXXX)
 trap 'rm -rf "$SQL_FIXTURE_DIR"' EXIT
-go run ./hack/sql-domains > "$SQL_FIXTURE_DIR/publication.json"
+go run -tags hack ./hack/sql-domains > "$SQL_FIXTURE_DIR/publication.json"
 go run ./cmd/uir --dsn "$SQL_FIXTURE_DIR/index.db" import "$SQL_FIXTURE_DIR/publication.json" > "$SQL_FIXTURE_DIR/import.json"
 go run ./cmd/uir --dsn "$SQL_FIXTURE_DIR/index.db" query "SELECT r.method, r.path, r.description FROM http.route:* AS r WHERE r.path IMATCH '/orders/**' AND r.description IS NULL" --format json | jq -e '.total == 1 and .rows[0]["r.method"] == "POST" and .rows[0]["r.description"] == null' > /dev/null
 go run ./cmd/uir --dsn "$SQL_FIXTURE_DIR/index.db" query "SELECT * FROM path(http.route:Orders, messaging.consumer:Consume, via => 'http.handled_by,messaging.publishes_to,messaging.delivers_to')" --format json | jq -e '.total == 1 and (.path.symbols | length) == 4 and (.path.calls | length) == 3' > /dev/null

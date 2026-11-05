@@ -1,9 +1,10 @@
 # Historical external snapshots
 
-External producers can publish a resolved Git commit without changing the current location head. Supply `options.historical`, `options.git_commit` and `options.producer` in the publication JSON, or use the corresponding import flags:
+External producers can publish a resolved Git commit without changing the current location head. Create a publication JSON using the [publication format and examples](module-indexing.md#publishing-from-a-non-go-producer). Set `PUBLICATION` to its path, `COMMIT` to the full ID resolved in the source repository with `git rev-parse HEAD^{commit}`, and `PRODUCER` to a fingerprint identifying the producer executable and effective lowering configuration. Supply `options.historical`, `options.git_commit` and `options.producer` in the publication JSON, or pass those values as flags:
 
 ```bash
-uir --dsn .tmp/history.db import publication.json --historical --git-commit 2c34bc95bc95e4a75fc26cec4ea8b0e70aba6362 --producer producer-sha256
+mkdir -p .tmp
+uir --dsn .tmp/history.db import "$PUBLICATION" --historical --git-commit "$COMMIT" --producer "$PRODUCER"
 ```
 
 `git_commit` is a full lowercase SHA-1 or SHA-256 Git object ID. `producer` identifies the executable and effective lowering configuration. Missing historical identity, unresolved commit names and conflicting flag/publication metadata are rejected. The zero-value options publish a current head.

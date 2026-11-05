@@ -104,9 +104,7 @@ Error findings and execution failures exit nonzero. Warnings and info alone exit
 
 Gavel discovers global and project UIR configuration and runs the installed `uir` binary as a native linter. Use `gavel lint uir` for Gavel snapshots, baselines, summaries and UI. Native documents configured through `lint.linters.uir.config` in `.gavel.yaml` are written into a unique project `.uir.d/gavel-*.yaml` fragment with a deadline-based `_expires`, then removed when execution finishes. UIR performs configuration validation and merging; Gavel does not import the UIR library. Analysis runs with the selected module context; a normal file scope filters reported findings afterward. Changing `.uir.yaml` or a `.uir.d/` fragment reports the full owning module. Fileless run warnings survive file scopes.
 
-The UIR dependency is pinned to Gavel v0.0.56 for existing report types. The shared `linters.HasFailures` API and native adapter are implemented in the sibling Gavel checkout and currently validated through the ignored local workspace. Release Gavel containing those changes, then update the UIR pin and run `GOWORK=off make build` before publishing UIR. No local replacement belongs in go.mod.
-
-The changed/staged modes also consume `commons-db/git`'s prepared-source API, currently implemented in the sibling checkout. The commons-db v0.1.61 pin does not provide it. Publish those shared Git changes and update the commons-db pin before validating or publishing a standalone UIR release.
+The Gavel report APIs and commons-db prepared-source APIs are available in the released dependencies pinned in `go.mod`. A sibling checkout is optional for development. Use `GOWORK=off make build` to validate those published dependencies independently of a local workspace.
 
 To run the included sample against an isolated database:
 
