@@ -89,7 +89,18 @@ func importTests(ctx context.Context, options testsImportOptions) (testruns.Resu
 	}
 	current, err := engine.CheckCurrent(ctx, options.Path, indexer.CheckOptions{IncludeTests: true, AllowIncomplete: true})
 	if err != nil {
-		return testruns.Result{}, withChangedPaths(ctx, options.Path, err)
+		return testruns.Result{}, withChangedPaths(ctx, options.Path, err, "the checkout differs from its indexed head (commit, gitignore, or move these, then reindex)")
+	}
+	// A head reindexed from a dirty checkout matches it, but its bytes are no commit's: refuse it, so a
+	// run is never recorded against uncommitted code.
+	var head storage.ModuleSnapshot
+	if err := database.WithContext(ctx).Where("id = ?", current.SnapshotID).Take(&head).Error; err != nil {
+		return testruns.Result{}, fmt.Errorf("load snapshot %s: %w", current.SnapshotID, err)
+	}
+	if head.WorktreeState == storage.WorktreeDirty {
+		return testruns.Result{}, withChangedPaths(ctx, options.Path,
+			fmt.Errorf("the indexed head of %q was indexed from a dirty worktree, so the tests ran against uncommitted changes", current.Location),
+			"commit, stash or gitignore these, reindex, and rerun the tests")
 	}
 	if options.CoverProfile != "" {
 		if len(imported.Runs) != 1 {
@@ -111,12 +122,13 @@ func importTests(ctx context.Context, options testsImportOptions) (testruns.Resu
 	return testruns.ImportRuns(ctx, database, snapshot, imported)
 }
 
-// withChangedPaths adds to a failed current-snapshot check the paths Git reports as changed or
-// untracked in the checkout: any of them, Go source or not, makes the checkout differ from its indexed
-// head, such as a producer's output directory that is not ignored.
-func withChangedPaths(ctx context.Context, path string, err error) error {
+// withChangedPaths adds to a refused import the paths Git reports as changed or untracked in the
+// checkout, after hint: any of them, Go source or not, makes the checkout differ from a clean commit,
+// such as a producer's output directory that is not ignored.
+func withChangedPaths(ctx context.Context, path string, err error, hint string) error {
 	status, statusErr := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", path, "status", "--porcelain", "--", ".").Output()
-	trimmed := strings.TrimSpace(string(status))
+	// Trim only the end: a porcelain line starts with its status columns, such as " M".
+	trimmed := strings.TrimRight(string(status), "\n")
 	if statusErr != nil || trimmed == "" {
 		return err
 	}
@@ -124,5 +136,5 @@ func withChangedPaths(ctx context.Context, path string, err error) error {
 	if len(lines) > 10 {
 		lines = append(lines[:10], fmt.Sprintf("... and %d more", len(lines)-10))
 	}
-	return fmt.Errorf("%w; the checkout differs from its indexed head (commit, gitignore, or move these, then reindex):\n%s", err, strings.Join(lines, "\n"))
+	return fmt.Errorf("%w; %s:\n%s", err, hint, strings.Join(lines, "\n"))
 }
