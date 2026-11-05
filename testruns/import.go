@@ -269,7 +269,7 @@ func (importer runImporter) link(ctx context.Context, test Test) (*int64, error)
 	if test.Framework == goTest {
 		name, _, _ := strings.Cut(test.Name, "/")
 		for _, declared := range document.declarations {
-			if declared.kind == "func" && declared.name == name {
+			if declared.kind == "func" && declared.name == name && inTestPackage(declared, test) {
 				return &declared.handle, nil
 			}
 		}
@@ -282,7 +282,19 @@ func (importer runImporter) link(ctx context.Context, test Test) (*int64, error)
 	if err != nil || handle == storage.FileScope {
 		return nil, nil
 	}
+	for _, declared := range document.declarations {
+		if declared.handle == handle && !inTestPackage(declared, test) {
+			return nil, nil
+		}
+	}
 	return &handle, nil
+}
+
+// inTestPackage reports whether declared belongs to the package the producer ran test in, or to its
+// external _test package. A producer that reports another package's file, such as for two tests of one
+// name, leaves the test unlinked rather than linked to the other package's declaration.
+func inTestPackage(declared declaration, test Test) bool {
+	return declared.packagePath == test.Package || declared.packagePath == test.Package+"_test"
 }
 
 // coverageRows turns attributed coverage into rows, giving each declaration the content fingerprint
