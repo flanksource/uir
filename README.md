@@ -26,16 +26,18 @@ Run `make docs-check` to type-check and test the documentation tooling, and `mak
 | `.` (`package uir`) | The model: node and statement types, enums, identifiers, fluent builders, pretty printers, semantic hashing, polymorphic JSON, and tree traversal. |
 | `diff/` | Structural diffing. `DiffNode` compares two nodes; `DiffTree` compares whole documents and classifies renames and moves. |
 | `render/` | Adapters onto [clicky](https://github.com/flanksource/clicky)'s `api.TreeNode` for printing a UIR, or its hierarchy overlay, as a grouped tree. |
-| `indexer/` | Incremental Go AST indexing into immutable module-root snapshots, exposed as a context-bound Clicky task. |
+| `indexer/` | Incremental Go indexing with typed facts, syntax coverage, and external producer publication into immutable module-root snapshots. |
 | `query/` | Compact PEG grammar and Participle SQL grammar over shared snapshot, symbol, and relationship resolution. |
 | `symboldiff/` | Commit-to-commit symbol diff over two snapshots' documents, with per-symbol line counts from hash-verified Git blobs. |
 | `schema/` | `uir.schema.json`, generated from the Go types by `make schema`. |
 | [`docs/symbols.md`](docs/symbols.md) | Identifier formats, symbol and identity keys, reference forms, and call projection queries. |
 | [`docs/query.md`](docs/query.md) | Query grammar, scope resolution, command usage, and result contract. |
-| [`docs/sql-query.md`](docs/sql-query.md) | SQL navigation, typed domain properties, native relationships, and a runnable publication example. |
+| [`docs/sql-query.md`](docs/sql-query.md) | Complete SQL grammar, selectors, fields, predicates, navigation functions, typed properties, and metrics. |
+| [`docs/sql-examples.md`](docs/sql-examples.md) | Runnable Go and cross-domain examples covering every SQL source function. |
 | [`docs/lint.md`](docs/lint.md) | `.uir.yaml` SQL lint rules, automatic indexing, historical checks, and Gavel integration. |
 | [`docs/diff.md`](docs/diff.md) | `uir diff`: commit selection, symbol classification, shape diff rendering, line attribution, and failure modes. |
-| [`docs/indexing.md`](docs/indexing.md) | Go AST coverage, incremental snapshot lifecycle, Git root and submodule behavior, and syntax-only limitations. |
+| [`docs/indexing.md`](docs/indexing.md) | Typed and syntax coverage, incremental snapshot lifecycle, build selection, and lint analysis. |
+| [`docs/git-backed-publication.md`](docs/git-backed-publication.md) | External source bindings to pinned Git files and changed-package historical publication. |
 | `cmd/genschema` | The schema generator's entry point; the logic lives in `internal/schemagen`. |
 | `cmd/uir` | CLI for adding module directories, querying snapshots, and incrementally reindexing Go workspaces. |
 | `web/` | Vite and Clicky UI browser for saved snapshots, embedded in `uir serve`. |
@@ -138,6 +140,12 @@ go run ./cmd/uir --dsn "$UIR_DSN" serve --host localhost --port 8080
 Set `UIR_DSN` to a PostgreSQL DSN or SQLite `.db` path and open `http://localhost:8080`. For live frontend development from the repository root, install dependencies with `pnpm --dir web install` and run `go run ./cmd/uir --dsn "$UIR_DSN" serve --dev`. See [serve documentation](docs/serve.md) for source behavior and API routes. Opening an older database discards legacy project snapshots; back it up first if that history matters.
 
 ## Development
+
+Use Go 1.27.1 or newer, Node.js 24, and the pnpm version pinned in the root `package.json`. Install browser dependencies before building:
+
+```sh
+pnpm --dir web install --frozen-lockfile
+```
 
 ```sh
 make build     # build embedded browser assets and compile every Go package
