@@ -66,6 +66,12 @@ table "symbol_deltas" {
     on_delete   = NO_ACTION
   }
   index "symbol_deltas_handle_idx" { columns = [column.symbol_handle, column.snapshot_ordinal] }
+  // Serves the symbol generation cutover's check, on every read-write open, for rows without a
+  // generation; it holds only such rows, so it is empty on a database that has none.
+  index "symbol_deltas_missing_generation_idx" {
+    columns = [column.snapshot_ordinal]
+    where   = "content_generation IS NULL"
+  }
   check "symbol_deltas_operation_check" {
     expr = "((operation = 'set' AND public_fp IS NOT NULL AND private_fp IS NOT NULL AND content_fp IS NOT NULL) OR (operation = 'delete' AND public_fp IS NULL AND private_fp IS NULL AND content_fp IS NULL))"
   }

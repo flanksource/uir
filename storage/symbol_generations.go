@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -55,18 +56,26 @@ func NextContentGeneration(prior SymbolGeneration, found bool, operation SourceO
 }
 
 // symbolGenerationsSQL is definedSymbolsSQL keeping tombstones and selecting the winning delta's
-// content fingerprint and generation.
-var symbolGenerationsSQL = baseChainSQL + fmt.Sprintf(`,
+// content fingerprint and generation; allSymbolGenerationsSQL is the same for every handle the chain
+// names.
+var (
+	symbolGenerationsSQL    = symbolGenerationsQuery("WHERE d.symbol_handle IN ?")
+	allSymbolGenerationsSQL = symbolGenerationsQuery("")
+)
+
+func symbolGenerationsQuery(filter string) string {
+	return baseChainSQL + fmt.Sprintf(`,
 ranked AS (
   SELECT d.symbol_handle, d.content_fp, d.content_generation,
          ROW_NUMBER() OVER (PARTITION BY d.symbol_handle ORDER BY c.depth) AS handle_rank
   FROM %[1]s d JOIN chain c ON c.ordinal = d.snapshot_ordinal
-  WHERE d.symbol_handle IN ?
+  %[2]s
 )
 SELECT t.depth AS tail_depth, t.base_id AS tail_base_id, r.root_count,
        e.symbol_handle, e.content_fp, e.content_generation
 FROM tail t CROSS JOIN roots r LEFT JOIN ranked e ON e.handle_rank = 1
-ORDER BY e.symbol_handle`, SymbolDelta{}.TableName())
+ORDER BY e.symbol_handle`, SymbolDelta{}.TableName(), filter)
+}
 
 // SymbolGenerations is, for each of handles the snapshot's base chain names, its newest delta's content
 // generation and content fingerprint, tombstones included so a re-added symbol continues its count.
@@ -86,23 +95,44 @@ func SymbolGenerations(ctx context.Context, database *gorm.DB, snapshotID uuid.U
 		if err := database.WithContext(ctx).Raw(symbolGenerationsSQL, snapshotID, maxBaseChainDepth, asked[start:min(start+definedLookupBatch, len(asked))]).Scan(&rows).Error; err != nil {
 			return nil, fmt.Errorf("load symbol generations for snapshot %s: %w", snapshotID, err)
 		}
-		if len(rows) == 0 {
-			return nil, fmt.Errorf("snapshot %s does not exist", snapshotID)
-		}
-		if err := (baseChain{TailDepth: rows[0].TailDepth, TailBaseID: rows[0].TailBaseID, RootCount: rows[0].RootCount}).check(snapshotID); err != nil {
+		if err := collectGenerations(snapshotID, rows, generations); err != nil {
 			return nil, err
-		}
-		for _, row := range rows {
-			if row.SymbolHandle == nil {
-				continue
-			}
-			if row.Generation == nil {
-				return nil, fmt.Errorf("symbol delta for handle %d in snapshot %s chain has no content generation: %w", *row.SymbolHandle, snapshotID, ErrSymbolGenerationCutover)
-			}
-			generations[*row.SymbolHandle] = SymbolGeneration{Generation: *row.Generation, ContentFP: row.ContentFP}
 		}
 	}
 	return generations, nil
+}
+
+// allSymbolGenerations is SymbolGenerations for every handle the snapshot's base chain names, in one
+// read of the chain.
+func allSymbolGenerations(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID) (map[int64]SymbolGeneration, error) {
+	var rows []effectiveSymbolRow
+	if err := database.WithContext(ctx).Raw(allSymbolGenerationsSQL, snapshotID, maxBaseChainDepth).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load symbol generations for snapshot %s: %w", snapshotID, err)
+	}
+	generations := map[int64]SymbolGeneration{}
+	if err := collectGenerations(snapshotID, rows, generations); err != nil {
+		return nil, err
+	}
+	return generations, nil
+}
+
+func collectGenerations(snapshotID uuid.UUID, rows []effectiveSymbolRow, generations map[int64]SymbolGeneration) error {
+	if len(rows) == 0 {
+		return fmt.Errorf("snapshot %s does not exist", snapshotID)
+	}
+	if err := (baseChain{TailDepth: rows[0].TailDepth, TailBaseID: rows[0].TailBaseID, RootCount: rows[0].RootCount}).check(snapshotID); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.SymbolHandle == nil {
+			continue
+		}
+		if row.Generation == nil {
+			return fmt.Errorf("symbol delta for handle %d in snapshot %s chain has no content generation: %w", *row.SymbolHandle, snapshotID, ErrSymbolGenerationCutover)
+		}
+		generations[*row.SymbolHandle] = SymbolGeneration{Generation: *row.Generation, ContentFP: row.ContentFP}
+	}
+	return nil
 }
 
 // SymbolHistoryEntry is a snapshot along a base chain at which a symbol's content generation advanced.
@@ -175,34 +205,39 @@ func SymbolHistory(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID,
 	return entries, nil
 }
 
-// cutOverSymbolGenerations completes the symbol generation cutover after migration: a database whose
-// symbol deltas all carry a generation (an empty one, or one published after the column existed) is
-// marked complete; otherwise every snapshot's deltas get their generation in ordinal order, one
-// transaction per snapshot with the marker, and the marker is set complete last. An interrupted cutover
-// resumes from the marker on the next open.
+// generationMemo bounds the base chains' generations the backfill keeps for later dependants.
+const generationMemo = 32
+
+// cutOverSymbolGenerations completes the symbol generation cutover after migration, on every read-write
+// open: when any symbol delta lacks a generation, such as rows an older uir binary published after the
+// cutover completed, every snapshot from the lowest such row's on gets its generations in ordinal order,
+// one transaction per snapshot with the marker, and the marker is set complete last. The lookup is served
+// by the partial index symbol_deltas_missing_generation_idx. An interrupted cutover resumes on the next
+// open.
 func cutOverSymbolGenerations(ctx context.Context, database *gorm.DB) error {
 	var markers []SymbolGenerationBackfill
 	if err := database.WithContext(ctx).Where("id = 1").Find(&markers).Error; err != nil {
 		return fmt.Errorf("read the symbol generation cutover: %w", err)
 	}
-	if len(markers) == 1 && markers[0].Complete {
-		return nil
+	var lowest []int64
+	if err := database.WithContext(ctx).Model(&SymbolDelta{}).Where("content_generation IS NULL").
+		Order("snapshot_ordinal").Limit(1).Pluck("snapshot_ordinal", &lowest).Error; err != nil {
+		return fmt.Errorf("find symbol deltas without a generation: %w", err)
 	}
-	marker := SymbolGenerationBackfill{ID: 1}
-	if len(markers) == 1 {
-		marker = markers[0]
-	} else {
-		var missing int64
-		if err := database.WithContext(ctx).Model(&SymbolDelta{}).Where("content_generation IS NULL").Limit(1).Count(&missing).Error; err != nil {
-			return fmt.Errorf("count symbol deltas without a generation: %w", err)
-		}
-		marker.Complete = missing == 0
-		if err := database.WithContext(ctx).Create(&marker).Error; err != nil {
-			return fmt.Errorf("start the symbol generation cutover: %w", err)
-		}
-		if marker.Complete {
+	marker := SymbolGenerationBackfill{ID: 1, Complete: len(lowest) == 0}
+	if len(lowest) == 1 {
+		marker.ThroughOrdinal = lowest[0] - 1
+	} else if len(markers) == 1 {
+		if markers[0].Complete {
 			return nil
 		}
+		marker.ThroughOrdinal = markers[0].ThroughOrdinal
+	}
+	if err := database.WithContext(ctx).Save(&marker).Error; err != nil {
+		return fmt.Errorf("start the symbol generation cutover: %w", err)
+	}
+	if marker.Complete {
+		return nil
 	}
 	logger.Infof("backfilling symbol content generations")
 	if err := backfillSymbolGenerations(ctx, database, &marker); err != nil {
@@ -215,26 +250,56 @@ func cutOverSymbolGenerations(ctx context.Context, database *gorm.DB) error {
 }
 
 // backfillSymbolGenerations gives the symbol deltas of every snapshot past marker.ThroughOrdinal their
-// content generation, reading the base's generations through SymbolGenerations: a base has a lower
-// ordinal, so the cutover already gave its whole chain theirs. Rows that already carry one keep it.
+// content generation. A base has a lower ordinal, so the cutover already gave its whole chain theirs.
+// Each snapshot's handle → generation map is derived from its base's plus its own deltas and kept while
+// a later snapshot still builds on it (up to generationMemo of them), so a chain is read from the
+// database only where its base is not kept. Rows that already carry a generation keep it.
 func backfillSymbolGenerations(ctx context.Context, database *gorm.DB, marker *SymbolGenerationBackfill) error {
 	var snapshots []ModuleSnapshot
 	if err := database.WithContext(ctx).Select("id", "ordinal", "base_snapshot_id").Order("ordinal").Find(&snapshots).Error; err != nil {
 		return fmt.Errorf("load snapshots to backfill: %w", err)
 	}
 	ordinals := make(map[uuid.UUID]int64, len(snapshots))
+	dependants := map[uuid.UUID]int{}
 	for _, snapshot := range snapshots {
 		ordinals[snapshot.ID] = snapshot.Ordinal
+		if snapshot.Ordinal > marker.ThroughOrdinal && snapshot.BaseSnapshotID != nil {
+			dependants[*snapshot.BaseSnapshotID]++
+		}
 	}
+	memo := map[uuid.UUID]map[int64]SymbolGeneration{}
 	for _, snapshot := range snapshots {
 		if snapshot.Ordinal <= marker.ThroughOrdinal {
 			continue
 		}
-		if snapshot.BaseSnapshotID != nil && ordinals[*snapshot.BaseSnapshotID] >= snapshot.Ordinal {
-			return fmt.Errorf("snapshot %s has base %s with ordinal %d, not below its own %d", snapshot.ID, *snapshot.BaseSnapshotID, ordinals[*snapshot.BaseSnapshotID], snapshot.Ordinal)
+		generations := map[int64]SymbolGeneration{}
+		if base := snapshot.BaseSnapshotID; base != nil {
+			if ordinals[*base] >= snapshot.Ordinal {
+				return fmt.Errorf("snapshot %s has base %s with ordinal %d, not below its own %d", snapshot.ID, *base, ordinals[*base], snapshot.Ordinal)
+			}
+			prior, kept := memo[*base]
+			if !kept {
+				var err error
+				if prior, err = allSymbolGenerations(ctx, database, *base); err != nil {
+					return fmt.Errorf("backfill the symbol generations of snapshot %s: %w", snapshot.ID, err)
+				}
+			}
+			dependants[*base]--
+			switch {
+			case dependants[*base] == 0:
+				delete(memo, *base)
+				generations = prior
+			case kept:
+				generations = maps.Clone(prior)
+			case len(memo) < generationMemo:
+				memo[*base] = prior
+				generations = maps.Clone(prior)
+			default:
+				generations = prior
+			}
 		}
 		if err := database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := backfillSnapshotGenerations(ctx, tx, snapshot); err != nil {
+			if err := backfillSnapshotGenerations(ctx, tx, snapshot, generations); err != nil {
 				return err
 			}
 			marker.ThroughOrdinal = snapshot.Ordinal
@@ -242,39 +307,37 @@ func backfillSymbolGenerations(ctx context.Context, database *gorm.DB, marker *S
 		}); err != nil {
 			return fmt.Errorf("backfill the symbol generations of snapshot %s: %w", snapshot.ID, err)
 		}
+		if dependants[snapshot.ID] > 0 && len(memo) < generationMemo {
+			memo[snapshot.ID] = generations
+		}
 	}
 	return nil
 }
 
-func backfillSnapshotGenerations(ctx context.Context, tx *gorm.DB, snapshot ModuleSnapshot) error {
+// backfillSnapshotGenerations gives the snapshot's deltas without a generation theirs from generations,
+// its base chain's, and then applies all of its deltas to generations, so it becomes the snapshot's.
+func backfillSnapshotGenerations(ctx context.Context, tx *gorm.DB, snapshot ModuleSnapshot, generations map[int64]SymbolGeneration) error {
 	var deltas []SymbolDelta
-	if err := tx.WithContext(ctx).Select("symbol_handle", "operation", "content_fp").
-		Where("snapshot_ordinal = ? AND content_generation IS NULL", snapshot.Ordinal).Order("symbol_handle").Find(&deltas).Error; err != nil {
+	if err := tx.WithContext(ctx).Select("symbol_handle", "operation", "content_fp", "content_generation").
+		Where("snapshot_ordinal = ?", snapshot.Ordinal).Order("symbol_handle").Find(&deltas).Error; err != nil {
 		return fmt.Errorf("load symbol deltas: %w", err)
 	}
-	if len(deltas) == 0 {
-		return nil
-	}
-	prior := map[int64]SymbolGeneration{}
-	if snapshot.BaseSnapshotID != nil {
-		handles := make([]int64, len(deltas))
-		for i, delta := range deltas {
-			handles[i] = delta.SymbolHandle
-		}
-		var err error
-		if prior, err = SymbolGenerations(ctx, tx, *snapshot.BaseSnapshotID, handles); err != nil {
-			return err
-		}
-	}
 	byGeneration := map[int64][]int64{}
+	next := make(map[int64]SymbolGeneration, len(deltas))
 	for _, delta := range deltas {
-		known, found := prior[delta.SymbolHandle]
-		generation, err := NextContentGeneration(known, found, delta.Operation, delta.ContentFP)
-		if err != nil {
-			return fmt.Errorf("symbol handle %d: %w", delta.SymbolHandle, err)
+		generation := delta.ContentGeneration
+		if generation == nil {
+			prior, found := generations[delta.SymbolHandle]
+			computed, err := NextContentGeneration(prior, found, delta.Operation, delta.ContentFP)
+			if err != nil {
+				return fmt.Errorf("symbol handle %d: %w", delta.SymbolHandle, err)
+			}
+			generation = &computed
+			byGeneration[computed] = append(byGeneration[computed], delta.SymbolHandle)
 		}
-		byGeneration[generation] = append(byGeneration[generation], delta.SymbolHandle)
+		next[delta.SymbolHandle] = SymbolGeneration{Generation: *generation, ContentFP: delta.ContentFP}
 	}
+	maps.Copy(generations, next)
 	for generation, handles := range byGeneration {
 		for start := 0; start < len(handles); start += definedLookupBatch {
 			if err := tx.WithContext(ctx).Model(&SymbolDelta{}).
