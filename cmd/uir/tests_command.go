@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/flanksource/clicky"
@@ -82,9 +84,12 @@ func importTests(ctx context.Context, options testsImportOptions) (testruns.Resu
 	if err != nil {
 		return testruns.Result{}, err
 	}
-	current, err := engine.CheckCurrent(ctx, options.Path, indexer.CheckOptions{IncludeTests: includeTests, AllowIncomplete: true})
+	if !includeTests {
+		return testruns.Result{}, fmt.Errorf("the indexed head of %q excludes test files, so it cannot tell which test code ran; run uir reindex --include-tests", options.Path)
+	}
+	current, err := engine.CheckCurrent(ctx, options.Path, indexer.CheckOptions{IncludeTests: true, AllowIncomplete: true})
 	if err != nil {
-		return testruns.Result{}, err
+		return testruns.Result{}, withChangedPaths(ctx, options.Path, err)
 	}
 	if options.CoverProfile != "" {
 		if len(imported.Runs) != 1 {
@@ -104,4 +109,20 @@ func importTests(ctx context.Context, options testsImportOptions) (testruns.Resu
 		return testruns.Result{}, fmt.Errorf("parse snapshot id %q: %w", current.SnapshotID, err)
 	}
 	return testruns.ImportRuns(ctx, database, snapshot, imported)
+}
+
+// withChangedPaths adds to a failed current-snapshot check the paths Git reports as changed or
+// untracked in the checkout: any of them, Go source or not, makes the checkout differ from its indexed
+// head, such as a producer's output directory that is not ignored.
+func withChangedPaths(ctx context.Context, path string, err error) error {
+	status, statusErr := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", path, "status", "--porcelain", "--", ".").Output()
+	trimmed := strings.TrimSpace(string(status))
+	if statusErr != nil || trimmed == "" {
+		return err
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > 10 {
+		lines = append(lines[:10], fmt.Sprintf("... and %d more", len(lines)-10))
+	}
+	return fmt.Errorf("%w; the checkout differs from its indexed head (commit, gitignore, or move these, then reindex):\n%s", err, strings.Join(lines, "\n"))
 }

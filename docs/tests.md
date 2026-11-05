@@ -61,8 +61,8 @@ Each coverage block is attributed to the innermost proven declaration whose exte
 
 | Source | Symbols | When |
 | --- | --- | --- |
-| `coverage` | Declarations with covered statements in the test's own coverage | The test carried its own coverage |
-| `static` | The test symbol's callee graph inside the indexed roots, to depth 8 and 1000 nodes | The test is linked and the graph is complete: no unresolved call, nothing cut by depth or limit |
+| `coverage` | Declarations with covered statements in the test's own coverage, plus the `static` set | The test carried its own coverage and the `static` set is complete |
+| `static` | The test symbol and the symbols its graph reaches inside the indexed roots through calls, variable reads and variable writes, to depth 8 and 1000 nodes | The test is linked and the graph is complete: no unresolved call, nothing cut by depth or limit |
 | `snapshot` | The whole snapshot (content set and context hashes) | Otherwise |
 
 `uir tests flaky` reports a test when results with the same closure source, closure fingerprint and environment both passed and failed, or when one run's attempts both failed and passed. Results across a changed closure or a different environment are never compared. It is computed from `test_results` on each call; nothing is stored.
@@ -71,7 +71,9 @@ Each coverage block is attributed to the innermost proven declaration whose exte
 
 - **Non-Go inputs.** Embedded SQL, testdata, templates and configuration files are not symbols, so they are in no closure. A test that fails because such a file changed looks flaky unless the producer supplies `inputs_digest`.
 - **Directive comments.** `//go:embed` and marker comments do not change `content_fp`.
+- **Test code** is not instrumented by Go coverage, so a `coverage` closure always includes the test's `static` set; a test without one gets `snapshot`.
 - **Ginkgo specs** are not symbols. A spec links only when a proven declaration encloses its line, and then its static graph is that declaration's; an unlinked spec falls back to `snapshot`.
-- **Static graphs** do not follow calls through function values or registration maps; such a graph holds an unresolved call and the result falls back to `snapshot`.
+- **Static graphs** follow a function a variable's value names, such as `map[string]func(){"x": Other}`, through the read of that variable. A function stored into a variable elsewhere, such as by a registration call, is reached only if the walk passes through the code that stores it.
+- **Clean checkout.** Import needs the checkout to match its indexed head, indexed with `--include-tests`. Untracked files a producer writes into it, such as gavel's `.gavel/` and `.tmp/`, must be gitignored or written elsewhere; the error lists the paths Git reports.
 - Only tests a run reported are known: a test that never ran is not in `test_cases`.
 - Only aggregate coverage is collected by default. Per-test coverage needs one profile per test from the producer.

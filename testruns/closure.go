@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/graph"
 	"github.com/flanksource/uir/internal/canonicalhash"
 	"github.com/flanksource/uir/query"
@@ -23,14 +24,21 @@ type closure struct {
 	fingerprint string
 }
 
-// closures fingerprints the closures of one run's results against its snapshot. A static closure is a
-// test symbol's complete callee graph, memoized per symbol.
+// closures fingerprints the closures of one run's results against its snapshot. A test symbol's static
+// dependencies are memoized per symbol.
 type closures struct {
 	database *gorm.DB
 	pipeline *query.Pipeline
 	snapshot storage.ModuleSnapshot
 	inputs   string
-	static   map[int64]*closure
+	static   map[int64]*staticDependencies
+}
+
+// staticDependencies are the handles a test symbol's complete dependency graph reaches, itself
+// included; complete is false when that graph could not be proven complete.
+type staticDependencies struct {
+	handles  []int64
+	complete bool
 }
 
 // fingerprint digests the source, the run's dependency set and non-indexed inputs, and the sorted
@@ -81,40 +89,48 @@ func (closures *closures) snapshotClosure() closure {
 	return closure{source: storage.ClosureSnapshot, fingerprint: digest.Sum()}
 }
 
-// of picks a result's closure: the declarations its own coverage executed, else the complete callee
-// graph of the symbol the test is, else the snapshot. covered are the handles with covered statements
-// in the test's own coverage, nil when it has none; symbol is the test's linked handle, if any.
+// of picks a result's closure. Every closure but the snapshot holds the test's own code: Go coverage does
+// not instrument test files, so a coverage closure is the declarations the test's coverage executed
+// joined with the test symbol's complete static dependencies (its own body and the test helpers it
+// reaches), and a static closure is those dependencies alone. A test without a linked symbol, or whose
+// dependency graph is not complete, gets the snapshot closure. covered are the handles with covered
+// statements in the test's own coverage, nil when it has none; symbol is the test's linked handle.
 func (closures *closures) of(ctx context.Context, covered []int64, symbol *int64) (closure, error) {
+	if symbol == nil {
+		return closures.snapshotClosure(), nil
+	}
+	static, err := closures.staticDependencies(ctx, *symbol)
+	if err != nil {
+		return closure{}, err
+	}
+	if !static.complete {
+		return closures.snapshotClosure(), nil
+	}
+	source, handles := storage.ClosureStatic, static.handles
 	if len(covered) > 0 {
-		fingerprint, complete, err := closures.fingerprint(ctx, storage.ClosureCoverage, covered)
-		if err != nil {
-			return closure{}, err
-		}
-		if complete {
-			return closure{source: storage.ClosureCoverage, fingerprint: fingerprint}, nil
-		}
+		source, handles = storage.ClosureCoverage, append(slices.Clone(static.handles), covered...)
 	}
-	if symbol != nil {
-		static, err := closures.staticClosure(ctx, *symbol)
-		if err != nil {
-			return closure{}, err
-		}
-		if static != nil {
-			return *static, nil
-		}
+	fingerprint, complete, err := closures.fingerprint(ctx, source, handles)
+	if err != nil {
+		return closure{}, err
 	}
-	return closures.snapshotClosure(), nil
+	if !complete {
+		return closures.snapshotClosure(), nil
+	}
+	return closure{source: source, fingerprint: fingerprint}, nil
 }
 
-// staticClosure is the fingerprint of the callee graph of handle within the snapshot, or nil when that
-// graph is not complete: cut by the depth or node limit, holding an unresolved call, or reaching a
-// symbol the snapshot does not define. Standard library, builtin and external callees are left out;
-// the environment and the dependency set stand for them.
-func (closures *closures) staticClosure(ctx context.Context, handle int64) (*closure, error) {
+// staticDependencies are the symbols the dependency graph of handle reaches within the snapshot,
+// following calls, variable reads and variable writes, so a changed package variable a test's code
+// reads, or a function a map variable's value names, changes the closure. The graph is not complete
+// when cut by the depth or node limit, holding an unresolved call, or reaching a symbol the snapshot
+// does not define. Standard library, builtin and external symbols are left out; the environment and
+// the dependency set stand for them.
+func (closures *closures) staticDependencies(ctx context.Context, handle int64) (*staticDependencies, error) {
 	if memo, found := closures.static[handle]; found {
 		return memo, nil
 	}
-	closures.static[handle] = nil
+	closures.static[handle] = &staticDependencies{}
 	ids, err := storage.SymbolIDs(ctx, closures.database, []int64{handle})
 	if err != nil {
 		return nil, err
@@ -122,29 +138,29 @@ func (closures *closures) staticClosure(ctx context.Context, handle int64) (*clo
 	built, err := closures.pipeline.Graph(ctx, query.GraphOptions{
 		Symbol: ids[handle], Direction: graph.DirectionCallees, Depth: graph.MaxDepth, Limit: graph.MaxLimit,
 		Exclude: []string{query.ExcludeStd, query.ExcludeBuiltin, query.ExcludeExternal},
+		Access:  []uir.RelationshipType{uir.RelationshipTypeCall, uir.RelationshipTypeRead, uir.RelationshipTypeWrite},
 		Scope:   query.ModuleScopeOptions{SnapshotID: closures.snapshot.ID.String()},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("build the call graph of test symbol %s: %w", ids[handle], err)
+		return nil, fmt.Errorf("build the dependency graph of test symbol %s: %w", ids[handle], err)
 	}
 	if len(built.Nodes) == 0 || built.Omitted.NodeLimit || built.Omitted.BeyondDepth > 0 || built.Omitted.Unresolved > 0 {
-		return nil, nil
+		return closures.static[handle], nil
 	}
 	reached := make([]string, 0, len(built.Nodes))
 	for _, node := range built.Nodes {
 		if node.Unresolved {
-			return nil, nil
+			return closures.static[handle], nil
 		}
 		reached = append(reached, node.ID)
 	}
 	handles, err := storage.StoredSymbolHandles(ctx, closures.database, reached)
-	if err != nil || len(handles) != len(reached) {
+	if err != nil {
 		return nil, err
 	}
-	fingerprint, complete, err := closures.fingerprint(ctx, storage.ClosureStatic, slices.Collect(maps.Values(handles)))
-	if err != nil || !complete {
-		return nil, err
+	if len(handles) != len(reached) {
+		return closures.static[handle], nil
 	}
-	closures.static[handle] = &closure{source: storage.ClosureStatic, fingerprint: fingerprint}
+	closures.static[handle] = &staticDependencies{handles: slices.Collect(maps.Values(handles)), complete: true}
 	return closures.static[handle], nil
 }

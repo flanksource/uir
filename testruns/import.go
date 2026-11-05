@@ -70,7 +70,7 @@ func ImportRuns(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID, im
 	for i, run := range imported.Runs {
 		importer := runImporter{
 			database: database, root: root, snapshot: snapshot, documents: documents,
-			closures: &closures{database: database, pipeline: pipeline, snapshot: snapshot, inputs: run.InputsDigest, static: map[int64]*closure{}},
+			closures: &closures{database: database, pipeline: pipeline, snapshot: snapshot, inputs: run.InputsDigest, static: map[int64]*staticDependencies{}},
 		}
 		recorded, err := importer.importRun(ctx, run)
 		if err != nil {

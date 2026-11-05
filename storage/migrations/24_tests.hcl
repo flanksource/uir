@@ -77,7 +77,8 @@ table "test_runs" {
 
 // test_results holds one row per test, run and attempt. closure_fingerprint digests the content
 // fingerprints of the symbols the test depends on, and closure_source says how that set was found:
-// coverage (symbols the test's own coverage executed), static (its complete call graph) or snapshot
+// coverage (symbols the test's own coverage executed, plus static), static (its complete graph of calls,
+// variable reads and writes) or snapshot
 // (the whole snapshot). Flakiness only compares results of one test, closure source, closure fingerprint
 // and environment.
 table "test_results" {
