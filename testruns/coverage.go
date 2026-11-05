@@ -103,10 +103,11 @@ func parsePosition(position string) (int, int, error) {
 
 // declaration is a proven declaration of a document that coverage and tests can be attributed to.
 type declaration struct {
-	handle int64
-	kind   string
-	name   string
-	extent storage.Range
+	handle      int64
+	kind        string
+	name        string
+	packagePath string
+	extent      storage.Range
 }
 
 // coveredDocument is a document of the run's snapshot with its proven declarations.
@@ -170,7 +171,7 @@ func (documents *snapshotDocuments) document(ctx context.Context, path string) (
 	decoded := coveredDocument{ordinal: active.Document.Ordinal}
 	for _, symbol := range content.Symbols {
 		if symbol.ID != nil {
-			decoded.declarations = append(decoded.declarations, declaration{handle: handles[*symbol.ID], kind: symbol.Kind, name: symbol.Identifier.Method, extent: symbol.Extent})
+			decoded.declarations = append(decoded.declarations, declaration{handle: handles[*symbol.ID], kind: symbol.Kind, name: symbol.Identifier.Method, packagePath: symbol.Identifier.Package, extent: symbol.Extent})
 		}
 	}
 	documents.decoded[path] = decoded
