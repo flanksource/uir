@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop
+  namespace: store
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/example/shop-api:1.2.3
+        - name: proxy
+          image: nginx:1.27.0

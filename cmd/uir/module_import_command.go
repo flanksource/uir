@@ -24,6 +24,9 @@ type moduleImportOptions struct {
 	Historical  bool   `flag:"historical" help:"Retain this commit without moving the location head"`
 	GitCommit   string `flag:"git-commit" help:"Resolved Git object ID of the producer input"`
 	Producer    string `flag:"producer" help:"Fingerprint of the producer executable and configuration"`
+	Plugin      string `flag:"plugin" help:"Producer plugin to run as '<bin> uir' (such as repomap); the argument is then the checkout path, default ."`
+	PluginPath  string `flag:"plugin-path" help:"Explicit path of the --plugin executable, instead of discovery"`
+	Security    bool   `flag:"security" help:"Ask the --plugin to include security advisories"`
 }
 
 func registerImportCommand(root *cobra.Command) {
@@ -46,8 +49,8 @@ func registerImportCommand(root *cobra.Command) {
 		}
 		return result, err
 	})
-	command.Use = "import [file.json|-]"
-	command.Short = "Publish a non-Go producer's symbols and documents from a publication JSON file"
+	command.Use = "import [file.json|-|checkout --plugin name]"
+	command.Short = "Publish a non-Go producer's symbols and documents from a publication JSON file or a producer plugin"
 	command.Args = cobra.MaximumNArgs(1)
 	setModuleRoute(command, "modules/import")
 }
@@ -79,6 +82,12 @@ func invalidPublication(message string) error {
 // argument, stdin for -, or --publication; over HTTP only the body's publication field, since a file
 // argument would read the server's disk.
 func readPublication(ctx context.Context, options moduleImportOptions, stdin io.Reader) (indexer.Publication, error) {
+	if err := validatePluginFlags(options); err != nil {
+		return indexer.Publication{}, err
+	}
+	if options.Plugin != "" {
+		return publicationFromPlugin(ctx, options)
+	}
 	encoded, source, err := publicationBytes(ctx, options, stdin)
 	if err != nil {
 		return indexer.Publication{}, err
