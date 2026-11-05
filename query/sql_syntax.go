@@ -42,7 +42,7 @@ func (pipeline *Pipeline) sqlSyntaxRows(ctx context.Context, parsed *sqlsyntax.Q
 		if err != nil {
 			return result, err
 		}
-		if document.coverage == storage.CoverageExcluded {
+		if document.coverage == storage.CoverageExcluded || !rows.subjects.keepFile(scope.snapshot.ID.String(), document.path) {
 			continue
 		}
 		content := document.content
@@ -74,6 +74,10 @@ func (pipeline *Pipeline) sqlSyntaxRows(ctx context.Context, parsed *sqlsyntax.Q
 			if declaration.ID != nil {
 				symbol.ID = *declaration.ID
 			}
+			if !rows.subjects.keepSymbol(symbol.ID) {
+				continue
+			}
+			rows.subjects.selected(symbol.ID)
 			values := map[string]any{"path": match.Path, "line": *match.Line, "column": *match.Column, "package": match.PackagePath, "module": match.RootKey, "snapshot": match.SnapshotID, "role": "definition",
 				"symbol.kind": symbol.Kind, "symbol.name": name, "symbol.query_name": symbol.QueryName, "symbol.module": symbol.ModuleKey, "symbol.package": symbol.PackagePath,
 				"symbol.metrics.param_count": declaration.Metrics.ParamCount, "symbol.metrics.body_lines": nil}

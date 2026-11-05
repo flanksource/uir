@@ -28,6 +28,7 @@ type sqlFileOptions struct {
 	includeExcluded bool
 	buildConstraint bool
 	buildTags       []string
+	subjects        *SQLSubjects
 }
 
 func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOptions) ([]sqlRecord, error) {
@@ -49,7 +50,7 @@ func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOpt
 		}
 		active := make(map[string]storage.ActiveDocument, len(facts.documents))
 		for _, document := range facts.documents {
-			if options.includeExcluded || document.Document.Coverage != storage.CoverageExcluded {
+			if (options.includeExcluded || document.Document.Coverage != storage.CoverageExcluded) && options.subjects.keepFile(scope.snapshot.ID.String(), document.Source.PathKey) {
 				active[document.Source.PathKey] = document
 			}
 		}

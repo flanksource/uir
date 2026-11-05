@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
-	"strings"
+	"time"
 
 	"github.com/flanksource/commons-db/git"
 	"github.com/flanksource/gavel/linters"
@@ -33,6 +33,8 @@ type Options struct {
 	WorkDir   string
 	All       bool
 	Directory string
+	// NoCache evaluates every rule and subject, ignoring stored findings, and overwrites them.
+	NoCache bool
 }
 
 func Run(ctx context.Context, database *gorm.DB, config *Config, options Options) *Result {
@@ -79,7 +81,9 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 	coverage := map[string]bool{}
 	files := map[string]bool{}
 	var sourceSets map[string]string
+	cache := newCacheReport(time.Now().UTC())
 	defer result.orderRules(rules)
+	defer cache.finish(result)
 	for _, mode := range []storage.AnalysisMode{storage.AnalysisSyntax, storage.AnalysisTyped} {
 		selected := false
 		for _, rule := range rules {
@@ -88,11 +92,11 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 		if !selected {
 			continue
 		}
-		scope, err := snapshots(ctx, database, config, options, mode)
+		scopeOptions, err := snapshots(ctx, database, config, options, mode)
 		if err != nil {
 			return err
 		}
-		currentSets, err := analysisSourceSets(ctx, database, scope)
+		currentSets, err := analysisSourceSets(ctx, database, scopeOptions)
 		if err != nil {
 			return err
 		}
@@ -100,48 +104,72 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 			return errors.New("project sources changed between syntax and typed analysis; rerun uir lint")
 		}
 		sourceSets = currentSets
+		gaps, err := pipeline.ScopeCoverage(ctx, scopeOptions)
+		if err != nil {
+			return err
+		}
+		if err := result.addCoverage(gaps, coverage); err != nil {
+			return err
+		}
+		scope, err := loadScope(ctx, database, scopeOptions)
+		if err != nil {
+			return err
+		}
 		for _, rule := range rules {
 			if rule.requirements.Mode != mode {
 				continue
 			}
-			queried, err := pipeline.VisitSQL(ctx, rule.Query, scope, func(row query.SQLRow) error {
-				if row.Match.Path != "" {
-					path, err := filepath.Rel(result.WorkDir, filepath.Join(row.Match.Location, row.Match.Path))
-					if options.All {
-						path = row.Match.Path
-					}
-					if err != nil {
-						return err
-					}
-					if !selection.MatchesPath(filepath.ToSlash(path)) {
-						return nil
-					}
-				}
-				var message strings.Builder
-				if err := rule.message.Execute(&message, row.Values); err != nil {
-					return err
-				}
-				finding := models.NewViolationBuilder().WithMessage(message.String()).WithSource("uir").WithRuleFromLinter("uir", rule.ID).Build()
-				finding.Severity = rule.Severity
-				if row.Match.Path != "" {
-					finding.File = filepath.Join(row.Match.Location, row.Match.Path)
-					files[finding.File] = true
-				}
-				if row.Match.Line != nil {
-					finding.Line = *row.Match.Line
-				}
-				if row.Match.Column != nil {
-					finding.Column = *row.Match.Column
-				}
-				result.addFinding(finding, row.WitnessSymbol)
-				return nil
-			})
-			err = errors.Join(err, result.addCoverage(queried.Coverage, coverage))
+			run := &ruleRun{database: database, pipeline: pipeline, scope: scope, rule: rule, noCache: options.NoCache, now: cache.now}
+			findings, err := run.lint(ctx)
+			cache.add(run)
+			if err == nil {
+				err = result.emit(rule, findings, scope, options, selection, files)
+			}
 			result.FileCount = len(files)
 			if err != nil {
 				return fmt.Errorf("rule %s: %w", rule.ID, err)
 			}
 		}
+	}
+	return nil
+}
+
+// emit adds a rule's findings that the selection's path filters keep, located in the scope's checkouts.
+func (result *Result) emit(rule Rule, findings []finding, scope *lintScope, options Options, selection *Selection, files map[string]bool) error {
+	for _, found := range findings {
+		location, known := scope.locations[found.Root]
+		if !known {
+			return fmt.Errorf("finding in root %q outside the lint scope", found.Root)
+		}
+		if found.Path != "" {
+			path, err := filepath.Rel(result.WorkDir, filepath.Join(location, found.Path))
+			if options.All {
+				path = found.Path
+			}
+			if err != nil {
+				return err
+			}
+			if !selection.MatchesPath(filepath.ToSlash(path)) {
+				continue
+			}
+		}
+		violation := models.NewViolationBuilder().WithMessage(found.Message).WithSource("uir").WithRuleFromLinter("uir", rule.ID).Build()
+		violation.Severity = rule.Severity
+		if found.Path != "" {
+			violation.File = filepath.Join(location, found.Path)
+			files[violation.File] = true
+		}
+		if found.Line != nil {
+			violation.Line = *found.Line
+		}
+		if found.Column != nil {
+			violation.Column = *found.Column
+		}
+		var witness *query.ModuleSymbol
+		if found.Symbol != nil {
+			witness = &query.ModuleSymbol{ID: found.Symbol.ID, QueryName: found.Symbol.QueryName, DeclarationKey: found.Symbol.DeclarationKey}
+		}
+		result.addFinding(violation, witness)
 	}
 	return nil
 }

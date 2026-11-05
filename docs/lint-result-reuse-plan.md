@@ -1,6 +1,8 @@
 # Lint findings as generation-gated facts
 
-Status: plan, not started. It builds on [Symbol generations, test coverage and test flakiness](symbol-generations-tests-plan.md), which is also not started, and reuses its `content_generation` and closure-fingerprint design rather than adding a second one.
+Status: phases 1–3 (storage, closures, reuse in `uir lint`) are implemented; see [Result reuse](lint.md#result-reuse). Phases 4 and 5 belong to gavel and oipa-cli. It builds on [Symbol generations, test coverage and test flakiness](symbol-generations-tests-plan.md) and reuses its `content_generation` and closure-fingerprint design rather than adding a second one.
+
+Where the implementation differs from this plan: closures are proven per subject only for symbol selector sources reading the subject's own facts (and per file for `files()` and syntax analysis, which has no canonical symbol ids); navigation and membership rules fall back to one closure over the whole scope, since their rows read symbols they are not about. A row is keyed by (rule, subject) and replaced when re-evaluated, with the rule version and closure fingerprint as columns, rather than keeping a row per fingerprint.
 
 ## Problem
 

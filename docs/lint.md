@@ -21,6 +21,7 @@ uir lint --changed HEAD~3..HEAD
 uir lint --changed main...HEAD --group-by symbol
 uir lint --staged
 uir lint --tags integration,feature
+uir lint --no-lint-cache
 ```
 
 `--tags` accepts repeated or comma-separated Go build tags. Tags select files for syntax analysis and typed loading and participate in analysis freshness checks; changing tags requires fresh analysis before `--no-index` can reuse it. Explicit snapshots already fix their build configuration and reject `--tags`. When running through Gavel, `gavel lint uir --generated=false --tags integration,feature` also suppresses generated-file findings while retaining generated source for type resolution.
@@ -35,7 +36,7 @@ Analysis selects the enclosing Go module at the invocation directory, or at the 
 
 `--all` selects every registered module's primary location, applies the selected configuration to all of them, and pins their snapshots into one combined query scope. Register modules with `uir add` first. Cross-module callers, callees and other navigation can then traverse those selected modules. External producer locations use their existing snapshots. Under `--all`, include/exclude file patterns are relative to each module. `--all` cannot combine with `--changed`, `--staged` or `--snapshot`; it supports `--no-index`.
 
-Version 1 accepts `version`, optional `_expires`, `lint.include_tests` (default false) and `lint.rules`. Every unexpired file requires at least one rule with a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. The IDs `uir/coverage` and `uir/index` are reserved for index warnings. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
+Version 1 accepts `version`, optional `_expires`, `lint.include_tests` (default false) and `lint.rules`. Every unexpired file requires at least one rule with a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. `reads` is `public` by default, or `private` for a rule that judges a table's indexes, keys or constraints; see [result reuse](#result-reuse). The IDs `uir/coverage` and `uir/index` are reserved for index warnings. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
 
 For shared rules, save this as `~/.uir.yaml`:
 
@@ -115,4 +116,15 @@ GOWORK=off .bin/uir --dsn .tmp/lint-example.db lint --config lint/testdata/proje
 
 The sample reports one warning and one parameter-count error. `GOWORK=off` selects the sample's own module rather than the repository's development workspace. To see a warning-only successful run, add `--rule small-files`.
 
-A repeat run reuses the index of an unchanged checkout but evaluates every selected rule again. Reusing each rule's findings while the symbols it read are unchanged is planned in [Lint findings as generation-gated facts](lint-result-reuse-plan.md).
+## Result reuse
+
+A repeat run reuses the index of an unchanged checkout, and also the findings of every (rule, subject) pair whose closure, the facts the rule read for that subject, is unchanged. Findings are stored in the UIR database beside test coverage (`lint_findings`), so `uir lint` evaluates only what changed. The design is [Lint findings as generation-gated facts](lint-result-reuse-plan.md). A rule's closure follows its query:
+
+- A symbol selector source whose fields are facts of the selected symbol, such as `FROM func:* WHERE symbol.metrics.param_count > 4`, is checked per symbol over typed analysis. A callable's closure is all three of its layer fingerprints; any other symbol, such as a table, contributes its `public` fingerprint, or its `private` fingerprint when the rule declares `reads: private`. Rules reading location or document facts (`path`, `line`, `column`, `symbol.type`, `symbol.props`, body lines or producer metrics) also hold the declaring document. A symbol the selector does not select holds only its identity, so a change to it re-evaluates nothing.
+- The same rules over syntax analysis, which has no canonical symbol ids, and `files()` rules are checked per file, by the file's document.
+- Navigation sources (callers, callees, references, reads, writes, traversal) and `IN` membership read symbols their rows are not about, so the rule is one pair whose closure is every snapshot of the scope: any change to the scope evaluates it again.
+- Rules reading `snapshot` or `symbol.generation` reuse findings only on the same snapshots, and rules reading `symbol.test_coverage` are evaluated every run, since test runs change it without a new snapshot.
+
+So an unchanged checkout evaluates no rule; a function body edit evaluates per-symbol rules for that function, per-file rules for its file and navigation rules; adding an index evaluates only `reads: private` rules for that table; and a row-count change evaluates nothing. A reused finding whose declaration moved, for example below an inserted comment, is relocated to the declaration's current position. Editing a rule's query, message or `reads` evaluates only that rule.
+
+JSON output adds `cache`: `source` (`uir`), `fingerprint` over every reported pair, `stored_at` (the oldest reused pair), `hit` (true only when every pair was reused), the `evaluated` and `reused` pair counts, and per-rule `rules` with each rule's closure. `--no-lint-cache` evaluates every rule and subject and overwrites the stored findings. Within a rule, reused findings are ordered by location rather than by the query's `ORDER BY`.
