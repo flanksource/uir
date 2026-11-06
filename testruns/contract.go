@@ -17,14 +17,13 @@ import (
 	"time"
 
 	"github.com/flanksource/uir/storage"
-	"github.com/google/uuid"
 )
 
 // ContractVersion is the Import version this package reads.
 const ContractVersion = 1
 
-// fullCommit is a full SHA-1 or SHA-256 Git object name.
-var fullCommit = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+// fullObject is a full SHA-1 or SHA-256 Git object name.
+var fullObject = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // ErrInvalidImport marks an import the contract rejects.
 var ErrInvalidImport = errors.New("invalid test import")
@@ -38,13 +37,14 @@ type Import struct {
 // Run is one execution of a root's tests. Environment is what makes two runs comparable (GOOS, GOARCH,
 // toolchain, -race, build tags, -count); its digest groups results for flakiness.
 //
-// GitCommit, Dirty and SnapshotID say which code the tests ran on: the full SHA of HEAD, whether the
-// worktree had uncommitted changes to indexed inputs, and the snapshot the producer indexed just before
-// running them. A dirty run needs SnapshotID, since uncommitted bytes cannot be indexed later.
+// GitCommit, Dirty and GitTree say which code the tests ran on: the full SHA of HEAD, whether the
+// worktree had uncommitted changes to indexed inputs, and, required when dirty, the Git tree hash of the
+// repository's working tree with uncommitted and untracked, non-ignored files and without the producer's
+// export file (GIT_INDEX_FILE=<tmp> git read-tree HEAD && git add -A && git write-tree, at the top level).
 type Run struct {
 	GitCommit   string            `json:"git_commit"`
 	Dirty       bool              `json:"dirty,omitempty"`
-	SnapshotID  string            `json:"snapshot_id,omitempty"`
+	GitTree     string            `json:"git_tree,omitempty"`
 	Producer    string            `json:"producer"`
 	Environment map[string]string `json:"environment"`
 	StartedAt   time.Time         `json:"started_at"`
@@ -120,15 +120,12 @@ func (run Run) validate() error {
 		return invalid("started_at is required and finished_at may not precede it")
 	case run.GitCommit == "":
 		return invalid("git_commit is required: without it the code the tests ran on is unknown")
-	case !fullCommit.MatchString(run.GitCommit):
+	case !fullObject.MatchString(run.GitCommit):
 		return invalid("git_commit %q is not a full lowercase commit SHA", run.GitCommit)
-	case run.Dirty && run.SnapshotID == "":
-		return invalid("the tests ran on uncommitted changes to %s, which cannot be indexed later; index them before the tests run (uir reindex --include-tests) and report that snapshot_id", run.GitCommit)
-	}
-	if run.SnapshotID != "" {
-		if _, err := uuid.Parse(run.SnapshotID); err != nil {
-			return invalid("snapshot_id %q is not a UUID", run.SnapshotID)
-		}
+	case run.Dirty && run.GitTree == "":
+		return invalid("the tests ran on uncommitted changes to %s but report no git_tree, so the code they ran on cannot be identified", run.GitCommit)
+	case run.GitTree != "" && !fullObject.MatchString(run.GitTree):
+		return invalid("git_tree %q is not a full lowercase tree hash", run.GitTree)
 	}
 	seen := map[string]bool{}
 	for i, test := range run.Tests {
