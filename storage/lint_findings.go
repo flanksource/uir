@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -34,7 +35,7 @@ type LintFinding struct {
 	ClosureSource      LintClosure `gorm:"column:closure_source"`
 	ClosureFingerprint string      `gorm:"column:closure_fingerprint"`
 	ContentGeneration  *int64      `gorm:"column:content_generation"`
-	DocumentOrdinal    *int64      `gorm:"column:document_ordinal"`
+	DocumentID         *uuid.UUID  `gorm:"column:document_id"`
 	Findings           JSON        `gorm:"column:findings"`
 	ProducedAt         time.Time   `gorm:"column:produced_at"`
 	ExpiresAt          *time.Time  `gorm:"column:expires_at"`

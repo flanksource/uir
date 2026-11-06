@@ -21,13 +21,16 @@ type lintScope struct {
 }
 
 // scopeSnapshot is one snapshot of a scope, its root key and checkout, and its defined symbols, document
-// membership and symbol definitions, each loaded when a closure first needs it.
+// membership (path → ordinal, and each ordinal's document id) and symbol definitions, each loaded when a
+// closure first needs it. Closures and stored rows name documents by id, since pruning frees ordinals
+// that a later document can be given.
 type scopeSnapshot struct {
 	snapshot    storage.ModuleSnapshot
 	rootKey     string
 	location    string
 	symbols     []storage.EffectiveSymbol
 	documents   map[string]int64
+	documentIDs map[int64]uuid.UUID
 	definitions map[int64][]int64
 }
 
@@ -73,7 +76,15 @@ func (snapshot *scopeSnapshot) activeDocuments(ctx context.Context, database *go
 		if err != nil {
 			return nil, err
 		}
-		snapshot.documents = documents
+		ordinals := make([]int64, 0, len(documents))
+		for _, ordinal := range documents {
+			ordinals = append(ordinals, ordinal)
+		}
+		ids, err := storage.DocumentIDs(ctx, database, ordinals)
+		if err != nil {
+			return nil, err
+		}
+		snapshot.documents, snapshot.documentIDs = documents, ids
 	}
 	return snapshot.documents, nil
 }

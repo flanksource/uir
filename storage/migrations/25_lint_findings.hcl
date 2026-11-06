@@ -9,8 +9,9 @@
 // findings is the JSON array of findings, empty for a subject the rule passed, so a clean result is reused
 // too. A row is reused only while its rule version and closure fingerprint match the snapshot being
 // linted and expires_at, which a producer whose findings read inputs outside UIR sets, has not passed.
-// document_ordinal is the subject's declaring document when the row was produced, so a reused finding
-// whose declaration moved is relocated, and content_generation the subject's content generation then.
+// document_id is the subject's declaring document when the row was produced, so a reused finding whose
+// declaration moved is relocated, and content_generation the subject's content generation then. Closures
+// and rows name documents by id, never by ordinal: pruning frees ordinals a later document can be given.
 // Writing a pair replaces its row. subject_handle has no foreign key: pruning a symbol deletes its rows.
 table "lint_findings" {
   schema = schema.public
@@ -25,8 +26,8 @@ table "lint_findings" {
     type = bigint
     null = true
   }
-  column "document_ordinal" {
-    type = bigint
+  column "document_id" {
+    type = uuid
     null = true
   }
   column "findings" { type = jsonb }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
+	"strings"
 
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
@@ -24,11 +24,22 @@ type symbolSubject struct {
 	unselected string
 }
 
+// documentIDs are the ids of the subject's declaring documents, sorted.
+func (subject *symbolSubject) documentIDs() []string {
+	ids := make([]string, len(subject.documents))
+	for i, ordinal := range subject.documents {
+		ids[i] = subject.snapshot.documentIDs[ordinal].String()
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 // subjects lints a rule whose rows read only their subject symbol. A selected subject's closure is the
 // symbol at the layer the rule reads, plus its declaring documents when the rule reads document facts or
-// the symbol is declared in more than one document. A subject the selector does not select has only its
-// identity as closure, since selection reads only kind, name, owner, package and module, so a change to
-// a symbol the rule does not read re-evaluates nothing. A reused finding whose declaration moved to
+// the symbol is declared in more than one document. A subject the selector does not select has as closure
+// what selection reads: its identity, plus its private layer for struct:, which selects by the type form
+// of its private shape. So a change to a symbol the rule does not select re-evaluates nothing, except a
+// shape change under struct:. A reused finding whose declaration moved to
 // another document is relocated there.
 func (run *ruleRun) subjects(ctx context.Context) ([]finding, error) {
 	kinds, err := run.selectorKinds(ctx)
@@ -130,10 +141,16 @@ func (run *ruleRun) universe(ctx context.Context, kinds map[symbolhandle.Kind]bo
 	if err != nil {
 		return nil, err
 	}
+	kind, _, _ := strings.Cut(run.rule.requirements.Closure.Selector, ":")
+	shapeSelected := kind == "struct"
 	for handle, subject := range universe {
 		subject.id = ids[handle]
+		// Selection reads the symbol's identity and, for struct:, the type form of its private shape.
 		unselected := run.header(storage.LintClosureUnselected)
 		unselected.Text(subject.id)
+		if shapeSelected {
+			unselected.Text(fingerprintText(subject.symbol.PrivateFP))
+		}
 		subject.unselected = unselected.Sum()
 		fields, _ := symbolhandle.Unpack(handle)
 		spec, err := registry.Spec(fields.Kind)
@@ -145,8 +162,8 @@ func (run *ruleRun) universe(ctx context.Context, kinds map[symbolhandle.Kind]bo
 		run.symbolLayer(selected, subject.symbol, spec.Category == symbolhandle.CategoryCallable)
 		if run.rule.requirements.Closure.Document || len(subject.documents) > 1 {
 			selected.Count(len(subject.documents))
-			for _, ordinal := range subject.documents {
-				selected.Text(strconv.FormatInt(ordinal, 10))
+			for _, id := range subject.documentIDs() {
+				selected.Text(id)
 			}
 		}
 		subject.selected = selected.Sum()
@@ -190,7 +207,7 @@ func (run *ruleRun) evaluateSubjects(ctx context.Context, universe map[int64]*sy
 		}
 		row.ContentGeneration = new(subject.symbol.ContentGeneration)
 		if len(subject.documents) == 1 {
-			row.DocumentOrdinal = new(subject.documents[0])
+			row.DocumentID = new(subject.snapshot.documentIDs[subject.documents[0]])
 		}
 		rows = append(rows, row)
 	}
@@ -201,7 +218,7 @@ func (run *ruleRun) evaluateSubjects(ctx context.Context, universe map[int64]*sy
 // there since the row was produced. It reports whether it moved them, and whether it located the
 // declaration: one it cannot locate is evaluated instead.
 func (run *ruleRun) relocate(ctx context.Context, row *storage.LintFinding, subject *symbolSubject) (moved, located bool, err error) {
-	if len(subject.documents) != 1 || row.DocumentOrdinal == nil || *row.DocumentOrdinal == subject.documents[0] {
+	if len(subject.documents) != 1 || row.DocumentID == nil || *row.DocumentID == subject.snapshot.documentIDs[subject.documents[0]] {
 		return false, true, nil
 	}
 	var findings []finding
@@ -236,7 +253,7 @@ func (run *ruleRun) relocate(ctx context.Context, row *storage.LintFinding, subj
 		}
 		row.Findings = storage.JSON(encoded)
 	}
-	row.DocumentOrdinal = new(subject.documents[0])
+	row.DocumentID = new(subject.snapshot.documentIDs[subject.documents[0]])
 	return true, true, nil
 }
 

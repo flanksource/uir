@@ -165,6 +165,63 @@ var _ = Describe("Lint result reuse", func() {
 		Expect(reported(after)).To(Equal(reported(forced)))
 	}, Entry("SQLite", "sqlite"), Entry("PostgreSQL", "postgres"))
 
+	DescribeTable("re-evaluates when a document ordinal is recycled or selection changes", func(ctx SpecContext, backend string) {
+		database := lintDatabase(ctx, backend)
+		root := GinkgoT().TempDir()
+		write := func(name, content string) {
+			GinkgoHelper()
+			Expect(os.WriteFile(filepath.Join(root, name), []byte(content), 0o600)).To(Succeed())
+		}
+		params := `    - id: params
+      message: "{{.name}}"
+      query: "SELECT symbol.name AS name FROM func:* WHERE symbol.metrics.param_count > 1"
+`
+		structs := `    - id: structs
+      message: "{{.name}}"
+      query: "SELECT symbol.name AS name FROM struct:*"
+`
+		var config *Config
+		load := func(rules string) {
+			GinkgoHelper()
+			write(ConfigName, "version: 1\nlint:\n  rules:\n"+rules)
+			var err error
+			config, err = Load(filepath.Join(root, ConfigName))
+			Expect(err).NotTo(HaveOccurred())
+		}
+		reuse := func() []string {
+			GinkgoHelper()
+			cached := Run(ctx, database, config, Options{})
+			Expect(cached.Error).To(BeEmpty())
+			forced := Run(ctx, database, config, Options{NoCache: true})
+			Expect(forced.Error).To(BeEmpty())
+			Expect(reported(cached)).To(Equal(reported(forced)))
+			return reported(cached)
+		}
+		write("go.mod", "module example.org/recycle\n\ngo 1.26\n")
+		write("a.go", "package recycle\n\ntype Shape int\n\nfunc A() {}\n")
+		write("z.go", "package recycle\n\nfunc Z(a, b int) int { return a + b }\n")
+		load(params)
+		Expect(reuse()).To(Equal([]string{"params z.go:3:6 Z"}))
+
+		By("a pruned document's ordinal is allocated to a new document of the same path")
+		Expect(os.Remove(filepath.Join(root, "z.go"))).To(Succeed())
+		Expect(reuse()).To(BeEmpty())
+		var roots []storage.ModuleRoot
+		Expect(database.WithContext(ctx).Find(&roots).Error).To(Succeed())
+		Expect(roots).To(HaveLen(1))
+		pruned, err := storage.PruneHistory(ctx, database, roots[0].RootKey, storage.HistoryPruneOptions{Keep: 1})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pruned.Documents).To(BeNumerically(">", 0))
+		write("z.go", "package recycle\n\nfunc Z(a int) int { return a }\n")
+		Expect(reuse()).To(BeEmpty())
+
+		By("a symbol the struct selector skipped becomes a struct")
+		load(params + structs)
+		Expect(reuse()).To(BeEmpty())
+		write("a.go", "package recycle\n\ntype Shape struct{}\n\nfunc A() {}\n")
+		Expect(reuse()).To(Equal([]string{"structs a.go:3:6 Shape"}))
+	}, Entry("SQLite", "sqlite"), Entry("PostgreSQL", "postgres"))
+
 	DescribeTable("re-evaluates table rules only for the layer they read", func(ctx SpecContext, backend string) {
 		database := lintDatabase(ctx, backend)
 		root := GinkgoT().TempDir()

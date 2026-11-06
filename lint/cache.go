@@ -22,7 +22,7 @@ import (
 
 const (
 	// closureVersion versions the closure fingerprint encoding.
-	closureVersion = "uir-lint-closure-v1"
+	closureVersion = "uir-lint-closure-v2"
 	// ruleVersionEncoding versions the rule version encoding.
 	ruleVersionEncoding = "uir-lint-rule-v1"
 )
@@ -271,7 +271,7 @@ func (run *ruleRun) files(ctx context.Context) ([]finding, error) {
 			digest := run.header(storage.LintClosureFile)
 			digest.Text(snapshot.snapshot.RootID.String())
 			digest.Text(path)
-			digest.Text(strconv.FormatInt(documents[path], 10))
+			digest.Text(snapshot.documentIDs[documents[path]].String())
 			key := snapshot.snapshot.RootID.String() + ":" + path
 			if _, duplicate := byKey[key]; duplicate {
 				return nil, errUnattributed
@@ -334,12 +334,7 @@ func (run *ruleRun) files(ctx context.Context) ([]finding, error) {
 // producers disagree on which layer holds the signature, and otherwise the public layer, or the private
 // layer for a rule declaring reads: private.
 func (run *ruleRun) symbolLayer(digest canonicalhash.Hash, symbol storage.EffectiveSymbol, callable bool) {
-	text := func(value *int64) string {
-		if value == nil {
-			return ""
-		}
-		return strconv.FormatInt(*value, 10)
-	}
+	text := fingerprintText
 	switch {
 	case callable:
 		digest.Text("all")
@@ -353,6 +348,13 @@ func (run *ruleRun) symbolLayer(digest canonicalhash.Hash, symbol storage.Effect
 		digest.Text(ReadsPublic)
 		digest.Text(text(symbol.PublicFP))
 	}
+}
+
+func fingerprintText(value *int64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatInt(*value, 10)
 }
 
 // selectorKinds are the handle kinds the rule's selector selects, by code.
