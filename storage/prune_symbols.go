@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// deleteOrphanSymbols deletes the candidate symbols that no posting, test case, and no symbol or implements delta names, except an
+// deleteOrphanSymbols deletes the candidate symbols, and their lint findings, that no posting, test case, and no symbol or implements delta names, except an
 // owner of a symbol that stays, such as a record whose field another document still reads. A symbol is
 // deleted after every orphan it owns, since symbols.owner_id references it.
 func deleteOrphanSymbols(ctx context.Context, tx *gorm.DB, candidates []int64, result *PruneResult) error {
@@ -26,13 +26,23 @@ func deleteOrphanSymbols(ctx context.Context, tx *gorm.DB, candidates []int64, r
 			}
 		}
 		var leaves []string
-		for id := range orphans {
+		var handles []int64
+		for id, orphan := range orphans {
 			if !owners[id] {
 				leaves = append(leaves, id)
+				handles = append(handles, orphan.Handle)
 			}
 		}
 		if len(leaves) == 0 {
 			return fmt.Errorf("the %d orphan symbols own one another in a cycle", len(orphans))
+		}
+		if err := inBatches(handles, func(batch []int64) error {
+			if err := tx.WithContext(ctx).Where("subject_handle IN ?", batch).Delete(&LintFinding{}).Error; err != nil {
+				return fmt.Errorf("delete the lint findings of orphan symbols: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		if err := inBatches(leaves, func(batch []string) error {
 			deleted := tx.WithContext(ctx).Where("id IN ?", batch).Delete(&Symbol{})

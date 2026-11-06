@@ -25,6 +25,7 @@ type lintOptions struct {
 	Staged   bool     `flag:"staged" help:"Lint the exact staged tree and report staged files"`
 	Revision string   `args:"true" help:"Commit, A..B or A...B (requires --changed)"`
 	All      bool     `flag:"all" help:"Analyze every registered module's primary location in one combined query scope"`
+	NoCache  bool     `flag:"no-lint-cache" help:"Evaluate every rule and subject instead of reusing stored findings, and overwrite them"`
 }
 
 func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
@@ -33,7 +34,7 @@ func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 		if err != nil {
 			return nil, err
 		}
-		request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{All: options.All, Rules: options.Rules, Tags: options.Tags, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision})
+		request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{All: options.All, Rules: options.Rules, Tags: options.Tags, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision, NoCache: options.NoCache})
 		if err != nil {
 			return lintFailure(err), err
 		}

@@ -31,14 +31,25 @@ type Settings struct {
 	Rules        []Rule `yaml:"rules"`
 }
 
+// Rule is one SQL architecture rule. Reads is the fingerprint layer the rule depends on for the
+// non-callable symbols it reads, such as tables: public (the default, a table's columns) or private (also
+// its indexes, keys and constraints), so adding an index re-evaluates only rules that declare private.
 type Rule struct {
 	ID           string                   `yaml:"id"`
 	Severity     models.ViolationSeverity `yaml:"severity"`
 	Message      string                   `yaml:"message"`
 	Query        string                   `yaml:"query"`
+	Reads        string                   `yaml:"reads,omitempty"`
 	message      *template.Template
 	requirements query.SQLRequirements
+	version      string
 }
+
+// The layers a rule declares it reads.
+const (
+	ReadsPublic  = "public"
+	ReadsPrivate = "private"
+)
 
 func Load(path string) (config *Config, err error) {
 	data, err := readConfig(path)
@@ -99,6 +110,13 @@ func Load(path string) (config *Config, err error) {
 		if strings.TrimSpace(rule.Message) == "" {
 			return nil, fmt.Errorf("rule %s: message is required", rule.ID)
 		}
+		if rule.Reads == "" {
+			rule.Reads = ReadsPublic
+		}
+		if rule.Reads != ReadsPublic && rule.Reads != ReadsPrivate {
+			return nil, fmt.Errorf("rule %s: invalid reads %q: expected public or private", rule.ID, rule.Reads)
+		}
+		rule.version = rule.ruleVersion()
 		rule.requirements, err = query.AnalyzeSQLRows(rule.Query)
 		if err != nil {
 			return nil, fmt.Errorf("rule %s: %w", rule.ID, err)

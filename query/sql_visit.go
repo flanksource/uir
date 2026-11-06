@@ -40,5 +40,5 @@ func (pipeline *Pipeline) VisitSQL(ctx context.Context, input string, scope Modu
 	if err := ValidateSQLRows(input); err != nil {
 		return ModuleQueryResult{}, err
 	}
-	return pipeline.executeSQL(ctx, input, scope, visit)
+	return pipeline.executeSQL(ctx, input, scope, visit, nil)
 }

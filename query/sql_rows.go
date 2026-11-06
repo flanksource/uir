@@ -39,6 +39,26 @@ type sqlRows struct {
 	buildTags  map[string]bool
 	fileSource bool
 	visit      func(SQLRow) error
+	subjects   *SQLSubjects
+}
+
+// keepSubjects drops the records whose witness symbol the visit's subjects leave out, and reports the
+// witnesses it keeps as selected.
+func (rows *sqlRows) keepSubjects(records []sqlRecord) []sqlRecord {
+	if rows.subjects == nil {
+		return records
+	}
+	return slices.DeleteFunc(records, func(record sqlRecord) bool {
+		id := ""
+		if record.witness != nil {
+			id = record.witness.ID
+		}
+		if !rows.subjects.keepSymbol(id) {
+			return true
+		}
+		rows.subjects.selected(id)
+		return false
+	})
 }
 
 func (rows *sqlRows) field(name string) (string, string, error) {

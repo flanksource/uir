@@ -7,8 +7,13 @@ import (
 	"github.com/flanksource/uir/storage"
 )
 
-type SQLRequirements struct{ Mode storage.AnalysisMode }
+// SQLRequirements are the analysis mode a row query needs and what its rows depend on.
+type SQLRequirements struct {
+	Mode    storage.AnalysisMode
+	Closure SQLClosure
+}
 
+// AnalyzeSQLRows finds the minimum analysis mode and the closure of a row query, without opening an index.
 func AnalyzeSQLRows(input string) (SQLRequirements, error) {
 	if err := ValidateSQLRows(input); err != nil {
 		return SQLRequirements{}, err
@@ -17,20 +22,28 @@ func AnalyzeSQLRows(input string) (SQLRequirements, error) {
 	if err != nil {
 		return SQLRequirements{}, err
 	}
+	mode, err := sqlMode(parsed)
+	if err != nil {
+		return SQLRequirements{}, err
+	}
+	return SQLRequirements{Mode: mode, Closure: sqlClosure(parsed)}, nil
+}
+
+func sqlMode(parsed *sqlsyntax.Query) (storage.AnalysisMode, error) {
 	mode := storage.AnalysisTyped
 	file := strings.EqualFold(parsed.Source.Name, "files")
 	callable := strings.HasPrefix(parsed.Source.Selector, "func:") || strings.HasPrefix(parsed.Source.Selector, "method:")
 	if callable {
 		selector, err := parseSelector(parsed.Source.Selector)
 		if err != nil {
-			return SQLRequirements{}, err
+			return mode, err
 		}
 		if selector.Owner != "" || selector.ModulePattern != "" {
-			return SQLRequirements{Mode: mode}, nil
+			return mode, nil
 		}
 	}
 	if !file && !callable {
-		return SQLRequirements{Mode: mode}, nil
+		return mode, nil
 	}
 	fields := syntaxFields()
 	if file {
@@ -38,15 +51,15 @@ func AnalyzeSQLRows(input string) (SQLRequirements, error) {
 	}
 	rows := sqlRows{fields: fields, fileSource: file}
 	if err := rows.bind(parsed); err != nil {
-		return SQLRequirements{Mode: mode}, nil
+		return mode, nil
 	}
 	if err := rows.requirePredicateFields(parsed.Where); err != nil {
-		return SQLRequirements{Mode: mode}, nil
+		return mode, nil
 	}
 	if !syntaxPredicate(parsed.Where) {
-		return SQLRequirements{Mode: mode}, nil
+		return mode, nil
 	}
-	return SQLRequirements{Mode: storage.AnalysisSyntax}, nil
+	return storage.AnalysisSyntax, nil
 }
 
 func syntaxFields() map[string]string {

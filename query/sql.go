@@ -46,10 +46,10 @@ func DetectLanguage(input string, requested Language) (Language, error) {
 }
 
 func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options ModuleScopeOptions) (ModuleQueryResult, error) {
-	return pipeline.executeSQL(ctx, input, options, nil)
+	return pipeline.executeSQL(ctx, input, options, nil, nil)
 }
 
-func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options ModuleScopeOptions, visit func(SQLRow) error) (ModuleQueryResult, error) {
+func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options ModuleScopeOptions, visit func(SQLRow) error, subjects *SQLSubjects) (ModuleQueryResult, error) {
 	if pipeline == nil || pipeline.database == nil {
 		return ModuleQueryResult{}, errors.New("UIR query database is required")
 	}
@@ -95,7 +95,7 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	rows := sqlRows{fields: fields, fileSource: source.function.Name == "files", visit: visit}
+	rows := sqlRows{fields: fields, fileSource: source.function.Name == "files", visit: visit, subjects: subjects}
 	if err := rows.bind(parsed); err != nil {
 		return ModuleQueryResult{}, err
 	}
@@ -137,7 +137,7 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 		records, err := session.sqlFileRecords(ctx, sqlFileOptions{
 			scopes: selection.scopes, lines: rows.required["file.lines"], includeExcluded: source.options.includeExcluded,
 			declarations:    rows.required["file.functions"] || rows.required["file.structs"],
-			buildConstraint: rows.required["file.build_constraint"], buildTags: sortedKeys(rows.buildTags),
+			buildConstraint: rows.required["file.build_constraint"], buildTags: sortedKeys(rows.buildTags), subjects: subjects,
 		})
 		if err != nil {
 			return ModuleQueryResult{}, err
@@ -197,6 +197,7 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
+	records = rows.keepSubjects(records)
 	if visit != nil {
 		if err := index.sqlWitnessKeys(ctx, records); err != nil {
 			return result, err

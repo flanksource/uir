@@ -3,11 +3,13 @@ package lint
 import (
 	"cmp"
 	"slices"
+	"time"
 
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/gavel/linters"
 	"github.com/flanksource/gavel/models"
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/internal/canonicalhash"
 	"github.com/flanksource/uir/query"
 )
 
@@ -15,7 +17,69 @@ type Result struct {
 	*linters.LinterResult
 	GroupBy string  `json:"group_by,omitempty"`
 	Groups  []Group `json:"groups,omitempty"`
-	groups  map[groupKey]int
+	// Cache reports how the run used stored findings; it is nil when no rule ran.
+	Cache  *Cache `json:"cache,omitempty"`
+	groups map[groupKey]int
+}
+
+// Cache reports how a run used the findings UIR stores: Source is always "uir", Fingerprint digests
+// every (rule version, subject, closure fingerprint) pair the run reported, StoredAt is when the oldest
+// reused pair was produced, and Hit is true only when every pair was reused.
+type Cache struct {
+	Source      string      `json:"source"`
+	Fingerprint string      `json:"fingerprint"`
+	StoredAt    *time.Time  `json:"stored_at,omitempty"`
+	Hit         bool        `json:"hit"`
+	Evaluated   int         `json:"evaluated"`
+	Reused      int         `json:"reused"`
+	Rules       []RuleCache `json:"rules"`
+}
+
+// RuleCache is how one rule used stored findings: the closure its pairs were checked by, and how many
+// (rule, subject) pairs it evaluated and reused.
+type RuleCache struct {
+	ID        string               `json:"id"`
+	Closure   query.SQLClosureKind `json:"closure"`
+	Evaluated int                  `json:"evaluated"`
+	Reused    int                  `json:"reused"`
+}
+
+// cacheReport accumulates a run's Cache.
+type cacheReport struct {
+	now    time.Time
+	cache  Cache
+	pairs  []string
+	active bool
+}
+
+func newCacheReport(now time.Time) *cacheReport {
+	return &cacheReport{now: now, cache: Cache{Source: "uir", Rules: []RuleCache{}}}
+}
+
+func (report *cacheReport) add(run *ruleRun) {
+	report.active = true
+	report.cache.Rules = append(report.cache.Rules, run.stats)
+	report.cache.Evaluated += run.stats.Evaluated
+	report.cache.Reused += run.stats.Reused
+	report.pairs = append(report.pairs, run.pairs...)
+	if run.stored != nil && (report.cache.StoredAt == nil || run.stored.Before(*report.cache.StoredAt)) {
+		report.cache.StoredAt = run.stored
+	}
+}
+
+func (report *cacheReport) finish(result *Result) {
+	if !report.active {
+		return
+	}
+	digest := canonicalhash.New(closureVersion)
+	slices.Sort(report.pairs)
+	digest.Count(len(report.pairs))
+	for _, pair := range report.pairs {
+		digest.Text(pair)
+	}
+	report.cache.Fingerprint = digest.Sum()
+	report.cache.Hit = report.cache.Evaluated == 0 && report.cache.Reused > 0
+	result.Cache = &report.cache
 }
 
 type groupKey struct{ file, symbol string }

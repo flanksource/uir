@@ -44,7 +44,7 @@ var generationNames = map[indexGeneration]string{generationPreHandle: "pre-handl
 // two-layer fingerprint generation (symbol deltas with shape_fp and body_fp) share the list. The registration tables, modules, locations, and primary_locations, keep their rows, and so do
 // task_runs and symbol_kinds, which describe no handle.
 var indexTables = []string{
-	"test_coverage", "test_results", "test_runs", "test_cases", "analysis_heads", "declaration_measures", "declaration_metrics", "source_metrics",
+	"lint_findings", "test_coverage", "test_results", "test_runs", "test_cases", "analysis_heads", "declaration_measures", "declaration_metrics", "source_metrics",
 	"symbol_generation_backfill", "document_membership", "document_deltas", "implements_facts", "implements_deltas", "snapshot_sibling_shapes", "symbol_deltas", "symbol_postings", "snapshot_dependencies", "package_coverage", "documents", "symbols", "symbol_packages",
 	"symbol_modules", "source_deltas", "source_revisions", "location_heads", "snapshots", "source_blobs",
 }
