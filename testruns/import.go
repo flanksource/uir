@@ -25,51 +25,61 @@ var runNamespace = uuid.MustParse("6f1d0c52-8a3e-4b8e-9d0e-2f5b7f3c9a41")
 // goTest is gavel's framework name for `go test`.
 const goTest = "go test"
 
-// RunResult is what importing one run did.
+// RunResult is what importing one run did, and the snapshot it is bound to.
 type RunResult struct {
-	RunID    uuid.UUID                     `json:"run_id"`
-	Reused   bool                          `json:"reused"`
-	Tests    int                           `json:"tests"`
-	Results  int                           `json:"results"`
-	Linked   int                           `json:"linked"`
-	Closures map[storage.ClosureSource]int `json:"closures,omitempty"`
-	Coverage int                           `json:"coverage_rows"`
+	RunID      uuid.UUID                     `json:"run_id"`
+	SnapshotID uuid.UUID                     `json:"snapshot_id"`
+	Reused     bool                          `json:"reused"`
+	Tests      int                           `json:"tests"`
+	Results    int                           `json:"results"`
+	Linked     int                           `json:"linked"`
+	Closures   map[storage.ClosureSource]int `json:"closures,omitempty"`
+	Coverage   int                           `json:"coverage_rows"`
 }
 
 // Result is what an import did, run by run.
 type Result struct {
-	RootKey    string      `json:"root_key"`
-	SnapshotID uuid.UUID   `json:"snapshot_id"`
-	Runs       []RunResult `json:"runs"`
+	RootKey string      `json:"root_key"`
+	Runs    []RunResult `json:"runs"`
 }
 
-// ImportRuns records imported against snapshotID, which the caller proved is the snapshot whose bytes
-// the tests executed (indexer.CheckCurrent on the checkout). Each run is one transaction; a run already
-// imported against the same snapshot is reused, not written again.
-func ImportRuns(ctx context.Context, database *gorm.DB, snapshotID uuid.UUID, imported Import) (Result, error) {
+// ImportRuns records each run of imported against the snapshot at the same index of snapshots, which
+// the caller proved holds the bytes that run executed. Every snapshot must belong to one root. Each run
+// is one transaction; a run already imported against the same snapshot is reused, not written again.
+func ImportRuns(ctx context.Context, database *gorm.DB, imported Import, snapshots []uuid.UUID) (Result, error) {
 	if err := imported.Validate(); err != nil {
 		return Result{}, err
 	}
-	var snapshot storage.ModuleSnapshot
-	if err := database.WithContext(ctx).Where("id = ?", snapshotID).Take(&snapshot).Error; err != nil {
-		return Result{}, fmt.Errorf("load snapshot %s: %w", snapshotID, err)
-	}
-	var root storage.ModuleRoot
-	if err := database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
-		return Result{}, fmt.Errorf("load the root of snapshot %s: %w", snapshotID, err)
+	if len(snapshots) != len(imported.Runs) {
+		return Result{}, fmt.Errorf("%d runs need %d snapshots, not %d", len(imported.Runs), len(imported.Runs), len(snapshots))
 	}
 	pipeline, err := query.NewPipeline(database)
 	if err != nil {
 		return Result{}, err
 	}
-	documents, err := newSnapshotDocuments(ctx, database, snapshot.ID)
-	if err != nil {
-		return Result{}, err
-	}
-	result := Result{RootKey: root.RootKey, SnapshotID: snapshot.ID, Runs: []RunResult{}}
+	var root storage.ModuleRoot
+	result := Result{Runs: []RunResult{}}
+	documents := map[uuid.UUID]*snapshotDocuments{}
 	for i, run := range imported.Runs {
+		var snapshot storage.ModuleSnapshot
+		if err := database.WithContext(ctx).Where("id = ?", snapshots[i]).Take(&snapshot).Error; err != nil {
+			return result, fmt.Errorf("run %d: load snapshot %s: %w", i, snapshots[i], err)
+		}
+		if i == 0 {
+			if err := database.WithContext(ctx).Where("id = ?", snapshot.RootID).Take(&root).Error; err != nil {
+				return result, fmt.Errorf("load the root of snapshot %s: %w", snapshot.ID, err)
+			}
+			result.RootKey = root.RootKey
+		} else if snapshot.RootID != root.ID {
+			return result, fmt.Errorf("run %d: snapshot %s is not of root %q", i, snapshot.ID, root.RootKey)
+		}
+		if documents[snapshot.ID] == nil {
+			if documents[snapshot.ID], err = newSnapshotDocuments(ctx, database, snapshot.ID); err != nil {
+				return result, err
+			}
+		}
 		importer := runImporter{
-			database: database, root: root, snapshot: snapshot, documents: documents,
+			database: database, root: root, snapshot: snapshot, documents: documents[snapshot.ID],
 			closures: &closures{database: database, pipeline: pipeline, snapshot: snapshot, inputs: run.InputsDigest, static: map[int64]*staticDependencies{}},
 		}
 		recorded, err := importer.importRun(ctx, run)
@@ -100,7 +110,7 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 	if err != nil {
 		return RunResult{}, fmt.Errorf("encode the run: %w", err)
 	}
-	recorded := RunResult{RunID: uuid.NewSHA1(runNamespace, append([]byte(importer.snapshot.ID.String()), encoded...)), Closures: map[storage.ClosureSource]int{}}
+	recorded := RunResult{RunID: uuid.NewSHA1(runNamespace, append([]byte(importer.snapshot.ID.String()), encoded...)), SnapshotID: importer.snapshot.ID, Closures: map[storage.ClosureSource]int{}}
 	var existing int64
 	if err := importer.database.WithContext(ctx).Model(&storage.TestRun{}).Where("id = ?", recorded.RunID).Count(&existing).Error; err != nil {
 		return RunResult{}, fmt.Errorf("look up run %s: %w", recorded.RunID, err)

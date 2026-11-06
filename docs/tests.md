@@ -3,9 +3,9 @@
 uir records which tests ran against exactly which indexed snapshot, with what outcome and coverage, so it can tell a regression from a flaky test. It never runs tests, parses test runner output, or finds tests in source: a producer such as gavel reports what the runner ran.
 
 ```bash
-uir add . --include-tests
+uir add .
 go test -coverprofile=cover.out ./...   # through gavel, which writes results.json
-uir tests import results.json --coverprofile cover.out
+uir tests import results.json --coverprofile cover.out   # from any commit, in any worktree state
 uir tests flaky --since 168h
 uir query 'SELECT symbol.name, symbol.generation, symbol.test_coverage FROM func:* WHERE symbol.test_coverage < 0.5'
 ```
@@ -18,6 +18,9 @@ uir query 'SELECT symbol.name, symbol.generation, symbol.test_coverage FROM func
 {
   "version": 1,
   "runs": [{
+    "git_commit": "3f2a9c1e0b7d4a6c8e5f1a2b3c4d5e6f7a8b9c0d",
+    "dirty": false,
+    "snapshot_id": "optional uir snapshot the tests ran on",
     "producer": "gavel",
     "environment": {"GOOS": "linux", "GOARCH": "amd64", "go": "go1.27.1", "race": "true"},
     "started_at": "2026-11-04T10:00:00Z",
@@ -36,7 +39,21 @@ uir query 'SELECT symbol.name, symbol.generation, symbol.test_coverage FROM func
 
 Fields follow gavel's `parsers.Test`. Outcomes are `pass`, `fail`, `skip`, `timeout` and `aborted`; `fail` and `timeout` count as failures. Paths are module-relative. `--coverprofile` attaches a Go coverage profile as the run's aggregate `coverage`, and requires an import with one run.
 
-The import binds runs to the snapshot `indexer.CheckCurrent` proves the checkout (`--path`, default `.`) currently is, under the head's test setting. A dirty or unindexed checkout fails; there is no nearest-snapshot fallback. A run's id derives from its snapshot and content, so importing the same file twice records it once.
+## Which snapshot a run is bound to
+
+Each run says which code it ran on, and the import stores it against that code's snapshot. The checkout the import runs from plays no part: results from an old commit import correctly while the checkout is many commits ahead and dirty.
+
+- `git_commit` is the full SHA of `HEAD` when the tests ran. It is required.
+- `dirty` is true when the worktree had uncommitted changes to indexed inputs.
+- `snapshot_id` is the snapshot the tests ran on. A producer gets it by running `uir reindex <module> --include-tests` before the tests. It is required when `dirty` is true.
+
+| Run reports | Bound to |
+| --- | --- |
+| `snapshot_id` | That snapshot, if it is a snapshot of the root (`--root`, default the module of the working directory's checkout), was indexed at `git_commit`, and serves test files. Otherwise the import fails. |
+| Clean, no `snapshot_id` | The newest clean snapshot of `git_commit` that serves test files. When there is none, the commit is indexed with its test files in a temporary worktree, as `uir diff --auto-index` does, from `--location` first, then any registered checkout of the root that has the commit. No checkout's worktree or head changes. |
+| Dirty, no `snapshot_id`, or no `git_commit` | Nothing: the import fails. Uncommitted code cannot be recovered later. |
+
+A snapshot "serves test files" when it holds at least one `_test.go` document; a snapshot indexed without `--include-tests` holds none. The runs of one file may be bound to different snapshots of the same root. A run's id derives from its snapshot and content, so importing the same file twice records it once.
 
 ## Tables
 
@@ -74,6 +91,6 @@ Each coverage block is attributed to the innermost proven declaration whose exte
 - **Test code** is not instrumented by Go coverage, so a `coverage` closure always includes the test's `static` set; a test without one gets `snapshot`.
 - **Ginkgo specs** are not symbols. A spec links only when a proven declaration encloses its line, and then its static graph is that declaration's; an unlinked spec falls back to `snapshot`.
 - **Static graphs** follow a function a variable's value names, such as `map[string]func(){"x": Other}`, through the read of that variable. A function stored into a variable elsewhere, such as by a registration call, is reached only if the walk passes through the code that stores it.
-- **Clean checkout.** Import needs the checkout to match its indexed head, indexed with `--include-tests`. Untracked files a producer writes into it, such as gavel's `.gavel/` and `.tmp/`, must be gitignored or written elsewhere; the error lists the paths Git reports.
+- **Test-file proof.** Whether a stored snapshot was indexed with test files is read from its documents, so a reported `snapshot_id` of a root that has no `_test.go` files at all is refused.
 - Only tests a run reported are known: a test that never ran is not in `test_cases`.
 - Only aggregate coverage is collected by default. Per-test coverage needs one profile per test from the producer.
