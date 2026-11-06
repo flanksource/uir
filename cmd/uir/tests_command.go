@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,11 +18,13 @@ import (
 	"github.com/flanksource/uir/testruns"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 )
 
 type testsImportOptions struct {
 	File         string `args:"true" required:"true"`
-	Path         string `flag:"path" help:"Checkout the tests ran in; it must match its indexed head exactly" default:"."`
+	Root         string `flag:"root" help:"Registered Go module path the runs tested; defaults to the module of the current checkout"`
+	Location     string `flag:"location" help:"Registered checkout to index a run's code from first; the root's other checkouts follow"`
 	CoverProfile string `flag:"coverprofile" help:"go test -coverprofile output to attach as the aggregate coverage of the import's one run"`
 }
 
@@ -35,7 +39,7 @@ func registerTestsCommand(root *cobra.Command) {
 	root.AddCommand(command)
 	importCommand := clicky.AddNamedCommandWithContext("import", command, testsImportOptions{}, importTests)
 	importCommand.Use = "import <results.json>"
-	importCommand.Short = "Import a producer's test runs, bound to the checkout's current indexed snapshot"
+	importCommand.Short = "Import a producer's test runs, each bound to the snapshot of the commit it recorded"
 	importCommand.Args = cobra.ExactArgs(1)
 	clicky.MarkLocalOnly(importCommand)
 	flaky := clicky.AddNamedCommandWithContext("flaky", command, testsFlakyOptions{}, func(ctx context.Context, options testsFlakyOptions) ([]testruns.FlakyTest, error) {
@@ -61,8 +65,8 @@ func registerTestsCommand(root *cobra.Command) {
 	clicky.MarkLocalOnly(flaky)
 }
 
-// importTests proves the checkout is exactly its indexed head, with the head's test setting, and
-// records the import against that snapshot. There is no nearest-snapshot fallback.
+// importTests binds each run to the snapshot of the code it recorded it ran on and records it there.
+// The state of any checkout plays no part: a checkout is only where an unindexed commit is read from.
 func importTests(ctx context.Context, options testsImportOptions) (testruns.Result, error) {
 	encoded, err := os.ReadFile(options.File)
 	if err != nil {
@@ -72,35 +76,20 @@ func importTests(ctx context.Context, options testsImportOptions) (testruns.Resu
 	if err := json.Unmarshal(encoded, &imported); err != nil {
 		return testruns.Result{}, fmt.Errorf("%w: decode %q: %v", testruns.ErrInvalidImport, options.File, err)
 	}
+	if err := imported.Validate(); err != nil {
+		return testruns.Result{}, err
+	}
 	database, err := databaseFor(ctx)
 	if err != nil {
 		return testruns.Result{}, err
 	}
-	engine, err := indexer.New(database)
+	rootKey, location, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, Location: options.Location, Required: true})
 	if err != nil {
 		return testruns.Result{}, err
 	}
-	includeTests, err := engine.HeadIncludesTests(ctx, options.Path)
-	if err != nil {
-		return testruns.Result{}, err
-	}
-	if !includeTests {
-		return testruns.Result{}, fmt.Errorf("the indexed head of %q excludes test files, so it cannot tell which test code ran; run uir reindex --include-tests", options.Path)
-	}
-	current, err := engine.CheckCurrent(ctx, options.Path, indexer.CheckOptions{IncludeTests: true, AllowIncomplete: true})
-	if err != nil {
-		return testruns.Result{}, withChangedPaths(ctx, options.Path, err, "the checkout differs from its indexed head (commit, gitignore, or move these, then reindex)")
-	}
-	// A head reindexed from a dirty checkout matches it, but its bytes are no commit's: refuse it, so a
-	// run is never recorded against uncommitted code.
-	var head storage.ModuleSnapshot
-	if err := database.WithContext(ctx).Where("id = ?", current.SnapshotID).Take(&head).Error; err != nil {
-		return testruns.Result{}, fmt.Errorf("load snapshot %s: %w", current.SnapshotID, err)
-	}
-	if head.WorktreeState == storage.WorktreeDirty {
-		return testruns.Result{}, withChangedPaths(ctx, options.Path,
-			fmt.Errorf("the indexed head of %q was indexed from a dirty worktree, so the tests ran against uncommitted changes", current.Location),
-			"commit, stash or gitignore these, reindex, and rerun the tests")
+	var root storage.ModuleRoot
+	if err := database.WithContext(ctx).Where("root_key = ?", rootKey).Take(&root).Error; err != nil {
+		return testruns.Result{}, fmt.Errorf("load root %q: %w", rootKey, err)
 	}
 	if options.CoverProfile != "" {
 		if len(imported.Runs) != 1 {
@@ -111,30 +100,195 @@ func importTests(ctx context.Context, options testsImportOptions) (testruns.Resu
 			return testruns.Result{}, fmt.Errorf("open the coverage profile: %w", err)
 		}
 		defer func() { _ = profile.Close() }()
-		if imported.Runs[0].Coverage, err = testruns.ParseGoCoverProfile(profile, current.RootKey); err != nil {
+		if imported.Runs[0].Coverage, err = testruns.ParseGoCoverProfile(profile, root.RootKey); err != nil {
 			return testruns.Result{}, err
 		}
 	}
-	snapshot, err := uuid.Parse(current.SnapshotID)
+	resultsFile, err := filepath.Abs(options.File)
 	if err != nil {
-		return testruns.Result{}, fmt.Errorf("parse snapshot id %q: %w", current.SnapshotID, err)
+		return testruns.Result{}, fmt.Errorf("resolve the test import %q: %w", options.File, err)
 	}
-	return testruns.ImportRuns(ctx, database, snapshot, imported)
+	if canonical, err := filepath.EvalSymlinks(resultsFile); err == nil {
+		resultsFile = canonical
+	}
+	snapshots := make([]uuid.UUID, len(imported.Runs))
+	for i, run := range imported.Runs {
+		if snapshots[i], err = runSnapshot(ctx, database, root, location, resultsFile, run); err != nil {
+			return testruns.Result{}, fmt.Errorf("run %d: %w", i, err)
+		}
+	}
+	return testruns.ImportRuns(ctx, database, imported, snapshots)
 }
 
-// withChangedPaths adds to a refused import the paths Git reports as changed or untracked in the
-// checkout, after hint: any of them, Go source or not, makes the checkout differ from a clean commit,
-// such as a producer's output directory that is not ignored.
-func withChangedPaths(ctx context.Context, path string, err error, hint string) error {
-	status, statusErr := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", path, "status", "--porcelain", "--", ".").Output()
-	// Trim only the end: a porcelain line starts with its status columns, such as " M".
-	trimmed := strings.TrimRight(string(status), "\n")
-	if statusErr != nil || trimmed == "" {
-		return err
+// runSnapshot is the snapshot holding the bytes a run executed. A clean run's is its commit's newest
+// clean snapshot with test files, or the commit indexed with them in a temporary worktree. A dirty run's
+// bytes exist only in a checkout that still holds them, so it is indexed from the checkout whose HEAD is
+// the run's commit and whose working tree hashes to the run's git_tree.
+func runSnapshot(ctx context.Context, database *gorm.DB, root storage.ModuleRoot, location, resultsFile string, run testruns.Run) (uuid.UUID, error) {
+	if run.Dirty {
+		return indexDirtyRun(ctx, database, root, location, resultsFile, run)
 	}
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) > 10 {
-		lines = append(lines[:10], fmt.Sprintf("... and %d more", len(lines)-10))
+	var snapshots []storage.ModuleSnapshot
+	if err := database.WithContext(ctx).Where("root_id = ? AND git_commit = ? AND worktree_state = ?", root.ID, run.GitCommit, storage.WorktreeClean).
+		Order("completed_at DESC").Order("started_at DESC").Order("id").Find(&snapshots).Error; err != nil {
+		return uuid.Nil, fmt.Errorf("load the snapshots of commit %s: %w", run.GitCommit, err)
 	}
-	return fmt.Errorf("%w; %s:\n%s", err, hint, strings.Join(lines, "\n"))
+	for _, snapshot := range snapshots {
+		if includes, err := includesTests(ctx, database, snapshot.ID); err != nil || includes {
+			return snapshot.ID, err
+		}
+	}
+	return indexCommit(ctx, database, root, location, run.GitCommit)
+}
+
+// indexDirtyRun reindexes, with test files, the first registered checkout of root (location first) that
+// is exactly the code a dirty run ran on: HEAD is its git_commit and the working tree hashes to its
+// git_tree, before and after indexing, so an edit made meanwhile is not bound to the run.
+func indexDirtyRun(ctx context.Context, database *gorm.DB, root storage.ModuleRoot, location, resultsFile string, run testruns.Run) (uuid.UUID, error) {
+	paths, err := checkouts(ctx, database, root, location)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var mismatches []string
+	for _, checkout := range paths {
+		if mismatch, err := ranOn(ctx, checkout, resultsFile, run); err != nil || mismatch != "" {
+			if err != nil {
+				return uuid.Nil, err
+			}
+			mismatches = append(mismatches, checkout+": "+mismatch)
+			continue
+		}
+		engine, err := indexer.New(database)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		started, err := indexer.StartModulesTask(ctx, engine, []indexer.ModuleOptions{{
+			Path: checkout, ExactLocation: checkout, IncludeTests: true, ExistingOnly: true, Reason: storage.ReasonReindex,
+		}})
+		if err != nil {
+			return uuid.Nil, err
+		}
+		results, err := started.Wait(ctx)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("index %s: %w", checkout, err)
+		}
+		if mismatch, err := ranOn(ctx, checkout, resultsFile, run); err != nil || mismatch != "" {
+			return uuid.Nil, errors.Join(err, fmt.Errorf("%s changed while it was indexed (%s); rerun the import", checkout, mismatch))
+		}
+		for _, result := range results {
+			if result.RootKey == root.RootKey {
+				return uuid.Parse(result.SnapshotID)
+			}
+		}
+		return uuid.Nil, fmt.Errorf("indexing %s published no snapshot of root %q", checkout, root.RootKey)
+	}
+	return uuid.Nil, fmt.Errorf("the tests ran on uncommitted changes to %s, and no registered checkout of root %q still holds them, so the code changed since the tests ran; rerun the tests and import their results (%s)",
+		run.GitCommit, root.RootKey, strings.Join(mismatches, "; "))
+}
+
+// ranOn says why checkout is not the code run ran on, or "" when it is: its HEAD is run.GitCommit and
+// its working tree hashes to run.GitTree as the producer hashed it, at the repository's top level with
+// uncommitted and untracked, non-ignored files and without resultsFile. The hash is written through a
+// temporary index, so the checkout's own index and working tree are untouched.
+func ranOn(ctx context.Context, checkout, resultsFile string, run testruns.Run) (string, error) {
+	git := func(environment []string, args ...string) (string, error) {
+		command := exec.CommandContext(ctx, "git", append([]string{"-C", checkout}, args...)...)
+		command.Env = append(os.Environ(), environment...)
+		var stderr strings.Builder
+		command.Stderr = &stderr
+		output, err := command.Output()
+		if err != nil {
+			return "", fmt.Errorf("git %s in %s: %w: %s", strings.Join(args, " "), checkout, err, strings.TrimSpace(stderr.String()))
+		}
+		return strings.TrimSpace(string(output)), nil
+	}
+	head, err := git(nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if head != run.GitCommit {
+		return fmt.Sprintf("HEAD is %s, not %s", head, run.GitCommit), nil
+	}
+	top, err := git(nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	scratch, err := os.MkdirTemp("", "uir-tree-")
+	if err != nil {
+		return "", fmt.Errorf("create a temporary index: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+	index := []string{"GIT_INDEX_FILE=" + filepath.Join(scratch, "index")}
+	pathspec := []string{"--", ":/"}
+	if relative, err := filepath.Rel(top, resultsFile); err == nil && filepath.IsLocal(relative) {
+		pathspec = append(pathspec, ":(top,exclude,literal)"+filepath.ToSlash(relative))
+	}
+	if _, err := git(index, "read-tree", "HEAD"); err != nil {
+		return "", err
+	}
+	if _, err := git(index, append([]string{"add", "-A"}, pathspec...)...); err != nil {
+		return "", err
+	}
+	tree, err := git(index, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	if tree != run.GitTree {
+		return fmt.Sprintf("its working tree is %s, not git_tree %s", tree, run.GitTree), nil
+	}
+	return "", nil
+}
+
+// includesTests reports whether a snapshot serves a _test.go file. A snapshot indexed without test
+// files serves none, so this proves only the setting of a root that has test files.
+func includesTests(ctx context.Context, database *gorm.DB, snapshot uuid.UUID) (bool, error) {
+	tests, err := storage.EffectiveSources(ctx, database, storage.EffectiveSourcesOptions{SnapshotID: snapshot, Suffix: "_test.go"})
+	return len(tests) > 0, err
+}
+
+// indexCommit publishes a clean historical snapshot of commit with its test files, from location when
+// it has the commit, else from the first other registered checkout of the root that does, without
+// touching any checkout's worktree or head.
+func indexCommit(ctx context.Context, database *gorm.DB, root storage.ModuleRoot, location, commit string) (uuid.UUID, error) {
+	paths, err := checkouts(ctx, database, root, location)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	for _, checkout := range paths {
+		if exec.CommandContext(ctx, "git", "-C", checkout, "cat-file", "-e", commit+"^{commit}").Run() != nil {
+			continue
+		}
+		engine, err := indexer.New(database)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		run, err := indexer.StartRevisionTask(ctx, engine, indexer.RevisionOptions{
+			RootKey: root.RootKey, Checkout: checkout, Commit: commit, IncludeTests: true, Reason: storage.ReasonHistorical,
+		})
+		if err != nil {
+			return uuid.Nil, err
+		}
+		indexed, err := run.Wait(ctx)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("index commit %s of %q: %w", commit, root.RootKey, err)
+		}
+		return uuid.Parse(indexed.SnapshotID)
+	}
+	return uuid.Nil, fmt.Errorf("commit %s has no clean snapshot with test files, and no registered checkout of root %q contains it to index (tried %s)", commit, root.RootKey, strings.Join(paths, ", "))
+}
+
+// checkouts are the registered checkouts of root, location first.
+func checkouts(ctx context.Context, database *gorm.DB, root storage.ModuleRoot, location string) ([]string, error) {
+	var locations []storage.ModuleLocation
+	if err := database.WithContext(ctx).Where("root_id = ?", root.ID).Order("canonical_path").Find(&locations).Error; err != nil {
+		return nil, fmt.Errorf("load the checkouts of root %q: %w", root.RootKey, err)
+	}
+	sort.SliceStable(locations, func(i, j int) bool {
+		return locations[i].CanonicalPath == location && locations[j].CanonicalPath != location
+	})
+	paths := make([]string, 0, len(locations))
+	for _, candidate := range locations {
+		paths = append(paths, candidate.CanonicalPath)
+	}
+	return paths, nil
 }
