@@ -36,7 +36,7 @@ uir query 'SELECT symbol.name, symbol.generation, symbol.test_coverage FROM func
 
 Fields follow gavel's `parsers.Test`. Outcomes are `pass`, `fail`, `skip`, `timeout` and `aborted`; `fail` and `timeout` count as failures. Paths are module-relative. `--coverprofile` attaches a Go coverage profile as the run's aggregate `coverage`, and requires an import with one run.
 
-The import binds runs to the snapshot `indexer.CheckCurrent` proves the checkout (`--path`, default `.`) currently is, under the head's test setting. A dirty or unindexed checkout fails; there is no nearest-snapshot fallback. A run's id derives from its snapshot and content, so importing the same file twice records it once.
+The import binds runs to the snapshot `indexer.CheckCurrent` proves the checkout (`--path`, default `.`) currently is, under the head's test setting. Runs bind to the indexed bytes, so a checkout with uncommitted changes imports once it is reindexed; a checkout whose Go sources, manifests or build configuration differ from its indexed head, or that has no head, fails, and there is no nearest-snapshot fallback. Untracked files uir does not index, such as gavel's `.gavel/` and `.tmp/`, do not make the head stale. A run's id derives from its snapshot and content, so importing the same file twice records it once.
 
 ## Tables
 
@@ -74,6 +74,6 @@ Each coverage block is attributed to the innermost proven declaration whose exte
 - **Test code** is not instrumented by Go coverage, so a `coverage` closure always includes the test's `static` set; a test without one gets `snapshot`.
 - **Ginkgo specs** are not symbols. A spec links only when a proven declaration encloses its line, and then its static graph is that declaration's; an unlinked spec falls back to `snapshot`.
 - **Static graphs** follow a function a variable's value names, such as `map[string]func(){"x": Other}`, through the read of that variable. A function stored into a variable elsewhere, such as by a registration call, is reached only if the walk passes through the code that stores it.
-- **Clean checkout.** Import needs the checkout to match its indexed head, indexed with `--include-tests`. Untracked files a producer writes into it, such as gavel's `.gavel/` and `.tmp/`, must be gitignored or written elsewhere; the error lists the paths Git reports.
+- **Current index.** Import needs the checkout's indexed content to match its head, indexed with `--include-tests`; uncommitted changes are fine once reindexed. A stale-index error lists the paths Git reports as changed.
 - Only tests a run reported are known: a test that never ran is not in `test_cases`.
 - Only aggregate coverage is collected by default. Per-test coverage needs one profile per test from the producer.

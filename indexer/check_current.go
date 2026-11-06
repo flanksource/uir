@@ -10,6 +10,11 @@ import (
 type CheckOptions struct {
 	IncludeTests    bool
 	AllowIncomplete bool
+	// IgnoreRevision accepts a head whose indexed content, configuration and context equal the
+	// checkout's even when its revision label differs: a clean head stays current after untracked
+	// files that are not indexed, such as a test runner's output directory, make Git report the
+	// checkout dirty.
+	IgnoreRevision bool
 }
 
 // CheckCurrent verifies an existing location head against the checkout without publishing a snapshot.
@@ -40,7 +45,7 @@ func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, options C
 		if !found {
 			return ModuleResult{}, fmt.Errorf("no indexed head for %q at %q; run uir reindex", root.RootKey, root.LocalPath)
 		}
-		if head.Revision != root.Revision || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash {
+		if (!options.IgnoreRevision && head.Revision != root.Revision) || head.ContentSetHash != root.ContentSetHash || head.ConfigurationHash != root.ConfigurationHash {
 			return ModuleResult{}, fmt.Errorf("stale UIR index for %q at %q; run uir reindex", root.RootKey, root.LocalPath)
 		}
 		if err := indexer.checkContext(ctx, root, head.ContextHash, options.IncludeTests); err != nil {
