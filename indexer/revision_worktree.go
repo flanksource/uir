@@ -190,8 +190,8 @@ type revisionScratch struct {
 	cleanup   func() error
 }
 
-// revisionWorktree adds a detached worktree of commit in a new scratch directory. Its cleanup force
-// removes the worktree, prunes the repository's worktree records, and deletes the scratch directory.
+// revisionWorktree adds a detached worktree of commit in a new scratch directory. Its cleanup removes
+// only this worktree's registration and scratch directory, including after a failed checkout.
 type revisionWorktreeOptions struct {
 	Repository, Commit, Directory string
 }
@@ -209,21 +209,41 @@ func revisionWorktree(ctx context.Context, options revisionWorktreeOptions) (rev
 	if err != nil {
 		return revisionScratch{}, fmt.Errorf("create historical snapshot scratch directory: %w", err)
 	}
+	canonical, err := filepath.EvalSymlinks(scratch)
+	if err != nil {
+		return revisionScratch{}, errors.Join(fmt.Errorf("resolve revision scratch directory: %w", err), os.RemoveAll(scratch))
+	}
+	scratch = canonical
 	prepared := revisionScratch{worktree: filepath.Join(scratch, "worktree"), manifests: filepath.Join(scratch, "manifests")}
 	if err := os.Mkdir(prepared.manifests, 0o755); err != nil {
 		return revisionScratch{}, errors.Join(fmt.Errorf("create historical manifest directory: %w", err), os.RemoveAll(scratch))
 	}
-	if _, err := revisionGit(ctx, options.Repository, "worktree", "add", "--detach", prepared.worktree, options.Commit); err != nil {
-		return revisionScratch{}, errors.Join(err, os.RemoveAll(scratch))
-	}
 	prepared.cleanup = func() error {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_, removeErr := revisionGit(cleanupCtx, options.Repository, "worktree", "remove", "--force", prepared.worktree)
-		_, pruneErr := revisionGit(cleanupCtx, options.Repository, "worktree", "prune")
-		return errors.Join(removeErr, pruneErr, os.RemoveAll(scratch))
+		if err := removeRevisionWorktree(options.Repository, prepared.worktree); err != nil {
+			return err
+		}
+		return os.RemoveAll(scratch)
+	}
+	if _, err := revisionGit(ctx, options.Repository, "worktree", "add", "--detach", prepared.worktree, options.Commit); err != nil {
+		return revisionScratch{}, errors.Join(err, prepared.cleanup())
 	}
 	return prepared, nil
+}
+
+func removeRevisionWorktree(repository, worktree string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	listed, err := revisionGit(ctx, repository, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return err
+	}
+	for _, field := range strings.Split(listed, "\x00") {
+		if field == "worktree "+worktree {
+			_, err := revisionGit(ctx, repository, "worktree", "remove", "--force", "--force", "--", worktree)
+			return err
+		}
+	}
+	return nil
 }
 
 func revisionGit(ctx context.Context, directory string, args ...string) (string, error) {
