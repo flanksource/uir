@@ -44,15 +44,21 @@ func (TestCase) TableName() string { return "test_cases" }
 
 // TestRun is one execution of a root's tests against a snapshot; see 24_tests.hcl.
 type TestRun struct {
-	ID              uuid.UUID  `gorm:"column:id;primaryKey"`
-	RootID          uuid.UUID  `gorm:"column:root_id"`
-	SnapshotID      *uuid.UUID `gorm:"column:snapshot_id"`
-	Producer        string     `gorm:"column:producer"`
-	Environment     JSON       `gorm:"column:environment"`
-	EnvironmentHash string     `gorm:"column:environment_hash"`
-	StartedAt       time.Time  `gorm:"column:started_at"`
-	FinishedAt      time.Time  `gorm:"column:finished_at"`
-	TaskRunID       *string    `gorm:"column:task_run_id"`
+	ID               uuid.UUID  `gorm:"column:id;primaryKey"`
+	RootID           uuid.UUID  `gorm:"column:root_id"`
+	SnapshotID       *uuid.UUID `gorm:"column:snapshot_id"`
+	Producer         string     `gorm:"column:producer"`
+	Environment      JSON       `gorm:"column:environment"`
+	EnvironmentHash  string     `gorm:"column:environment_hash"`
+	StartedAt        time.Time  `gorm:"column:started_at"`
+	FinishedAt       time.Time  `gorm:"column:finished_at"`
+	TaskRunID        *string    `gorm:"column:task_run_id"`
+	SelectionMode    string     `gorm:"column:selection_mode"`
+	InventoryDigest  string     `gorm:"column:inventory_digest"`
+	InputsDigest     string     `gorm:"column:inputs_digest"`
+	Complete         bool       `gorm:"column:complete"`
+	IdentityVerified bool       `gorm:"column:identity_verified"`
+	PlanID           *string    `gorm:"column:plan_id"`
 }
 
 func (TestRun) TableName() string { return "test_runs" }
@@ -67,6 +73,7 @@ type TestResult struct {
 	FailureDigest      *string       `gorm:"column:failure_digest"`
 	ClosureFingerprint string        `gorm:"column:closure_fingerprint"`
 	ClosureSource      ClosureSource `gorm:"column:closure_source"`
+	PackageFingerprint string        `gorm:"column:package_fingerprint"`
 }
 
 func (TestResult) TableName() string { return "test_results" }

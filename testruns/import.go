@@ -130,10 +130,18 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 	row := storage.TestRun{
 		ID: recorded.RunID, RootID: importer.root.ID, SnapshotID: &snapshotID, Producer: run.Producer,
 		Environment: environment, EnvironmentHash: EnvironmentHash(run.Environment),
-		StartedAt: run.StartedAt.UTC(), FinishedAt: run.FinishedAt.UTC(),
+		StartedAt: run.StartedAt.UTC(), FinishedAt: run.FinishedAt.UTC(), SelectionMode: run.SelectionMode,
+		InventoryDigest: run.InventoryDigest, InputsDigest: run.InputsDigest, Complete: run.Complete,
+		IdentityVerified: run.IdentityVerified,
 	}
 	if run.TaskRunID != "" {
 		row.TaskRunID = &run.TaskRunID
+	}
+	if run.PlanID != "" {
+		row.PlanID = &run.PlanID
+	}
+	if row.SelectionMode == "" {
+		row.SelectionMode = "legacy"
 	}
 	planned, coverage, err := importer.plan(ctx, run, &recorded)
 	if err != nil {
@@ -160,6 +168,7 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 					RunID: recorded.RunID, TestCaseID: testCase.ID, Attempt: attempt + 1, Outcome: outcome.Outcome,
 					DurationMS: outcome.DurationMS, FailureDigest: failureDigest(outcome.Failure),
 					ClosureFingerprint: test.closure.fingerprint, ClosureSource: test.closure.source,
+					PackageFingerprint: test.packageFingerprint,
 				})
 			}
 		}
@@ -189,10 +198,11 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 // plannedTest is a test with everything read before the run's transaction: its link, its closure, and
 // key, the placeholder its coverage rows carry until its test case id is known.
 type plannedTest struct {
-	test    Test
-	key     uuid.UUID
-	link    *int64
-	closure closure
+	test               Test
+	key                uuid.UUID
+	link               *int64
+	closure            closure
+	packageFingerprint string
 }
 
 // plan reads, outside any transaction, each test's link and closure and attributes the run's and each
@@ -228,6 +238,13 @@ func (importer runImporter) plan(ctx context.Context, run Run, recorded *RunResu
 		}
 		if next.closure, err = importer.closures.of(ctx, covered, link); err != nil {
 			return nil, nil, fmt.Errorf("test %s: %w", test.display(), err)
+		}
+		var complete bool
+		if next.packageFingerprint, complete, err = packageFingerprint(ctx, importer.database, importer.snapshot.ID, test.Package); err != nil {
+			return nil, nil, fmt.Errorf("test %s package setup: %w", test.display(), err)
+		} else if !complete {
+			next.closure = importer.closures.snapshotClosure()
+			next.packageFingerprint = next.closure.fingerprint
 		}
 		recorded.Tests++
 		if link != nil {

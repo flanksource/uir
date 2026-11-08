@@ -19,8 +19,8 @@ import (
 	"github.com/flanksource/uir/storage"
 )
 
-// ContractVersion is the Import version this package reads.
-const ContractVersion = 1
+// ContractVersion is the newest Import version this package reads.
+const ContractVersion = 2
 
 // fullObject is a full SHA-1 or SHA-256 Git object name.
 var fullObject = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
@@ -54,7 +54,14 @@ type Run struct {
 	// testdata and configuration files. Every closure fingerprint of the run folds it in; without it a
 	// change to those files is invisible to flakiness.
 	InputsDigest string `json:"inputs_digest,omitempty"`
-	Tests        []Test `json:"tests"`
+	// SelectionMode is full when the producer executed its complete current inventory and partial
+	// when it applied a plan. Only a complete, identity-verified full run can be a future baseline.
+	SelectionMode    string `json:"selection_mode,omitempty"`
+	InventoryDigest  string `json:"inventory_digest,omitempty"`
+	Complete         bool   `json:"complete,omitempty"`
+	IdentityVerified bool   `json:"identity_verified,omitempty"`
+	PlanID           string `json:"plan_id,omitempty"`
+	Tests            []Test `json:"tests"`
 	// Coverage is the run's aggregate coverage profile.
 	Coverage []Block `json:"coverage,omitempty"`
 }
@@ -98,8 +105,8 @@ func invalid(format string, arguments ...any) error {
 
 // Validate checks the import against the contract before anything is read or written.
 func (imported Import) Validate() error {
-	if imported.Version != ContractVersion {
-		return invalid("version %d is not %d", imported.Version, ContractVersion)
+	if imported.Version != 1 && imported.Version != ContractVersion {
+		return invalid("version %d is neither 1 nor %d", imported.Version, ContractVersion)
 	}
 	if len(imported.Runs) == 0 {
 		return invalid("no runs")
@@ -126,6 +133,14 @@ func (run Run) validate() error {
 		return invalid("the tests ran on uncommitted changes to %s but report no git_tree, so the code they ran on cannot be identified", run.GitCommit)
 	case run.GitTree != "" && !fullObject.MatchString(run.GitTree):
 		return invalid("git_tree %q is not a full lowercase tree hash", run.GitTree)
+	case run.SelectionMode != "" && run.SelectionMode != "full" && run.SelectionMode != "partial":
+		return invalid("selection_mode %q is not full or partial", run.SelectionMode)
+	case run.SelectionMode != "" && len(run.InventoryDigest) != 64:
+		return invalid("an affected-test run requires a 64-character inventory_digest")
+	case run.Complete && run.SelectionMode == "":
+		return invalid("complete requires selection_mode")
+	case run.IdentityVerified && run.SelectionMode == "":
+		return invalid("identity_verified requires selection_mode")
 	}
 	seen := map[string]bool{}
 	for i, test := range run.Tests {

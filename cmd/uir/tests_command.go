@@ -34,6 +34,12 @@ type testsFlakyOptions struct {
 	MinRuns int           `flag:"min-runs" help:"Only report tests with at least this many runs" default:"1"`
 }
 
+type testsPlanOptions struct {
+	File     string `args:"true" required:"true"`
+	Root     string `flag:"root" help:"Registered Go module path; defaults to the module of the current checkout"`
+	Location string `flag:"location" help:"Registered checkout to ensure current; defaults to the current checkout"`
+}
+
 func registerTestsCommand(root *cobra.Command) {
 	command := &cobra.Command{Use: "tests", Short: "Record test runs against indexed snapshots and report flaky tests"}
 	root.AddCommand(command)
@@ -42,6 +48,11 @@ func registerTestsCommand(root *cobra.Command) {
 	importCommand.Short = "Import a producer's test runs, each bound to the snapshot of the commit it recorded"
 	importCommand.Args = cobra.ExactArgs(1)
 	clicky.MarkLocalOnly(importCommand)
+	planCommand := clicky.AddNamedCommandWithContext("plan", command, testsPlanOptions{}, planTests)
+	planCommand.Use = "plan <request.json>"
+	planCommand.Short = "Ensure the exact current test snapshot and prove inventory tests skippable"
+	planCommand.Args = cobra.ExactArgs(1)
+	clicky.MarkLocalOnly(planCommand)
 	flaky := clicky.AddNamedCommandWithContext("flaky", command, testsFlakyOptions{}, func(ctx context.Context, options testsFlakyOptions) ([]testruns.FlakyTest, error) {
 		database, err := databaseFor(ctx)
 		if err != nil {
@@ -63,6 +74,87 @@ func registerTestsCommand(root *cobra.Command) {
 	})
 	flaky.Short = "List tests whose outcome differed on identical code in one environment"
 	clicky.MarkLocalOnly(flaky)
+}
+
+func planTests(ctx context.Context, options testsPlanOptions) (testruns.PlanResponse, error) {
+	encoded, err := os.ReadFile(options.File)
+	if err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("read test plan request %q: %w", options.File, err)
+	}
+	var request testruns.PlanRequest
+	if err := json.Unmarshal(encoded, &request); err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("decode test plan request %q: %w", options.File, err)
+	}
+	if err := request.Validate(); err != nil {
+		return testruns.PlanResponse{}, err
+	}
+	goEnvironment := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "GOVERSION")
+	goEnvironment.Dir = options.Location
+	environmentOutput, err := goEnvironment.Output()
+	if err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("read current Go build environment: %w", err)
+	}
+	var currentEnvironment map[string]string
+	if err := json.Unmarshal(environmentOutput, &currentEnvironment); err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("decode current Go build environment: %w", err)
+	}
+	for requestKey, currentKey := range map[string]string{"GOOS": "GOOS", "GOARCH": "GOARCH", "go": "GOVERSION"} {
+		if request.Environment[requestKey] != currentEnvironment[currentKey] {
+			return testruns.PlanResponse{}, fmt.Errorf("requested %s=%q does not match the current build environment %q", requestKey, request.Environment[requestKey], currentEnvironment[currentKey])
+		}
+	}
+	database, err := databaseFor(ctx)
+	if err != nil {
+		return testruns.PlanResponse{}, err
+	}
+	rootKey, location, err := defaultCheckout(ctx, database, checkoutDefaults{Root: options.Root, Location: options.Location, Required: true})
+	if err != nil {
+		return testruns.PlanResponse{}, err
+	}
+	var root storage.ModuleRoot
+	if err := database.WithContext(ctx).Where("root_key = ?", rootKey).Take(&root).Error; err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("load root %q: %w", rootKey, err)
+	}
+	requestFile, err := filepath.Abs(options.File)
+	if err != nil {
+		return testruns.PlanResponse{}, err
+	}
+	identity := testruns.Run{GitCommit: request.GitCommit, Dirty: request.Dirty, GitTree: request.GitTree}
+	if mismatch, err := ranOn(ctx, location, requestFile, identity); err != nil || mismatch != "" {
+		return testruns.PlanResponse{}, errors.Join(err, fmt.Errorf("test plan request does not match %s: %s", location, mismatch))
+	}
+	engine, err := indexer.New(database)
+	if err != nil {
+		return testruns.PlanResponse{}, err
+	}
+	started, err := indexer.StartModulesTask(ctx, engine, []indexer.ModuleOptions{{
+		Path: location, ExactLocation: location, IncludeTests: true, ExistingOnly: true, Reason: storage.ReasonReindex,
+	}})
+	if err != nil {
+		return testruns.PlanResponse{}, err
+	}
+	results, err := started.Wait(ctx)
+	if err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("ensure current test index: %w", err)
+	}
+	if mismatch, err := ranOn(ctx, location, requestFile, identity); err != nil || mismatch != "" {
+		return testruns.PlanResponse{}, errors.Join(err, fmt.Errorf("%s changed while planning (%s); rerun the plan", location, mismatch))
+	}
+	var snapshotID uuid.UUID
+	for _, result := range results {
+		if result.RootKey == root.RootKey {
+			snapshotID, err = uuid.Parse(result.SnapshotID)
+			break
+		}
+	}
+	if err != nil || snapshotID == uuid.Nil {
+		return testruns.PlanResponse{}, errors.Join(err, fmt.Errorf("ensure current published no snapshot of root %q", root.RootKey))
+	}
+	var snapshot storage.ModuleSnapshot
+	if err := database.WithContext(ctx).Where("id = ?", snapshotID).Take(&snapshot).Error; err != nil {
+		return testruns.PlanResponse{}, fmt.Errorf("load current snapshot %s: %w", snapshotID, err)
+	}
+	return testruns.Plan(ctx, database, root, snapshot, request)
 }
 
 // importTests binds each run to the snapshot of the code it recorded it ran on and records it there.
@@ -233,8 +325,17 @@ func ranOn(ctx context.Context, checkout, resultsFile string, run testruns.Run) 
 	if err != nil {
 		return "", err
 	}
-	if tree != run.GitTree {
-		return fmt.Sprintf("its working tree is %s, not git_tree %s", tree, run.GitTree), nil
+	expected := run.GitTree
+	if !run.Dirty {
+		if expected, err = git(nil, "rev-parse", "HEAD^{tree}"); err != nil {
+			return "", err
+		}
+	}
+	if tree != expected {
+		if run.Dirty {
+			return fmt.Sprintf("its working tree is %s, not git_tree %s", tree, expected), nil
+		}
+		return fmt.Sprintf("its working tree is dirty (%s, not HEAD tree %s)", tree, expected), nil
 	}
 	return "", nil
 }
