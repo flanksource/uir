@@ -11,6 +11,24 @@ import (
 )
 
 var _ = Describe("uir tests plan identity", func() {
+	It("compares GOEXPERIMENT as an unordered set", func() {
+		Expect(canonicalGoExperiments("newinliner,arenas newinliner")).To(Equal("arenas,newinliner"))
+	})
+
+	It("excludes an ignored generated results file from worktree identity", func() {
+		workspace := GinkgoT().TempDir()
+		gitIn(workspace, "init", "--quiet", "--initial-branch=main")
+		Expect(os.WriteFile(filepath.Join(workspace, ".gitignore"), []byte("run.json\n"), 0o644)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.com/results\n\ngo 1.25\n"), 0o644)).To(Succeed())
+		gitIn(workspace, "add", "--all")
+		gitIn(workspace, "commit", "--quiet", "--message", "baseline")
+		results := filepath.Join(workspace, "run.json")
+		Expect(os.WriteFile(results, []byte("generated"), 0o644)).To(Succeed())
+		mismatch, err := ranOn(context.Background(), workspace, results, testruns.Run{GitCommit: gitIn(workspace, "rev-parse", "HEAD")})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(mismatch).To(BeEmpty())
+	})
+
 	It("detects indexed input mutations around planning", func() {
 		workspace := GinkgoT().TempDir()
 		gitIn(workspace, "init", "--quiet", "--initial-branch=main")

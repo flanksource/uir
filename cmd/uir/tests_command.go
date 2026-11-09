@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -101,7 +102,11 @@ func planTests(ctx context.Context, options testsPlanOptions) (testruns.PlanResp
 	for requestKey, currentKey := range map[string]string{
 		"GOOS": "GOOS", "GOARCH": "GOARCH", "go": "GOVERSION", "CGO_ENABLED": "CGO_ENABLED", "GOEXPERIMENT": "GOEXPERIMENT",
 	} {
-		if request.Environment[requestKey] != currentEnvironment[currentKey] {
+		requested, current := request.Environment[requestKey], currentEnvironment[currentKey]
+		if requestKey == "GOEXPERIMENT" {
+			requested, current = canonicalGoExperiments(requested), canonicalGoExperiments(current)
+		}
+		if requested != current {
 			return testruns.PlanResponse{}, fmt.Errorf("requested %s=%q does not match the current build environment %q", requestKey, request.Environment[requestKey], currentEnvironment[currentKey])
 		}
 	}
@@ -157,6 +162,12 @@ func planTests(ctx context.Context, options testsPlanOptions) (testruns.PlanResp
 		return testruns.PlanResponse{}, fmt.Errorf("load current snapshot %s: %w", snapshotID, err)
 	}
 	return testruns.Plan(ctx, database, root, snapshot, request)
+}
+
+func canonicalGoExperiments(value string) string {
+	values := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' })
+	sort.Strings(values)
+	return strings.Join(slices.Compact(values), ",")
 }
 
 // importTests binds each run to the snapshot of the code it recorded it ran on and records it there.
@@ -313,15 +324,22 @@ func ranOn(ctx context.Context, checkout, resultsFile string, run testruns.Run) 
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 	index := []string{"GIT_INDEX_FILE=" + filepath.Join(scratch, "index")}
-	pathspec := []string{"--", ":/"}
+	resultsRelative := ""
 	if relative, err := filepath.Rel(top, resultsFile); err == nil && filepath.IsLocal(relative) {
-		pathspec = append(pathspec, ":(top,exclude,literal)"+filepath.ToSlash(relative))
+		resultsRelative = filepath.ToSlash(relative)
 	}
 	if _, err := git(index, "read-tree", "HEAD"); err != nil {
 		return "", err
 	}
-	if _, err := git(index, append([]string{"add", "-A"}, pathspec...)...); err != nil {
+	if _, err := git(index, "add", "-A", "--", ":/"); err != nil {
 		return "", err
+	}
+	if resultsRelative != "" {
+		// Restore the producer's generated results to HEAD after adding the checkout. An exclusion
+		// pathspec makes git add reject an ignored results file even though it must not enter identity.
+		if _, err := git(index, "reset", "-q", "HEAD", "--", resultsRelative); err != nil {
+			return "", err
+		}
 	}
 	tree, err := git(index, "write-tree")
 	if err != nil {
