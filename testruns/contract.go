@@ -19,8 +19,8 @@ import (
 	"github.com/flanksource/uir/storage"
 )
 
-// ContractVersion is the Import version this package reads.
-const ContractVersion = 1
+// ContractVersion is the newest Import version this package reads.
+const ContractVersion = 2
 
 // fullObject is a full SHA-1 or SHA-256 Git object name.
 var fullObject = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
@@ -54,7 +54,17 @@ type Run struct {
 	// testdata and configuration files. Every closure fingerprint of the run folds it in; without it a
 	// change to those files is invisible to flakiness.
 	InputsDigest string `json:"inputs_digest,omitempty"`
-	Tests        []Test `json:"tests"`
+	// SelectionMode is full when the producer executed its complete current inventory and partial
+	// when it applied a plan. Only a complete, identity-verified full run can be a future baseline.
+	SelectionMode    string `json:"selection_mode,omitempty"`
+	InventoryDigest  string `json:"inventory_digest,omitempty"`
+	Complete         bool   `json:"complete,omitempty"`
+	IdentityVerified bool   `json:"identity_verified,omitempty"`
+	PlanID           string `json:"plan_id,omitempty"`
+	// Inventory is the complete producer inventory whose digest the plan and run share. It lets UIR
+	// verify that a claimed full baseline actually reported every schedulable test.
+	Inventory []InventoryTest `json:"inventory,omitempty"`
+	Tests     []Test          `json:"tests"`
 	// Coverage is the run's aggregate coverage profile.
 	Coverage []Block `json:"coverage,omitempty"`
 }
@@ -98,21 +108,21 @@ func invalid(format string, arguments ...any) error {
 
 // Validate checks the import against the contract before anything is read or written.
 func (imported Import) Validate() error {
-	if imported.Version != ContractVersion {
-		return invalid("version %d is not %d", imported.Version, ContractVersion)
+	if imported.Version != 1 && imported.Version != ContractVersion {
+		return invalid("version %d is neither 1 nor %d", imported.Version, ContractVersion)
 	}
 	if len(imported.Runs) == 0 {
 		return invalid("no runs")
 	}
 	for i, run := range imported.Runs {
-		if err := run.validate(); err != nil {
+		if err := run.validate(imported.Version); err != nil {
 			return fmt.Errorf("run %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-func (run Run) validate() error {
+func (run Run) validate(version int) error {
 	switch {
 	case strings.TrimSpace(run.Producer) == "":
 		return invalid("producer is required")
@@ -126,6 +136,26 @@ func (run Run) validate() error {
 		return invalid("the tests ran on uncommitted changes to %s but report no git_tree, so the code they ran on cannot be identified", run.GitCommit)
 	case run.GitTree != "" && !fullObject.MatchString(run.GitTree):
 		return invalid("git_tree %q is not a full lowercase tree hash", run.GitTree)
+	case run.SelectionMode != "" && run.SelectionMode != "full" && run.SelectionMode != "partial":
+		return invalid("selection_mode %q is not full or partial", run.SelectionMode)
+	case run.SelectionMode != "" && len(run.InventoryDigest) != 64:
+		return invalid("an affected-test run requires a 64-character inventory_digest")
+	case run.Complete && run.SelectionMode == "":
+		return invalid("complete requires selection_mode")
+	case run.IdentityVerified && run.SelectionMode == "":
+		return invalid("identity_verified requires selection_mode")
+	case version == 1 && (run.SelectionMode != "" || run.InventoryDigest != "" || run.Complete || run.IdentityVerified || run.PlanID != "" || len(run.Inventory) > 0):
+		return invalid("affected-test metadata requires import version %d", ContractVersion)
+	case run.SelectionMode == "" && (run.InventoryDigest != "" || run.PlanID != "" || len(run.Inventory) > 0):
+		return invalid("affected-test metadata requires selection_mode")
+	}
+	if run.SelectionMode != "" {
+		if err := validateInventory(run.Inventory); err != nil {
+			return invalid("inventory: %v", err)
+		}
+		if actual := (PlanRequest{Inventory: run.Inventory}).InventoryHash(); run.InventoryDigest != actual {
+			return invalid("inventory_digest %q does not match inventory %q", run.InventoryDigest, actual)
+		}
 	}
 	seen := map[string]bool{}
 	for i, test := range run.Tests {
@@ -137,6 +167,14 @@ func (run Run) validate() error {
 			return invalid("test %s is reported twice", test.display())
 		}
 		seen[test.Framework+"\x00"+test.Package+"\x00"+key] = true
+	}
+	if run.SelectionMode == "full" && run.Complete && run.IdentityVerified {
+		for _, inventory := range run.Inventory {
+			key := inventory.asTest().namePath()
+			if !seen[inventory.Framework+"\x00"+inventory.Package+"\x00"+key] {
+				return invalid("complete full run has no result for inventory test %q", inventory.ID)
+			}
+		}
 	}
 	return validateBlocks(run.Coverage)
 }

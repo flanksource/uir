@@ -56,10 +56,35 @@ table "test_runs" {
     type = text
     null = true
   }
+  column "selection_mode" {
+    type    = text
+    default = "legacy"
+  }
+  column "inventory_digest" {
+    type    = text
+    default = ""
+  }
+  column "inputs_digest" {
+    type    = text
+    default = ""
+  }
+  column "complete" {
+    type    = boolean
+    default = false
+  }
+  column "identity_verified" {
+    type    = boolean
+    default = false
+  }
+  column "plan_id" {
+    type = text
+    null = true
+  }
 
   primary_key { columns = [column.id] }
   index "test_runs_root_idx" { columns = [column.root_id, column.started_at] }
   index "test_runs_snapshot_idx" { columns = [column.snapshot_id] }
+  index "test_runs_baseline_idx" { columns = [column.root_id, column.environment_hash, column.inputs_digest, column.finished_at] }
   foreign_key "test_runs_root_fkey" {
     columns     = [column.root_id]
     ref_columns = [table.modules.column.id]
@@ -73,6 +98,7 @@ table "test_runs" {
     on_delete   = SET_NULL
   }
   check "test_runs_environment_hash_check" { expr = "length(environment_hash) = 64" }
+  check "test_runs_selection_check" { expr = "selection_mode IN ('legacy', 'full', 'partial')" }
 }
 
 // test_results holds one row per test, run and attempt. closure_fingerprint digests the content
@@ -95,6 +121,10 @@ table "test_results" {
   }
   column "closure_fingerprint" { type = text }
   column "closure_source" { type = text }
+  column "package_fingerprint" {
+    type    = text
+    default = ""
+  }
 
   primary_key { columns = [column.run_id, column.test_case_id, column.attempt] }
   index "test_results_closure_idx" { columns = [column.test_case_id, column.closure_fingerprint] }

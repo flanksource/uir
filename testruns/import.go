@@ -60,6 +60,7 @@ func ImportRuns(ctx context.Context, database *gorm.DB, imported Import, snapsho
 	var root storage.ModuleRoot
 	result := Result{Runs: []RunResult{}}
 	documents := map[uuid.UUID]*snapshotDocuments{}
+	packages := map[uuid.UUID]*packageFingerprints{}
 	for i, run := range imported.Runs {
 		var snapshot storage.ModuleSnapshot
 		if err := database.WithContext(ctx).Where("id = ?", snapshots[i]).Take(&snapshot).Error; err != nil {
@@ -77,9 +78,12 @@ func ImportRuns(ctx context.Context, database *gorm.DB, imported Import, snapsho
 			if documents[snapshot.ID], err = newSnapshotDocuments(ctx, database, snapshot.ID); err != nil {
 				return result, err
 			}
+			if packages[snapshot.ID], err = newPackageFingerprints(ctx, database, snapshot.ID); err != nil {
+				return result, err
+			}
 		}
 		importer := runImporter{
-			database: database, root: root, snapshot: snapshot, documents: documents[snapshot.ID],
+			database: database, root: root, snapshot: snapshot, documents: documents[snapshot.ID], packages: packages[snapshot.ID],
 			closures: &closures{database: database, pipeline: pipeline, snapshot: snapshot, inputs: run.InputsDigest, static: map[int64]*staticDependencies{}},
 		}
 		recorded, err := importer.importRun(ctx, run)
@@ -96,6 +100,7 @@ type runImporter struct {
 	root      storage.ModuleRoot
 	snapshot  storage.ModuleSnapshot
 	documents *snapshotDocuments
+	packages  *packageFingerprints
 	closures  *closures
 }
 
@@ -130,10 +135,18 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 	row := storage.TestRun{
 		ID: recorded.RunID, RootID: importer.root.ID, SnapshotID: &snapshotID, Producer: run.Producer,
 		Environment: environment, EnvironmentHash: EnvironmentHash(run.Environment),
-		StartedAt: run.StartedAt.UTC(), FinishedAt: run.FinishedAt.UTC(),
+		StartedAt: run.StartedAt.UTC(), FinishedAt: run.FinishedAt.UTC(), SelectionMode: run.SelectionMode,
+		InventoryDigest: run.InventoryDigest, InputsDigest: run.InputsDigest, Complete: run.Complete,
+		IdentityVerified: run.IdentityVerified,
 	}
 	if run.TaskRunID != "" {
 		row.TaskRunID = &run.TaskRunID
+	}
+	if run.PlanID != "" {
+		row.PlanID = &run.PlanID
+	}
+	if row.SelectionMode == "" {
+		row.SelectionMode = "legacy"
 	}
 	planned, coverage, err := importer.plan(ctx, run, &recorded)
 	if err != nil {
@@ -160,6 +173,7 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 					RunID: recorded.RunID, TestCaseID: testCase.ID, Attempt: attempt + 1, Outcome: outcome.Outcome,
 					DurationMS: outcome.DurationMS, FailureDigest: failureDigest(outcome.Failure),
 					ClosureFingerprint: test.closure.fingerprint, ClosureSource: test.closure.source,
+					PackageFingerprint: test.packageFingerprint,
 				})
 			}
 		}
@@ -189,10 +203,11 @@ func (importer runImporter) importRun(ctx context.Context, run Run) (RunResult, 
 // plannedTest is a test with everything read before the run's transaction: its link, its closure, and
 // key, the placeholder its coverage rows carry until its test case id is known.
 type plannedTest struct {
-	test    Test
-	key     uuid.UUID
-	link    *int64
-	closure closure
+	test               Test
+	key                uuid.UUID
+	link               *int64
+	closure            closure
+	packageFingerprint string
 }
 
 // plan reads, outside any transaction, each test's link and closure and attributes the run's and each
@@ -228,6 +243,12 @@ func (importer runImporter) plan(ctx context.Context, run Run, recorded *RunResu
 		}
 		if next.closure, err = importer.closures.of(ctx, covered, link); err != nil {
 			return nil, nil, fmt.Errorf("test %s: %w", test.display(), err)
+		}
+		packageFP := importer.packages.of(test.Package)
+		next.packageFingerprint = packageFP.fingerprint
+		if !packageFP.complete {
+			next.closure = importer.closures.snapshotClosure()
+			next.packageFingerprint = next.closure.fingerprint
 		}
 		recorded.Tests++
 		if link != nil {
