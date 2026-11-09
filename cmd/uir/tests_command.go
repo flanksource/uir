@@ -88,7 +88,7 @@ func planTests(ctx context.Context, options testsPlanOptions) (testruns.PlanResp
 	if err := request.Validate(); err != nil {
 		return testruns.PlanResponse{}, err
 	}
-	goEnvironment := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "GOVERSION")
+	goEnvironment := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "GOVERSION", "CGO_ENABLED", "GOEXPERIMENT")
 	goEnvironment.Dir = options.Location
 	environmentOutput, err := goEnvironment.Output()
 	if err != nil {
@@ -98,7 +98,9 @@ func planTests(ctx context.Context, options testsPlanOptions) (testruns.PlanResp
 	if err := json.Unmarshal(environmentOutput, &currentEnvironment); err != nil {
 		return testruns.PlanResponse{}, fmt.Errorf("decode current Go build environment: %w", err)
 	}
-	for requestKey, currentKey := range map[string]string{"GOOS": "GOOS", "GOARCH": "GOARCH", "go": "GOVERSION"} {
+	for requestKey, currentKey := range map[string]string{
+		"GOOS": "GOOS", "GOARCH": "GOARCH", "go": "GOVERSION", "CGO_ENABLED": "CGO_ENABLED", "GOEXPERIMENT": "GOEXPERIMENT",
+	} {
 		if request.Environment[requestKey] != currentEnvironment[currentKey] {
 			return testruns.PlanResponse{}, fmt.Errorf("requested %s=%q does not match the current build environment %q", requestKey, request.Environment[requestKey], currentEnvironment[currentKey])
 		}

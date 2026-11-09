@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const PlanContractVersion = 1
+const PlanContractVersion = 2
 
 // PlanRequest is a producer's complete current ordinary-test inventory and the exact execution
 // context for which it asks UIR to prove tests skippable.
@@ -61,8 +61,17 @@ func (request PlanRequest) Validate() error {
 	if len(request.InputsDigest) != 64 {
 		return fmt.Errorf("inputs_digest must be a 64-character digest")
 	}
+	for _, key := range []string{"GOOS", "GOARCH", "go", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "race", "tags", "count"} {
+		if _, found := request.Environment[key]; !found {
+			return fmt.Errorf("environment requires %s", key)
+		}
+	}
+	return validateInventory(request.Inventory)
+}
+
+func validateInventory(inventory []InventoryTest) error {
 	seen := map[string]bool{}
-	for i, test := range request.Inventory {
+	for i, test := range inventory {
 		if test.ID == "" || test.Framework == "" || test.Package == "" || test.Name == "" {
 			return fmt.Errorf("inventory test %d requires id, framework, package and name", i)
 		}

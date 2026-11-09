@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,7 +76,8 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	baseline := indexPlannerFixture(t, ctx, engine, database, workspace)
 	request := PlanRequest{
 		Version: PlanContractVersion, GitCommit: strings.Repeat("a", 40),
-		Environment:  map[string]string{"GOOS": "linux", "GOARCH": "amd64", "go": "go-test", "race": "false", "tags": "", "count": ""},
+		Environment: map[string]string{"GOOS": "linux", "GOARCH": "amd64", "go": "go-test", "CGO_ENABLED": "0", "GOEXPERIMENT": "", "GOFLAGS": "",
+			"race": "false", "tags": "", "count": ""},
 		InputsDigest: strings.Repeat("b", 64), InputContext: "no-external-inputs:v1",
 		Inventory: []InventoryTest{
 			{ID: "deep", Framework: goTest, Package: "example.com/deep", Name: "TestDeepGlobal", File: "deep_test.go", Line: 5},
@@ -86,7 +88,7 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	imported, err := ImportRuns(ctx, database, Import{Version: ContractVersion, Runs: []Run{{
 		GitCommit: request.GitCommit, Producer: "planner-test", Environment: request.Environment,
 		StartedAt: now, FinishedAt: now, InputsDigest: request.InputsDigest, SelectionMode: "full",
-		InventoryDigest: request.InventoryHash(), Complete: true, IdentityVerified: true,
+		InventoryDigest: request.InventoryHash(), Complete: true, IdentityVerified: true, Inventory: request.Inventory,
 		Tests: []Test{
 			{Framework: goTest, Package: "example.com/deep", Name: "TestDeepGlobal", File: "deep_test.go", Line: 5, Attempts: []Attempt{{Outcome: storage.TestPass}}},
 			{Framework: goTest, Package: "example.com/deep", Name: "TestUnrelated", File: "deep_test.go", Line: 11, Attempts: []Attempt{{Outcome: storage.TestPass}}},
@@ -135,7 +137,7 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	_, err = ImportRuns(ctx, database, Import{Version: ContractVersion, Runs: []Run{{
 		GitCommit: partialOnly.GitCommit, Producer: "planner-test", Environment: partialOnly.Environment,
 		StartedAt: now, FinishedAt: now, InputsDigest: partialOnly.InputsDigest, SelectionMode: "partial",
-		InventoryDigest: partialOnly.InventoryHash(), Complete: true, IdentityVerified: true,
+		InventoryDigest: partialOnly.InventoryHash(), Complete: true, IdentityVerified: true, Inventory: partialOnly.Inventory,
 		Tests: []Test{{Framework: goTest, Package: "example.com/deep", Name: "TestDeepGlobal", File: "deep_test.go", Line: 5, Attempts: []Attempt{{Outcome: storage.TestPass}}}},
 	}}}, []uuid.UUID{baseline.ID})
 	if err != nil {
@@ -149,7 +151,7 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	_, err = ImportRuns(ctx, database, Import{Version: ContractVersion, Runs: []Run{{
 		GitCommit: unverified.GitCommit, Producer: "planner-test", Environment: unverified.Environment,
 		StartedAt: now, FinishedAt: now, InputsDigest: unverified.InputsDigest, SelectionMode: "full",
-		InventoryDigest: unverified.InventoryHash(), Complete: true,
+		InventoryDigest: unverified.InventoryHash(), Complete: true, Inventory: unverified.Inventory,
 		Tests: []Test{{Framework: goTest, Package: "example.com/deep", Name: "TestDeepGlobal", File: "deep_test.go", Line: 5, Attempts: []Attempt{{Outcome: storage.TestPass}}}},
 	}}}, []uuid.UUID{baseline.ID})
 	if err != nil {
@@ -162,6 +164,35 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	if deepBaseline.ClosureSource != storage.ClosureStatic || controlBaseline.ClosureSource != storage.ClosureStatic {
 		t.Fatalf("baseline closures = %q and %q, want static", deepBaseline.ClosureSource, controlBaseline.ClosureSource)
 	}
+	if err := database.Model(&storage.TestResult{}).
+		Where("run_id = ? AND test_case_id = ?", deepBaseline.RunID, deepBaseline.TestCaseID).
+		Updates(map[string]any{"closure_source": storage.ClosureCoverage, "closure_fingerprint": strings.Repeat("d", 64)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	coverageBaseline, err := Plan(ctx, database, baseline.root, baseline.ModuleSnapshot, request)
+	if err != nil || strings.Join(coverageBaseline.Skippable, ",") != "deep,control" {
+		t.Fatalf("coverage baseline plan = %+v, err=%v; want static planning to skip both", coverageBaseline, err)
+	}
+	if err := database.Model(&storage.TestResult{}).
+		Where("run_id = ? AND test_case_id = ?", controlBaseline.RunID, controlBaseline.TestCaseID).
+		Update("outcome", storage.TestSkip).Error; err != nil {
+		t.Fatal(err)
+	}
+	skippedBaseline, err := Plan(ctx, database, baseline.root, baseline.ModuleSnapshot, request)
+	if err != nil || strings.Join(skippedBaseline.Skippable, ",") != "deep" {
+		t.Fatalf("skipped-result baseline plan = %+v, err=%v; want only deep skippable", skippedBaseline, err)
+	}
+	if err := database.Model(&storage.TestResult{}).
+		Where("run_id = ? AND test_case_id = ?", controlBaseline.RunID, controlBaseline.TestCaseID).
+		Update("outcome", storage.TestFail).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertPlannerRunsAll(t, ctx, database, baseline, request, "no admissible full-pass baseline")
+	if err := database.Model(&storage.TestResult{}).
+		Where("run_id = ? AND test_case_id = ?", controlBaseline.RunID, controlBaseline.TestCaseID).
+		Update("outcome", storage.TestPass).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	writePlannerFile(t, filepath.Join(workspace, "deep.go"), strings.Replace(plannerFixtureSource, `"before"`, `"after"`, 1))
 	changed := indexPlannerFixture(t, ctx, engine, database, workspace)
@@ -173,11 +204,15 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	if controlCurrent.source != storage.ClosureStatic || controlCurrent.fingerprint != controlBaseline.ClosureFingerprint {
 		t.Fatalf("control closure = %q %s; want unchanged static closure", controlCurrent.source, controlCurrent.fingerprint)
 	}
-	packageCurrent, complete, err := packageFingerprint(ctx, database, changed.ID, "example.com/deep")
-	if err != nil || !complete {
-		t.Fatalf("current package fingerprint incomplete: complete=%t err=%v", complete, err)
+	packages, err := newPackageFingerprints(ctx, database, changed.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if packageCurrent == deepBaseline.PackageFingerprint {
+	packageCurrent := packages.of("example.com/deep")
+	if !packageCurrent.complete {
+		t.Fatal("current package fingerprint is incomplete")
+	}
+	if packageCurrent.fingerprint == deepBaseline.PackageFingerprint {
 		t.Fatal("package fingerprint did not change with the global")
 	}
 	planned, err := Plan(ctx, database, changed.root, changed.ModuleSnapshot, request)
@@ -186,6 +221,257 @@ func TestPlanTracksGlobalThroughDeepCallChain(t *testing.T) {
 	}
 	if len(planned.Skippable) != 0 {
 		t.Fatalf("changed skippable tests = %v, want none", planned.Skippable)
+	}
+}
+
+func TestPlanIncludesTestBinarySetupDependencies(t *testing.T) {
+	cases := []struct {
+		name     string
+		baseline map[string]string
+		changed  map[string]string
+	}{
+		{
+			name: "cross-package init writer",
+			baseline: map[string]string{
+				"state/state.go": `package state
+
+var value string
+
+func init() { value = "before" }
+func Value() string { return value }
+`,
+				"app/app.go":      "package app\n",
+				"app/app_test.go": setupTest(`"example.com/setup/state"`, `state.Value()`),
+			},
+			changed: map[string]string{
+				"state/state.go": `package state
+
+var value string
+
+func init() { value = "after" }
+func Value() string { return value }
+`,
+			},
+		},
+		{
+			name: "blank-imported registration",
+			baseline: map[string]string{
+				"registry/registry.go": `package registry
+
+var value string
+
+func Register(next string) { value = next }
+func Value() string { return value }
+`,
+				"plugin/plugin.go": `package plugin
+
+import "example.com/setup/registry"
+
+func init() { registry.Register("before") }
+`,
+				"app/app.go": "package app\n",
+				"app/app_test.go": `package app
+
+import (
+	"testing"
+	_ "example.com/setup/plugin"
+	"example.com/setup/registry"
+)
+
+func TestSetup(t *testing.T) {
+	if registry.Value() != "before" { t.Fatal(registry.Value()) }
+}
+`,
+			},
+			changed: map[string]string{
+				"plugin/plugin.go": `package plugin
+
+import "example.com/setup/registry"
+
+func init() { registry.Register("after") }
+`,
+			},
+		},
+		{
+			name: "new test-file blank import",
+			baseline: map[string]string{
+				"registry/registry.go": `package registry
+
+var value string
+
+func Register(next string) { value = next }
+func Value() string { return value }
+`,
+				"plugin/plugin.go": `package plugin
+
+import "example.com/setup/registry"
+
+func init() { registry.Register("plugin") }
+`,
+				"app/app.go": "package app\n",
+				"app/app_test.go": `package app
+
+import (
+	"testing"
+	"example.com/setup/registry"
+)
+
+func TestSetup(t *testing.T) {
+	if registry.Value() != "" { t.Fatal(registry.Value()) }
+}
+`,
+			},
+			changed: map[string]string{
+				"app/app_test.go": `package app
+
+import (
+	"testing"
+	_ "example.com/setup/plugin"
+	"example.com/setup/registry"
+)
+
+func TestSetup(t *testing.T) {
+	if registry.Value() != "" { t.Fatal(registry.Value()) }
+}
+`,
+			},
+		},
+		{
+			name: "TestMain transitive helper",
+			baseline: map[string]string{
+				"helper/helper.go": `package helper
+
+func Mode() string { return "before" }
+`,
+				"app/app.go": "package app\n",
+				"app/app_test.go": `package app
+
+import (
+	"os"
+	"testing"
+	"example.com/setup/helper"
+)
+
+func TestMain(m *testing.M) {
+	if helper.Mode() != "before" { os.Exit(1) }
+	os.Exit(m.Run())
+}
+
+func TestSetup(t *testing.T) {}
+`,
+			},
+			changed: map[string]string{
+				"helper/helper.go": `package helper
+
+func Mode() string { return "after" }
+`,
+			},
+		},
+	}
+
+	for _, fixture := range cases {
+		t.Run(fixture.name, func(t *testing.T) {
+			ctx := context.Background()
+			workspace := t.TempDir()
+			writePlannerFile(t, filepath.Join(workspace, "go.mod"), "module example.com/setup\n\ngo 1.25\n")
+			for path, content := range fixture.baseline {
+				writePlannerFile(t, filepath.Join(workspace, path), content)
+			}
+			runPlannerGoTest(t, workspace, true)
+			database, err := storage.UirDB(ctx, storage.DBOptions{DSN: filepath.Join(t.TempDir(), "planner.db")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				sqlDB, dbErr := database.DB()
+				if dbErr == nil {
+					_ = sqlDB.Close()
+				}
+			})
+			engine, err := indexer.New(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline := indexPlannerFixture(t, ctx, engine, database, workspace)
+			request := PlanRequest{
+				Version: PlanContractVersion, GitCommit: strings.Repeat("a", 40),
+				Environment: map[string]string{"GOOS": "linux", "GOARCH": "amd64", "go": "go-test", "CGO_ENABLED": "0", "GOEXPERIMENT": "", "GOFLAGS": "",
+					"race": "false", "tags": "", "count": ""},
+				InputsDigest: strings.Repeat("b", 64), InputContext: "no-external-inputs:v1",
+				Inventory: []InventoryTest{{ID: "setup", Framework: goTest, Package: "example.com/setup/app", Name: "TestSetup", File: "app/app_test.go", Line: 10}},
+			}
+			now := time.Now().UTC()
+			_, err = ImportRuns(ctx, database, Import{Version: ContractVersion, Runs: []Run{{
+				GitCommit: request.GitCommit, Producer: "planner-test", Environment: request.Environment,
+				StartedAt: now, FinishedAt: now, InputsDigest: request.InputsDigest, SelectionMode: "full",
+				InventoryDigest: request.InventoryHash(), Complete: true, IdentityVerified: true, Inventory: request.Inventory,
+				Tests: []Test{{Framework: goTest, Package: "example.com/setup/app", Name: "TestSetup", File: "app/app_test.go", Line: 10, Attempts: []Attempt{{Outcome: storage.TestPass}}}},
+			}}}, []uuid.UUID{baseline.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			unchanged, err := Plan(ctx, database, baseline.root, baseline.ModuleSnapshot, request)
+			if err != nil || strings.Join(unchanged.Skippable, ",") != "setup" {
+				t.Fatalf("unchanged plan = %+v, err=%v; want setup skippable", unchanged, err)
+			}
+			for path, content := range fixture.changed {
+				writePlannerFile(t, filepath.Join(workspace, path), content)
+			}
+			runPlannerGoTest(t, workspace, false)
+			changed := indexPlannerFixture(t, ctx, engine, database, workspace)
+			planned, err := Plan(ctx, database, changed.root, changed.ModuleSnapshot, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(planned.Skippable) != 0 {
+				t.Fatalf("changed skippable tests = %v, want none", planned.Skippable)
+			}
+		})
+	}
+}
+
+func TestAffectedImportValidatesFullInventory(t *testing.T) {
+	now := time.Now().UTC()
+	inventory := []InventoryTest{{ID: "test", Framework: goTest, Package: "example.com/app", Name: "TestApp", File: "app_test.go", Line: 5}}
+	digest := (PlanRequest{Inventory: inventory}).InventoryHash()
+	valid := Run{
+		GitCommit: strings.Repeat("a", 40), Producer: "gavel", StartedAt: now, FinishedAt: now,
+		SelectionMode: "full", InventoryDigest: digest, Complete: true, IdentityVerified: true, Inventory: inventory,
+		Tests: []Test{{Framework: goTest, Package: "example.com/app", Name: "TestApp", File: "app_test.go", Line: 5,
+			Attempts: []Attempt{{Outcome: storage.TestSkip}}}},
+	}
+	if err := (Import{Version: ContractVersion, Runs: []Run{valid}}).Validate(); err != nil {
+		t.Fatalf("complete inventory with terminal skip was rejected: %v", err)
+	}
+
+	wrongDigest := valid
+	wrongDigest.InventoryDigest = strings.Repeat("b", 64)
+	if err := (Import{Version: ContractVersion, Runs: []Run{wrongDigest}}).Validate(); err == nil || !strings.Contains(err.Error(), "does not match inventory") {
+		t.Fatalf("wrong inventory digest error = %v", err)
+	}
+
+	missing := valid
+	missing.Tests = nil
+	if err := (Import{Version: ContractVersion, Runs: []Run{missing}}).Validate(); err == nil || !strings.Contains(err.Error(), "has no result") {
+		t.Fatalf("missing full-inventory result error = %v", err)
+	}
+
+	if err := (Import{Version: 1, Runs: []Run{valid}}).Validate(); err == nil || !strings.Contains(err.Error(), "affected-test metadata requires import version") {
+		t.Fatalf("v1 affected metadata error = %v", err)
+	}
+}
+
+func setupTest(imported, expression string) string {
+	return "package app\n\nimport (\n\t\"testing\"\n\t" + imported + "\n)\n\nfunc TestSetup(t *testing.T) {\n\tif " + expression + " != \"before\" { t.Fatal(" + expression + ") }\n}\n"
+}
+
+func runPlannerGoTest(t *testing.T, workspace string, wantPass bool) {
+	t.Helper()
+	command := exec.Command("go", "test", "./...")
+	command.Dir = workspace
+	output, err := command.CombinedOutput()
+	if (err == nil) != wantPass {
+		t.Fatalf("go test pass=%t, want %t; err=%v\n%s", err == nil, wantPass, err, output)
 	}
 }
 
@@ -248,7 +534,11 @@ func plannerClosure(t *testing.T, ctx context.Context, database *gorm.DB, snapsh
 	if err != nil {
 		t.Fatal(err)
 	}
-	importer := runImporter{database: database, root: snapshot.root, snapshot: snapshot.ModuleSnapshot, documents: documents,
+	packages, err := newPackageFingerprints(ctx, database, snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	importer := runImporter{database: database, root: snapshot.root, snapshot: snapshot.ModuleSnapshot, documents: documents, packages: packages,
 		closures: &closures{database: database, pipeline: pipeline, snapshot: snapshot.ModuleSnapshot, inputs: inputs, static: map[int64]*staticDependencies{}}}
 	link, err := importer.link(ctx, test)
 	if err != nil {
@@ -263,6 +553,9 @@ func plannerClosure(t *testing.T, ctx context.Context, database *gorm.DB, snapsh
 
 func writePlannerFile(t *testing.T, path, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

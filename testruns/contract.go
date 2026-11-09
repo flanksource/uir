@@ -61,7 +61,10 @@ type Run struct {
 	Complete         bool   `json:"complete,omitempty"`
 	IdentityVerified bool   `json:"identity_verified,omitempty"`
 	PlanID           string `json:"plan_id,omitempty"`
-	Tests            []Test `json:"tests"`
+	// Inventory is the complete producer inventory whose digest the plan and run share. It lets UIR
+	// verify that a claimed full baseline actually reported every schedulable test.
+	Inventory []InventoryTest `json:"inventory,omitempty"`
+	Tests     []Test          `json:"tests"`
 	// Coverage is the run's aggregate coverage profile.
 	Coverage []Block `json:"coverage,omitempty"`
 }
@@ -112,14 +115,14 @@ func (imported Import) Validate() error {
 		return invalid("no runs")
 	}
 	for i, run := range imported.Runs {
-		if err := run.validate(); err != nil {
+		if err := run.validate(imported.Version); err != nil {
 			return fmt.Errorf("run %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-func (run Run) validate() error {
+func (run Run) validate(version int) error {
 	switch {
 	case strings.TrimSpace(run.Producer) == "":
 		return invalid("producer is required")
@@ -141,6 +144,18 @@ func (run Run) validate() error {
 		return invalid("complete requires selection_mode")
 	case run.IdentityVerified && run.SelectionMode == "":
 		return invalid("identity_verified requires selection_mode")
+	case version == 1 && (run.SelectionMode != "" || run.InventoryDigest != "" || run.Complete || run.IdentityVerified || run.PlanID != "" || len(run.Inventory) > 0):
+		return invalid("affected-test metadata requires import version %d", ContractVersion)
+	case run.SelectionMode == "" && (run.InventoryDigest != "" || run.PlanID != "" || len(run.Inventory) > 0):
+		return invalid("affected-test metadata requires selection_mode")
+	}
+	if run.SelectionMode != "" {
+		if err := validateInventory(run.Inventory); err != nil {
+			return invalid("inventory: %v", err)
+		}
+		if actual := (PlanRequest{Inventory: run.Inventory}).InventoryHash(); run.InventoryDigest != actual {
+			return invalid("inventory_digest %q does not match inventory %q", run.InventoryDigest, actual)
+		}
 	}
 	seen := map[string]bool{}
 	for i, test := range run.Tests {
@@ -152,6 +167,14 @@ func (run Run) validate() error {
 			return invalid("test %s is reported twice", test.display())
 		}
 		seen[test.Framework+"\x00"+test.Package+"\x00"+key] = true
+	}
+	if run.SelectionMode == "full" && run.Complete && run.IdentityVerified {
+		for _, inventory := range run.Inventory {
+			key := inventory.asTest().namePath()
+			if !seen[inventory.Framework+"\x00"+inventory.Package+"\x00"+key] {
+				return invalid("complete full run has no result for inventory test %q", inventory.ID)
+			}
+		}
 	}
 	return validateBlocks(run.Coverage)
 }

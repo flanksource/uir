@@ -60,6 +60,7 @@ func ImportRuns(ctx context.Context, database *gorm.DB, imported Import, snapsho
 	var root storage.ModuleRoot
 	result := Result{Runs: []RunResult{}}
 	documents := map[uuid.UUID]*snapshotDocuments{}
+	packages := map[uuid.UUID]*packageFingerprints{}
 	for i, run := range imported.Runs {
 		var snapshot storage.ModuleSnapshot
 		if err := database.WithContext(ctx).Where("id = ?", snapshots[i]).Take(&snapshot).Error; err != nil {
@@ -77,9 +78,12 @@ func ImportRuns(ctx context.Context, database *gorm.DB, imported Import, snapsho
 			if documents[snapshot.ID], err = newSnapshotDocuments(ctx, database, snapshot.ID); err != nil {
 				return result, err
 			}
+			if packages[snapshot.ID], err = newPackageFingerprints(ctx, database, snapshot.ID); err != nil {
+				return result, err
+			}
 		}
 		importer := runImporter{
-			database: database, root: root, snapshot: snapshot, documents: documents[snapshot.ID],
+			database: database, root: root, snapshot: snapshot, documents: documents[snapshot.ID], packages: packages[snapshot.ID],
 			closures: &closures{database: database, pipeline: pipeline, snapshot: snapshot, inputs: run.InputsDigest, static: map[int64]*staticDependencies{}},
 		}
 		recorded, err := importer.importRun(ctx, run)
@@ -96,6 +100,7 @@ type runImporter struct {
 	root      storage.ModuleRoot
 	snapshot  storage.ModuleSnapshot
 	documents *snapshotDocuments
+	packages  *packageFingerprints
 	closures  *closures
 }
 
@@ -239,10 +244,9 @@ func (importer runImporter) plan(ctx context.Context, run Run, recorded *RunResu
 		if next.closure, err = importer.closures.of(ctx, covered, link); err != nil {
 			return nil, nil, fmt.Errorf("test %s: %w", test.display(), err)
 		}
-		var complete bool
-		if next.packageFingerprint, complete, err = packageFingerprint(ctx, importer.database, importer.snapshot.ID, test.Package); err != nil {
-			return nil, nil, fmt.Errorf("test %s package setup: %w", test.display(), err)
-		} else if !complete {
+		packageFP := importer.packages.of(test.Package)
+		next.packageFingerprint = packageFP.fingerprint
+		if !packageFP.complete {
 			next.closure = importer.closures.snapshotClosure()
 			next.packageFingerprint = next.closure.fingerprint
 		}
