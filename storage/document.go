@@ -7,15 +7,20 @@ import (
 	"fmt"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/effects"
 	"github.com/flanksource/uir/storage/symbolhandle"
 )
 
-// DocumentFormatVersion versions documents.content. Format 11 adds a Go file's imports and its
+// DocumentFormatVersion versions documents.content. Format 12 adds each Go declaration's own effects
+// (EffectsRecorded); format 11 adds a Go file's imports and its
 // package-level vars and consts to syntax documents; format 10 adds producer metric values (measures);
 // format 9 gives every symbol of a document its own key (each Go func init is keyed by its
 // discriminator); format 8 adds resolved variable types; format 6 moved implements into snapshot-level
 // facts (EffectiveImplements).
-const DocumentFormatVersion = 11
+const DocumentFormatVersion = 12
+
+// effectsFormat is the first document format whose symbols may carry effects.
+const effectsFormat = 12
 
 // uniqueKeysFormat is the first document format whose symbol keys are unique within a document.
 const uniqueKeysFormat = 9
@@ -30,7 +35,9 @@ type Range [4]int
 type ByteSpan [2]int
 
 // DocumentContent is the JSON object stored in documents.content; see docs/symbol-index-storage.md.
-// Excluded states why an excluded document holds no facts.
+// Excluded states why an excluded document holds no facts. EffectsRecorded marks a document whose every
+// symbol carries the effects of its own declaration, so a symbol without effects has none of its own; a
+// document without it says nothing about effects.
 type DocumentContent struct {
 	Relationships []DocumentRelationship `json:"relationships,omitempty"`
 	Version       int                    `json:"version"`
@@ -40,6 +47,8 @@ type DocumentContent struct {
 	Diagnostics   []DocumentDiagnostic   `json:"diagnostics"`
 	Imports       []DocumentImport       `json:"imports,omitempty"`
 	Excluded      string                 `json:"excluded,omitempty"`
+
+	EffectsRecorded bool `json:"effects_recorded,omitempty"`
 }
 
 // DocumentImport is one import of a Go file in source order: the name it binds (the last path element
@@ -55,7 +64,9 @@ type DocumentImport struct {
 // private shape text (the full declared structure) and PublicShape the part a consumer outside the
 // symbol's visibility boundary observes; PublicHash, PrivateHash, and ContentHash are the three layered
 // hashes (docs/symbol-index-storage.md#hashes-and-identities). Implements is only present in documents
-// older than format 6; no reader consults it, since implements facts are snapshot-level now.
+// older than format 6; no reader consults it, since implements facts are snapshot-level now. Effects are
+// the effects the declaration itself has, each with the source text that first has it, not those of what
+// it calls or reads; they are not hashed.
 type DocumentSymbol struct {
 	DeclaredType *string          `json:"declared_type,omitempty"`
 	Metrics      *CallableMetrics `json:"metrics,omitempty"`
@@ -84,6 +95,8 @@ type DocumentSymbol struct {
 	Payload      JSON             `json:"payload,omitempty"`
 	SemanticHash string           `json:"semantic_hash,omitempty"`
 	Field        *Field           `json:"field,omitempty"`
+
+	Effects map[effects.Effect]string `json:"effects,omitempty"`
 }
 
 // Explorable reports whether the symbol carries the explorer and nodes projection.
@@ -208,6 +221,17 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 		if err := validateMeasures(content.Version, symbol); err != nil {
 			return err
 		}
+		if len(symbol.Effects) > 0 && !content.EffectsRecorded {
+			return fmt.Errorf("symbol %s: effects require a document that records them", symbol.Key)
+		}
+		for effect := range symbol.Effects {
+			if !effects.Valid(effect) {
+				return fmt.Errorf("symbol %s: unknown effect %q", symbol.Key, effect)
+			}
+		}
+	}
+	if content.EffectsRecorded && (content.Version < effectsFormat || (document.Coverage != CoverageIndexed && document.Coverage != CoveragePartial)) {
+		return fmt.Errorf("recorded effects require a typed document of format %d or newer", effectsFormat)
 	}
 	if content.Version < 7 {
 		for _, symbol := range content.Symbols {

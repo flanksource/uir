@@ -66,6 +66,9 @@ const (
 	StyleDiffMoved        = "text-cyan-600"
 	StyleDiffAddedCount   = "text-green-600"
 	StyleDiffRemovedCount = "text-red-600"
+
+	StyleDeterministic    = "text-green-600"
+	StyleNondeterministic = "text-amber-500"
 )
 
 // LiteralStyle is the style of a literal of the given type: one each for

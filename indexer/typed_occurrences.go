@@ -11,9 +11,13 @@ import (
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
-// occurrenceSites marks the identifiers a file calls through and the ones it assigns to.
+// occurrenceSites marks the identifiers a file calls through and the ones it assigns to. A package-level
+// variable is also written by a store through it (to a field, element, slice or pointee of it), by
+// taking its address, by delete, clear or copy into it, and by selecting a method of it that may
+// mutate it.
 type occurrenceSites struct {
 	calls  map[*ast.Ident]*ast.CallExpr
 	writes map[*ast.Ident]bool
@@ -21,6 +25,11 @@ type occurrenceSites struct {
 
 func findOccurrenceSites(file *ast.File, info *types.Info) occurrenceSites {
 	sites := occurrenceSites{calls: map[*ast.Ident]*ast.CallExpr{}, writes: map[*ast.Ident]bool{}}
+	stored := func(expression ast.Expr) {
+		if root := packageVarRoot(expression, info); root != nil {
+			sites.writes[root] = true
+		}
+	}
 	written := func(expression ast.Expr) {
 		switch target := ast.Unparen(expression).(type) {
 		case *ast.Ident:
@@ -28,12 +37,27 @@ func findOccurrenceSites(file *ast.File, info *types.Info) occurrenceSites {
 		case *ast.SelectorExpr:
 			sites.writes[target.Sel] = true
 		}
+		stored(expression)
 	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch node := node.(type) {
 		case *ast.CallExpr:
 			if callee := calleeIdent(node.Fun, info); callee != nil {
 				sites.calls[callee] = node
+			}
+			if builtin, ok := typeutil.Callee(info, node).(*types.Builtin); ok && len(node.Args) > 0 {
+				switch builtin.Name() {
+				case "delete", "clear", "copy":
+					stored(node.Args[0])
+				}
+			}
+		case *ast.UnaryExpr:
+			if node.Op == token.AND {
+				stored(node.X)
+			}
+		case *ast.SelectorExpr:
+			if selection, found := info.Selections[node]; found && mutatingMethod(selection) {
+				stored(node.X)
 			}
 		case *ast.AssignStmt:
 			for _, target := range node.Lhs {

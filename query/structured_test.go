@@ -134,7 +134,7 @@ var _ = Describe("structured query composition", func() {
 		Expect(documents).To(HaveLen(1))
 		var content storage.DocumentContent
 		Expect(json.Unmarshal(documents[0].Content, &content)).To(Succeed())
-		content.Version = 2
+		content.Version, content.EffectsRecorded = 2, false
 		encoded, err := json.Marshal(content)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(database.Model(&storage.Document{}).Where("id = ?", documents[0].ID).Update("content", storage.JSON(encoded)).Error).To(Succeed())
