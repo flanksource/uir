@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flanksource/clicky/task"
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/commons-db/git"
 	"github.com/flanksource/gavel/linters"
 	"github.com/flanksource/gavel/models"
@@ -47,7 +50,18 @@ func Run(ctx context.Context, database *gorm.DB, config *Config, options Options
 	if config != nil {
 		runOptions.ConfigDir = config.Root
 	}
-	result.LinterResult = linters.RunLinterWithTask(ctx, nil, adapter, runOptions)
+	var runErr error
+	result.LinterResult, runErr = progress.Run(ctx, "Linting", "module-lint", func(ctx context.Context) (*linters.LinterResult, error) {
+		report := linters.RunLinterWithTask(ctx, nil, adapter, runOptions)
+		if report.Error != "" {
+			return report, errors.New(report.Error)
+		}
+		return report, nil
+	})
+	if runErr != nil {
+		result.Success = false
+		result.Error = runErr.Error()
+	}
 	return result
 }
 
@@ -80,6 +94,7 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 	files := map[string]bool{}
 	var sourceSets map[string]string
 	defer result.orderRules(rules)
+	position := 0
 	for _, mode := range []storage.AnalysisMode{storage.AnalysisSyntax, storage.AnalysisTyped} {
 		selected := false
 		for _, rule := range rules {
@@ -103,6 +118,11 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 		for _, rule := range rules {
 			if rule.requirements.Mode != mode {
 				continue
+			}
+			position++
+			if current := task.TaskFromContext(ctx); current != nil {
+				current.SetName(fmt.Sprintf("Linting: %s %d/%d", rule.ID, position, len(rules)))
+				current.SetProgress(position-1, len(rules))
 			}
 			queried, err := pipeline.VisitSQL(ctx, rule.Query, scope, func(row query.SQLRow) error {
 				if row.Match.Path != "" {
@@ -140,6 +160,9 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 			result.FileCount = len(files)
 			if err != nil {
 				return fmt.Errorf("rule %s: %w", rule.ID, err)
+			}
+			if current := task.TaskFromContext(ctx); current != nil {
+				current.SetProgress(position, len(rules))
 			}
 		}
 	}

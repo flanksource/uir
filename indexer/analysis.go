@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	clickytask "github.com/flanksource/clicky/task"
 	"github.com/flanksource/commons-db/git"
 	"github.com/flanksource/uir/storage"
@@ -41,7 +43,9 @@ func (indexer *Indexer) Analyze(ctx context.Context, options AnalysisOptions) (M
 }
 
 func (indexer *Indexer) analyze(ctx context.Context, options AnalysisOptions) (ModuleResult, error) {
-	root, err := discoverAnalysis(ctx, options)
+	filesContext, restore := progress.Begin(ctx, "Filesystem", 0)
+	root, err := discoverAnalysis(filesContext, options)
+	restore()
 	if err != nil {
 		return ModuleResult{}, err
 	}
@@ -54,11 +58,24 @@ func (indexer *Indexer) analyze(ctx context.Context, options AnalysisOptions) (M
 		return ModuleResult{}, err
 	}
 	if current && (snapshot.CoverageSettled() || options.NoIndex) {
+		if current := clickytask.TaskFromContext(ctx); current != nil {
+			current.Infof("Reusing %s analysis for %s (%d files)", options.Mode, root.RootKey, len(root.Files))
+		}
 		return ModuleResult{RootKey: root.RootKey, Location: root.LocalPath, SnapshotID: snapshot.ID.String(), Files: len(root.Files), ReusedFiles: len(root.Files), Unchanged: true}, nil
 	}
 	if options.NoIndex {
 		return ModuleResult{}, fmt.Errorf("missing or stale %s lint analysis for %q; run uir lint without --no-index", options.Mode, root.LocalPath)
 	}
+	if group := clickytask.GroupFromContext(ctx); group != nil {
+		step := group.StartStep("Analyzing "+string(options.Mode)+": "+root.RootKey, clickytask.WithContext(ctx))
+		result, err := indexer.analyzeRoot(step.Task().Context(), options, root, head, snapshot)
+		step.Finish(err)
+		return result, err
+	}
+	return indexer.analyzeRoot(ctx, options, root, head, snapshot)
+}
+
+func (indexer *Indexer) analyzeRoot(ctx context.Context, options AnalysisOptions, root discoveredRoot, head storage.AnalysisHead, snapshot storage.ModuleSnapshot) (ModuleResult, error) {
 	extraction, inputs, err := indexer.extractAnalysis(ctx, root, options.IncludeTests)
 	if err != nil {
 		return ModuleResult{}, err

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/clicky/task"
+
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -106,7 +108,7 @@ func (indexer *Indexer) storedVersionMiss(ctx context.Context, memo *runMemo, st
 // logs the version and why.
 func logVersionedMiss(ctx context.Context, name, miss string) {
 	PhaseCount(ctx, "versioned-stale", 1)
-	if log, found := ctx.Value(phaseLogKey{}).(phaseLog); found {
+	if log := task.TaskFromContext(ctx); log != nil {
 		log.Infof("versioned-stale: %s: %s", name, miss)
 	}
 }

@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 
@@ -17,7 +18,7 @@ var _ = Describe("Syntax analysis build selection", func() {
 		writeFile(path, string(source))
 		root := discoveredRoot{LocalPath: directory, Variant: buildVariant{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "0"},
 			Files: []discoveredFile{{AbsolutePath: path, PathKey: "work_test.go", PackagePath: "example.org/work", Content: source}}}
-		extraction, err := extractSyntaxAnalysis(root)
+		extraction, err := extractSyntaxAnalysis(context.Background(), root)
 		Expect(err).NotTo(HaveOccurred())
 		var content storage.DocumentContent
 		Expect(json.Unmarshal(extraction.documents["work_test.go"].content, &content)).To(Succeed())
@@ -33,7 +34,7 @@ var _ = Describe("Syntax analysis build selection", func() {
 		writeFile(path, source)
 		root := discoveredRoot{LocalPath: directory, Variant: buildVariant{GOOS: "linux", GOARCH: "amd64", CGOEnabled: cgo},
 			Files: []discoveredFile{{AbsolutePath: path, PathKey: "work.go", PackagePath: "example.org/work", Content: []byte(source)}}}
-		extraction, err := extractSyntaxAnalysis(root)
+		extraction, err := extractSyntaxAnalysis(context.Background(), root)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(extraction.documents["work.go"].coverage).To(Equal(expected))
 		var content storage.DocumentContent

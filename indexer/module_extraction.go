@@ -11,6 +11,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
@@ -192,12 +194,15 @@ func extractTypedLoad(ctx context.Context, load *typedLoad, base map[string]base
 
 // extractPackages extracts the root's packages in path order and records its sibling sources.
 func (extractor *packageExtraction) extractPackages(ctx context.Context) error {
+	ctx, finish := progress.Begin(ctx, "Analyzing types", len(extractor.load.root.Files))
+	defer finish()
 	extraction := extractor.extraction
 	grouped := map[string][]discoveredFile{}
 	for _, file := range extractor.load.root.Files {
 		grouped[file.PackagePath] = append(grouped[file.PackagePath], file)
 	}
 	for _, packagePath := range sortedKeys(grouped) {
+		progress.Item(ctx, packagePath)
 		extracted, err := extractor.extractPackage(ctx, packagePath, grouped[packagePath])
 		if err != nil {
 			return fmt.Errorf("extract package %q: %w", packagePath, err)
@@ -249,9 +254,14 @@ func (extractor *packageExtraction) extractPackage(ctx context.Context, packageP
 		extracted.exportShapeHash = &shape
 	}
 	if base, found := extractor.base[packagePath]; found && base.inputHash == extracted.inputHash && base.coverage == extracted.coverage && reflect.DeepEqual(base.diagnostics, extracted.diagnostics) {
-		return extracted, reuseBaseDocuments(extraction, base, files)
+		err := reuseBaseDocuments(extraction, base, files)
+		if err == nil {
+			progress.Advance(ctx, len(files))
+		}
+		return extracted, err
 	}
 	for _, file := range files {
+		progress.Item(ctx, packagePath+" › "+file.PathKey)
 		diagnostics := fileDiagnostics(extracted.diagnostics, file.PathKey)
 		document, err := extractor.extractDocument(ctx, state, file, extracted.inputHash, diagnostics)
 		if failure := asDocumentError(err); failure != nil {
@@ -267,6 +277,7 @@ func (extractor *packageExtraction) extractPackage(ctx context.Context, packageP
 		}
 		extraction.documents[file.PathKey] = document
 		extractor.rendered++
+		progress.Advance(ctx, 1)
 	}
 	return extracted, nil
 }

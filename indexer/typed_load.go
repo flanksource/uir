@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/tools/go/packages"
 )
@@ -63,6 +65,8 @@ func sourceResolutionFailure(err error) bool {
 // type information for the whole dependency graph, in the root's directory and build variant. The
 // standard library and the module cache are checked from their declarations only (typedSources).
 func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredRoot, includeTests bool) (typedLoad, error) {
+	ctx, finish := progress.Begin(ctx, "Analyzing types", 0)
+	defer finish()
 	config, sources, err := typedLoadConfig(ctx, root, includeTests)
 	if err != nil {
 		return typedLoad{}, packageLoadError{fmt.Errorf("load Go packages of %q: %w", root.RootKey, err)}

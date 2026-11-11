@@ -42,20 +42,12 @@ var indexRetryConfig = clickytask.RetryConfig{
 // timeout or a connection, for tasks that never retry; a module index task retries with indexRetryConfig.
 var noTaskRetries = clickytask.WithRetryConfig(clickytask.RetryConfig{})
 
-type taskRunKey struct{}
-type runGroupKey struct{}
-
-// WithTaskRunID marks ctx as running inside the task run id, so every snapshot published under it
-// records the run.
-func WithTaskRunID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, taskRunKey{}, id)
-}
-
 func taskRunID(ctx context.Context) *string {
-	id, found := ctx.Value(taskRunKey{}).(string)
-	if !found || id == "" {
+	group := clickytask.GroupFromContext(ctx)
+	if group == nil {
 		return nil
 	}
+	id := group.ID()
 	return &id
 }
 
@@ -196,7 +188,7 @@ func StartMissingModulesTask(ctx context.Context, indexer *Indexer, includeTests
 
 func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (*ModuleIndexRun, error) {
 	details := newRunDetails(indexer)
-	group := clicky.StartGroup[[]ModuleResult](spec.name, clickytask.WithKind(ModuleIndexKind), clickytask.WithLabels(spec.labels),
+	group := clicky.StartGroup[[]ModuleResult](spec.name, clickytask.WithGroupContext(ctx), clickytask.WithKind(ModuleIndexKind), clickytask.WithLabels(spec.labels),
 		clickytask.WithConcurrency(1), clickytask.WithGroupIdentity(spec.identity), clickytask.WithDetailsProvider(details.details))
 	run := &ModuleIndexRun{group: group}
 	details.runID = run.ID()
@@ -219,7 +211,7 @@ func startModuleRun(ctx context.Context, indexer *Indexer, spec moduleRunSpec) (
 		module := group.Add(target.rootKey, func(taskContext commonscontext.Context, progress *clickytask.Task) ([]ModuleResult, error) {
 			started := time.Now()
 			progress.Infof("indexing %s at %s", target.rootKey, target.location)
-			results, err := runIndexTask(withRunMemo(context.WithValue(taskContext, runGroupKey{}, group.Group), memo), details, progress,
+			results, err := runIndexTask(withRunMemo(taskContext, memo), details,
 				func(ctx context.Context) ([]ModuleResult, error) {
 					if target.cached != nil {
 						return []ModuleResult{*target.cached}, Phase(ctx, "fingerprint-reuse", func(context.Context) error { return nil })
@@ -314,12 +306,12 @@ func (indexer *Indexer) indexTarget(ctx context.Context, options ModuleOptions) 
 // indexStep runs index as a step of the task run in ctx, so work a module does on the way, such as a
 // local dependency, shows as its own task and logs its phases there; outside a run it just runs index.
 func indexStep(ctx context.Context, name string, index func(context.Context) ([]ModuleResult, error)) ([]ModuleResult, error) {
-	group, inRun := ctx.Value(runGroupKey{}).(*clickytask.Group)
-	if !inRun {
+	group := clickytask.GroupFromContext(ctx)
+	if group == nil {
 		return index(ctx)
 	}
-	step := group.StartStep(name)
-	stepContext := withProgressUnits(withPhaseLog(ctx, step.Task()), step.Task())
+	step := group.StartStep(name, clickytask.WithContext(ctx))
+	stepContext := withProgressUnits(step.Task().Context())
 	results, err := index(stepContext)
 	if err == nil {
 		addProgress(stepContext, 0, 1)
@@ -351,9 +343,9 @@ func newRunDetails(indexer *Indexer) *runDetails {
 // runIndexTask runs a run task's index under ctx, marked as the run's, with its own server timings and
 // phase log and progress units, then adds the phases it timed to the run's and reads back the snapshots
 // the run has published, whatever index returned.
-func runIndexTask[T any](ctx context.Context, details *runDetails, progress *clickytask.Task, index func(context.Context) (T, error)) (T, error) {
-	timed, timings := rpchttp.WithTimings(WithTaskRunID(ctx, details.runID))
-	indexed := withProgressUnits(withPhaseLog(timed, progress), progress)
+func runIndexTask[T any](ctx context.Context, details *runDetails, index func(context.Context) (T, error)) (T, error) {
+	timed, timings := rpchttp.WithTimings(ctx)
+	indexed := withProgressUnits(timed)
 	result, err := index(indexed)
 	if err == nil {
 		addProgress(indexed, 0, 1)
