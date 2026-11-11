@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -69,6 +71,8 @@ func changedFiles(before, after map[string]storage.ActiveDocument) []changedFile
 // readDocuments loads and decodes the given sides' documents, then clears the segment owners of
 // every file that either side excludes, whose lines all belong to file scope.
 func readDocuments(ctx context.Context, database *gorm.DB, files []changedFile, read map[*fileSide]bool) error {
+	ctx, finish := progress.Begin(ctx, "Comparing documents", len(read))
+	defer finish()
 	byID := make(map[uuid.UUID]*fileSide, len(read))
 	ids := make([]uuid.UUID, 0, len(read))
 	for side := range read {
@@ -85,9 +89,11 @@ func readDocuments(ctx context.Context, database *gorm.DB, files []changedFile, 
 		return err
 	}
 	for _, id := range ids {
+		progress.Item(ctx, byID[id].path)
 		if err := byID[id].decode(contents[id], kinds); err != nil {
 			return err
 		}
+		progress.Advance(ctx, 1)
 	}
 	for _, file := range files {
 		if file.excluded() {

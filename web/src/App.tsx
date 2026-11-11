@@ -12,7 +12,7 @@ import { QueryView } from "./QueryView";
 import { ALL_MODULES, applyRoutePatch, readRoute, routeURL, scopePatch, scopeValue, type Route } from "./route";
 import { SnapshotTable } from "./SnapshotTable";
 import { SystemDetails } from "./SystemDetails";
-import { MODULE_INDEX_KIND, TASKS_API, useRunEnd } from "./task-links";
+import { TASKS_API, useRunEnd } from "./task-links";
 import { Card, ErrorMessage, Field, Heading, Muted, PageLayout, PanelForm, Row, Section, TextInput } from "./ui";
 import { useLoad, useTimedLoad } from "./use-load";
 
@@ -164,7 +164,7 @@ export function App() {
     ]} />}</div>}
     sidebarFooter={<SystemDetails />}
     bodyHeader={<span>{route.view === "connections" ? "Connections" : selectedRoot?.name || route.module || "All modules"} {route.view !== "connections" && route.snapshot && <Muted>/ {route.snapshot.slice(0, 12)}</Muted>}</span>}
-    bodyActions={<Row><TaskManagerButton basePath={TASKS_API} kind={MODULE_INDEX_KIND} tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })}
+    bodyActions={<Row><TaskManagerButton basePath={TASKS_API} tasksHref="/tasks" onNavigate={() => setRoute({ view: "tasks" })}
       selectedId={route.taskRun} onSelectRun={(id) => setRoute({ taskRun: id ?? "" }, true)} /><Button variant="outline" onClick={() => setRefresh((current) => current + 1)}>Refresh</Button></Row>}>
     {route.view === "explorer" ? <Suspense fallback={<div className="p-3"><Muted>Loading explorer…</Muted></div>}><ExplorerView route={route} roots={roots} heads={heads} browse={browse} locations={locations} onRoute={setRoute} onRefresh={() => setRefresh((current) => current + 1)} /></Suspense> : <PageLayout>
       {roots.loading && <Muted>Loading module roots…</Muted>}
@@ -184,7 +184,7 @@ export function App() {
           setRoute({ view: "tasks", taskRun: run.run_id });
         }} />
       </>}
-      {route.view === "tasks" && <><Heading>Indexing tasks</Heading><TaskManager basePath={TASKS_API} kind={MODULE_INDEX_KIND}
+      {route.view === "tasks" && <><Heading>Tasks</Heading><TaskManager basePath={TASKS_API}
         selectedId={route.taskRun} onSelectRun={(id) => setRoute({ taskRun: id ?? "" }, true)} /></>}
       {route.view === "connections" && <ConnectionsView route={route} onRoute={setRoute} refresh={refresh} onRefresh={() => setRefresh((current) => current + 1)} />}
       {route.view === "query" && <>

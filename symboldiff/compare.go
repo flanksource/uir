@@ -246,6 +246,9 @@ func newRow(pair *pairing, class Class, coverage []string, tokenizer Tokenizer) 
 		return Row{}, fmt.Errorf("symbol %q in %q has no name in its identifier", reported.symbol.Key, reported.file.path)
 	}
 	row := Row{Class: class, Kind: reported.symbol.Kind, Owner: owner, Name: name, Visibility: reported.symbol.Visibility, Coverage: coverage}
+	if class == ClassRenamed {
+		_, row.NameBefore = ownerAndName(pair.before.symbol.Identifier)
+	}
 	var before, after string
 	if pair.before != nil {
 		row.PathBefore, before = pair.before.file.path, shownShape(pair.before.symbol, class)

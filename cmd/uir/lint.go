@@ -7,6 +7,7 @@ import (
 
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/gavel/linters"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/lint"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
@@ -29,41 +30,43 @@ type lintOptions struct {
 
 func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 	command := clicky.AddNamedCommandWithContext("lint", root, lintOptions{}, func(ctx context.Context, options lintOptions) (results []*lint.Result, err error) {
-		directory, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{All: options.All, Rules: options.Rules, Tags: options.Tags, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision})
-		if err != nil {
-			return lintFailure(err), err
-		}
-		defer func() {
-			if cleanup := request.Release(); cleanup != nil {
-				err = errors.Join(err, cleanup)
-				if len(results) == 0 {
-					results = lintFailure(err)
-				} else {
-					results[0].Success = false
-					if results[0].Error == "" {
-						results[0].Error = cleanup.Error()
-					} else {
-						results[0].Error += "; " + cleanup.Error()
-					}
-				}
+		return progress.Run(ctx, "Linting", "module-lint", func(ctx context.Context) (results []*lint.Result, err error) {
+			directory, err := os.Getwd()
+			if err != nil {
+				return nil, err
 			}
-		}()
-		var database *gorm.DB
-		if !request.Empty() {
-			database, err = runtime.Database(ctx)
+			request, err := lint.Prepare(ctx, directory, options.Config, lint.Options{All: options.All, Rules: options.Rules, Tags: options.Tags, Include: options.Include, Exclude: options.Exclude, NoIndex: options.NoIndex, Snapshot: options.Snapshot, GroupBy: options.GroupBy, Changed: options.Changed, Staged: options.Staged, Revision: options.Revision})
 			if err != nil {
 				return lintFailure(err), err
 			}
-		}
-		results = []*lint.Result{request.Run(ctx, database)}
-		if linters.HasFailures([]*linters.LinterResult{results[0].LinterResult}) {
-			return results, errors.New("UIR lint failed")
-		}
-		return results, nil
+			defer func() {
+				if cleanup := request.Release(); cleanup != nil {
+					err = errors.Join(err, cleanup)
+					if len(results) == 0 {
+						results = lintFailure(err)
+					} else {
+						results[0].Success = false
+						if results[0].Error == "" {
+							results[0].Error = cleanup.Error()
+						} else {
+							results[0].Error += "; " + cleanup.Error()
+						}
+					}
+				}
+			}()
+			var database *gorm.DB
+			if !request.Empty() {
+				database, err = runtime.Database(ctx)
+				if err != nil {
+					return lintFailure(err), err
+				}
+			}
+			results = []*lint.Result{request.Run(ctx, database)}
+			if linters.HasFailures([]*linters.LinterResult{results[0].LinterResult}) {
+				return results, errors.New("UIR lint failed")
+			}
+			return results, nil
+		})
 	})
 	command.Short = "Run SQL architecture rules from .uir.yaml"
 	command.Args = cobra.MaximumNArgs(1)

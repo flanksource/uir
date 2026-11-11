@@ -10,6 +10,7 @@ import (
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/api"
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/storage"
 	"github.com/spf13/cobra"
@@ -226,7 +227,9 @@ func registerModuleCommands(root *cobra.Command) {
 		if err != nil {
 			return moduleQueryResult{}, err
 		}
-		return queryModules(ctx, database, options)
+		return progress.Run(ctx, "Querying", "module-query", func(ctx context.Context) (moduleQueryResult, error) {
+			return queryModules(ctx, database, options)
+		})
 	})
 	queryCommand.Use = "query [expression]"
 	queryCommand.Short = "Run compact or SQL navigation and stored file/callable metric queries against indexed snapshots"

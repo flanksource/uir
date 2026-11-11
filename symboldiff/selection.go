@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -211,5 +213,8 @@ func verifyCommit(ctx context.Context, directory, revision string) (string, erro
 }
 
 func git(ctx context.Context, directory string, args ...string) ([]byte, error) {
+	ctx, finish := progress.Begin(ctx, "Git", 0)
+	defer finish()
+	progress.Item(ctx, strings.Join(args, " "))
 	return runGit(ctx, directory, "", args...)
 }

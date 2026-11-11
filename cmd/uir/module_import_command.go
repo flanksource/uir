@@ -13,6 +13,7 @@ import (
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/uir/indexer"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/spf13/cobra"
 )
 
@@ -32,22 +33,24 @@ type moduleImportOptions struct {
 func registerImportCommand(root *cobra.Command) {
 	var command *cobra.Command
 	command = clicky.AddNamedCommandWithContext("import", root, moduleImportOptions{}, func(ctx context.Context, options moduleImportOptions) (indexer.ModuleResult, error) {
-		publication, err := readPublication(ctx, options, command.InOrStdin())
-		if err != nil {
-			return indexer.ModuleResult{}, err
-		}
-		if err := applyPublicationOptions(&publication, options); err != nil {
-			return indexer.ModuleResult{}, err
-		}
-		database, err := databaseFor(ctx)
-		if err != nil {
-			return indexer.ModuleResult{}, err
-		}
-		result, err := indexer.Publish(ctx, database, publication)
-		if errors.Is(err, indexer.ErrInvalidPublication) {
-			return indexer.ModuleResult{}, invalidPublication(err.Error())
-		}
-		return result, err
+		return progress.Run(ctx, "Importing", indexer.ModuleIndexKind, func(ctx context.Context) (indexer.ModuleResult, error) {
+			publication, err := readPublication(ctx, options, command.InOrStdin())
+			if err != nil {
+				return indexer.ModuleResult{}, err
+			}
+			if err := applyPublicationOptions(&publication, options); err != nil {
+				return indexer.ModuleResult{}, err
+			}
+			database, err := databaseFor(ctx)
+			if err != nil {
+				return indexer.ModuleResult{}, err
+			}
+			result, err := indexer.Publish(ctx, database, publication)
+			if errors.Is(err, indexer.ErrInvalidPublication) {
+				return indexer.ModuleResult{}, invalidPublication(err.Error())
+			}
+			return result, err
+		})
 	})
 	command.Use = "import [file.json|-|checkout --plugin name]"
 	command.Short = "Publish a non-Go producer's symbols and documents from a publication JSON file or a producer plugin"
@@ -88,6 +91,9 @@ func readPublication(ctx context.Context, options moduleImportOptions, stdin io.
 	if options.Plugin != "" {
 		return publicationFromPlugin(ctx, options)
 	}
+	ctx, finish := progress.Begin(ctx, "Filesystem", 0)
+	defer finish()
+	progress.Item(ctx, options.File)
 	encoded, source, err := publicationBytes(ctx, options, stdin)
 	if err != nil {
 		return indexer.Publication{}, err
