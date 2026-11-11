@@ -176,7 +176,8 @@ func (analysis *effectAnalysis) visit(ctx context.Context, id string) error {
 // expand describes a symbol once. A predeclared identifier and a library symbol the effects catalog
 // knows have the effects the catalog gives them. A constant, field or type has none. A function,
 // method or package-level variable declared in a document that records effects has its declaration's
-// own effects, takes on those of what its body or initializer calls, references as a function value,
+// own effects, takes on those of what its body or initializer calls (including the methods a library
+// it calls calls back), references as a function value,
 // or reads or writes as a package-level variable, and writes or reads (once some indexed code writes
 // it) package-level state itself; one with no such document, such as a library function the catalog
 // does not know, is Unknown, as are an interface method and a call the index could not resolve.
@@ -231,6 +232,15 @@ func (analysis *effectAnalysis) expand(ctx context.Context, id string) (*effectN
 		}
 	}
 	edges := map[string]bool{}
+	for _, posting := range postings {
+		document, err := analysis.index.document(ctx, posting)
+		if err != nil {
+			return nil, err
+		}
+		for _, callee := range document.entries[id].ImplicitCalls {
+			edges[callee] = true
+		}
+	}
 	calls, err := analysis.index.callees(ctx, symbol)
 	if err != nil {
 		return nil, err

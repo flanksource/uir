@@ -18,13 +18,17 @@ const (
 
 import (
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 var (
@@ -148,6 +152,65 @@ func Call(f func() int) int { return f() }
 func Hooked() int { return hook() }
 
 func Measure(s Shape) float64 { return s.Area() }
+
+type Stamp struct{}
+
+func (Stamp) MarshalJSON() ([]byte, error) { return []byte(time.Now().String()), nil }
+
+func (Stamp) String() string { return time.Now().String() }
+
+type Envelope struct{ At Stamp }
+
+type clockErr struct{}
+
+func (clockErr) Error() string { return time.Now().String() }
+
+type byTime []int
+
+func (b byTime) Len() int           { return len(b) }
+func (b byTime) Less(i, j int) bool { return time.Now().UnixNano()%2 == 0 }
+func (b byTime) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
+
+type Label struct{ name string }
+
+func (l Label) String() string { return l.name }
+
+func ViaJSON() []byte { b, _ := json.Marshal(Envelope{}); return b }
+
+func ViaFmt() string { return fmt.Sprint(Stamp{}) }
+
+func ViaErrorf() error { return fmt.Errorf("x: %w", clockErr{}) }
+
+func ViaSort(x []int) { sort.Sort(byTime(x)) }
+
+func ViaErrorsIs(err error) bool { return errors.Is(err, clockErr{}) }
+
+func Wrap(err error) error { return fmt.Errorf("x: %w", err) }
+
+func Labelled() string { return fmt.Sprintf("%v", Label{"a"}) }
+
+func MapRunes(s string, f func(rune) rune) string { return strings.Map(f, s) }
+
+func Upper(s string) string { return strings.Map(unicode.ToUpper, s) }
+
+func Epoch() string { return time.Unix(0, 0).Format(time.RFC3339) }
+
+func LocalDate() time.Time { return time.Date(2020, 1, 1, 0, 0, 0, 0, time.Local) }
+
+func UTCDate() string { return time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339) }
+`
+	// effectsStubs declares functions without a body: one linked to the runtime and one implemented in
+	// assembly, which stub.s lets the compiler accept.
+	effectsStubs = `package effects
+
+import _ "unsafe"
+
+//go:linkname nanotime runtime.nanotime
+func nanotime() int64
+
+func Mono() int64 { return nanotime() }
+
+func Asm() int64
 `
 )
 
@@ -157,6 +220,8 @@ func effectsWorkspace() string {
 	Expect(os.MkdirAll(checkout, 0o755)).To(Succeed())
 	Expect(os.WriteFile(filepath.Join(checkout, "go.mod"), []byte("module "+effectsModule+"\n\ngo 1.26\n"), 0o644)).To(Succeed())
 	Expect(os.WriteFile(filepath.Join(checkout, "effects.go"), []byte(effectsSource), 0o644)).To(Succeed())
+	Expect(os.WriteFile(filepath.Join(checkout, "stubs.go"), []byte(effectsStubs), 0o644)).To(Succeed())
+	Expect(os.WriteFile(filepath.Join(checkout, "stub.s"), nil, 0o644)).To(Succeed())
 	return checkout
 }
 
@@ -223,6 +288,20 @@ var _ = Describe("symbol effects", Ordered, ContinueOnFailure, func() {
 		Entry("a function-valued package variable", "func:Hooked", false, effects.Unknown),
 		Entry("a call of an interface method", "func:Measure", false, effects.Unknown),
 		Entry("an interface method", "method:Shape.Area", false, effects.Unknown),
+		Entry("json calling a nested field's MarshalJSON", "func:ViaJSON", false, effects.TimeRead),
+		Entry("fmt calling String", "func:ViaFmt", false, effects.TimeRead),
+		Entry("fmt.Errorf calling a wrapped error's Error", "func:ViaErrorf", false, effects.TimeRead),
+		Entry("sort calling Less", "func:ViaSort", false, effects.TimeRead),
+		Entry("errors.Is on an error whose methods depend on its value", "func:ViaErrorsIs", false, effects.Unknown),
+		Entry("fmt formatting an error value", "func:Wrap", false, effects.Unknown),
+		Entry("fmt calling a deterministic String", "func:Labelled", true),
+		Entry("a library calling a function value", "func:MapRunes", false, effects.Unknown),
+		Entry("a library calling a named function", "func:Upper", true),
+		Entry("a linknamed function without a body", "func:Mono", false, effects.Unknown),
+		Entry("an assembly function", "func:Asm", false, effects.Unknown),
+		Entry("formatting a time in the local zone", "func:Epoch", false, effects.EnvRead),
+		Entry("a date in the local zone", "func:LocalDate", false, effects.EnvRead),
+		Entry("a date in UTC", "func:UTCDate", true),
 	)
 
 	It("explains an effect by the shortest path to the symbol that has it", func(ctx SpecContext) {
@@ -231,6 +310,12 @@ var _ = Describe("symbol effects", Ordered, ContinueOnFailure, func() {
 		}))
 		Expect(symbolEffects(ctx, "func:Ping").Effects).To(Equal([]query.SymbolEffect{
 			{Effect: effects.TimeRead, Path: []string{effectsModule + ".Ping", effectsModule + ".Pong", "time.Now"}, Evidence: "time.Now"},
+		}))
+		Expect(symbolEffects(ctx, "func:ViaJSON").Effects).To(Equal([]query.SymbolEffect{
+			{Effect: effects.TimeRead, Path: []string{effectsModule + ".ViaJSON", effectsModule + ".Stamp.MarshalJSON", "time.Now"}, Evidence: "time.Now"},
+		}))
+		Expect(symbolEffects(ctx, "func:Mono").Effects).To(Equal([]query.SymbolEffect{
+			{Effect: effects.Unknown, Path: []string{effectsModule + ".Mono", effectsModule + ".nanotime"}, Evidence: "func nanotime has no body"},
 		}))
 		Expect(symbolEffects(ctx, "func:Spawn").Effects).To(ContainElement(
 			query.SymbolEffect{Effect: effects.Goroutine, Path: []string{effectsModule + ".Spawn"}, Evidence: "go f"}))
@@ -242,7 +327,7 @@ var _ = Describe("symbol effects", Ordered, ContinueOnFailure, func() {
 		for _, row := range result.Rows {
 			names = append(names, row["symbol.name"])
 		}
-		Expect(names).To(Equal([]any{"Add", "Even", "Factorial", "Greet", "Insert", "IsWord", "Keys", "Len", "Locked", "Odd", "Shout", "Sorted"}))
+		Expect(names).To(Equal([]any{"Add", "Even", "Factorial", "Greet", "Insert", "IsWord", "Keys", "Labelled", "Len", "Len", "Locked", "Odd", "Shout", "Sorted", "String", "Swap", "UTCDate", "Upper"}))
 		result = runQuery(ctx, pipeline, "SELECT symbol.effects FROM func:Spawn", scope)
 		Expect(result.Rows).To(Equal([]map[string]any{{"symbol.effects": "goroutine,unknown"}}))
 	})
@@ -257,7 +342,7 @@ var _ = Describe("symbol effects", Ordered, ContinueOnFailure, func() {
 		Expect(json.Unmarshal(document.Content, &content)).To(Succeed())
 		content.Version, content.EffectsRecorded = 11, false
 		for i := range content.Symbols {
-			content.Symbols[i].Effects = nil
+			content.Symbols[i].Effects, content.Symbols[i].ImplicitCalls = nil, nil
 		}
 		encoded, err := json.Marshal(content)
 		Expect(err).NotTo(HaveOccurred())

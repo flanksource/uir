@@ -66,7 +66,8 @@ type DocumentImport struct {
 // hashes (docs/symbol-index-storage.md#hashes-and-identities). Implements is only present in documents
 // older than format 6; no reader consults it, since implements facts are snapshot-level now. Effects are
 // the effects the declaration itself has, each with the source text that first has it, not those of what
-// it calls or reads; they are not hashed.
+// it calls or reads; they are not hashed. ImplicitCalls are the ids of the methods a library function
+// the declaration calls may call back on the values it passes, such as a String method fmt calls.
 type DocumentSymbol struct {
 	DeclaredType *string          `json:"declared_type,omitempty"`
 	Metrics      *CallableMetrics `json:"metrics,omitempty"`
@@ -96,7 +97,8 @@ type DocumentSymbol struct {
 	SemanticHash string           `json:"semantic_hash,omitempty"`
 	Field        *Field           `json:"field,omitempty"`
 
-	Effects map[effects.Effect]string `json:"effects,omitempty"`
+	Effects       map[effects.Effect]string `json:"effects,omitempty"`
+	ImplicitCalls []string                  `json:"implicit_calls,omitempty"`
 }
 
 // Explorable reports whether the symbol carries the explorer and nodes projection.
@@ -221,7 +223,12 @@ func validateDocumentContent(document Document, content DocumentContent, kinds s
 		if err := validateMeasures(content.Version, symbol); err != nil {
 			return err
 		}
-		if len(symbol.Effects) > 0 && !content.EffectsRecorded {
+		for _, callee := range symbol.ImplicitCalls {
+			if len(callee) != 64 {
+				return fmt.Errorf("symbol %s: implicit call %q is not a symbol id", symbol.Key, callee)
+			}
+		}
+		if (len(symbol.Effects) > 0 || len(symbol.ImplicitCalls) > 0) && !content.EffectsRecorded {
 			return fmt.Errorf("symbol %s: effects require a document that records them", symbol.Key)
 		}
 		for effect := range symbol.Effects {

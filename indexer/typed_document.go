@@ -76,7 +76,7 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 	}
 	assignEnclosing(symbols, occurrences)
 	if !partial {
-		if err := recordEffects(source, symbols); err != nil {
+		if err := builder.recordEffects(source, symbols); err != nil {
 			return storage.DocumentContent{}, fmt.Errorf("record effects in %q: %w", file.PathKey, err)
 		}
 	}
