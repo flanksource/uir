@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flanksource/clicky/task"
+
 	"github.com/flanksource/uir/storage"
 	"github.com/google/uuid"
 	"golang.org/x/mod/modfile"
@@ -41,7 +43,7 @@ func reusableHead(ctx context.Context, check *headCheck, root discoveredRoot, fo
 	}
 	if miss.counter != "" {
 		PhaseCount(ctx, miss.counter, 1)
-		if log, found := ctx.Value(phaseLogKey{}).(phaseLog); found {
+		if log := task.TaskFromContext(ctx); log != nil {
 			log.Infof("%s: %s at %s: %s", miss.counter, root.RootKey, root.LocalPath, miss.detail)
 		}
 	}

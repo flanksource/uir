@@ -6,6 +6,8 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -39,6 +41,8 @@ func publishDocuments(ctx context.Context, database *gorm.DB, publication *snaps
 	if err != nil {
 		return nil, err
 	}
+	ctx, finish := progress.Begin(ctx, "Publishing documents", len(plan.pending))
+	defer finish()
 	needed, stored, err := neededSymbols(ctx, database, publication.extraction, plan.pending)
 	if err != nil {
 		return nil, err
@@ -52,10 +56,12 @@ func publishDocuments(ctx context.Context, database *gorm.DB, publication *snaps
 		return nil, err
 	}
 	for _, next := range plan.pending {
+		progress.Item(ctx, next.document.PackagePath+" › "+next.document.PathKey)
 		if plan.bindings[next.document.PathKey], err = publishDocument(ctx, database, next, publication.root.Ordinal, handles); err != nil {
 			return nil, err
 		}
 		result.ParsedFiles++
+		progress.Advance(ctx, 1)
 	}
 	membership.bindings = plan.bindings
 	return handles, nil

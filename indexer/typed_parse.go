@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"golang.org/x/tools/go/packages"
 )
 
@@ -21,6 +23,7 @@ import (
 // declarations lose their bodies, which go/types then never checks or records. Every other file,
 // the root's and each workspace module's, is parsed in full and its content hash kept.
 type typedSources struct {
+	ctx          context.Context
 	root         string
 	dependencies []string
 	mutex        sync.Mutex
@@ -43,7 +46,7 @@ func newTypedSources(ctx context.Context, root discoveredRoot, environment []str
 	if err := json.Unmarshal(output, &values); err != nil {
 		return nil, fmt.Errorf("read go env in %q: decode %q: %w", root.LocalPath, output, err)
 	}
-	sources := &typedSources{root: root.LocalPath, parsed: map[string]string{}, declarations: map[string]bool{}}
+	sources := &typedSources{ctx: ctx, root: root.LocalPath, parsed: map[string]string{}, declarations: map[string]bool{}}
 	for _, name := range []string{"GOROOT", "GOMODCACHE"} {
 		if values[name] == "" {
 			return nil, fmt.Errorf("read go env in %q: %s is empty", root.LocalPath, name)
@@ -68,6 +71,9 @@ func (sources *typedSources) dependencyFile(filename string) bool {
 
 // parse is the load's packages.Config.ParseFile.
 func (sources *typedSources) parse(fileSet *token.FileSet, filename string, source []byte) (*ast.File, error) {
+	if sources.ctx != nil {
+		progress.Item(sources.ctx, filename)
+	}
 	if !sources.dependencyFile(filename) {
 		hash := hashBytes(source)
 		sources.mutex.Lock()

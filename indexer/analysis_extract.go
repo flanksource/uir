@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/indexer/syntax"
 	"github.com/flanksource/uir/storage"
 )
@@ -41,7 +43,7 @@ func (indexer *Indexer) extractAnalysis(ctx context.Context, root discoveredRoot
 		return moduleExtraction{}, inputs, err
 	}
 	if root.AnalysisMode == storage.AnalysisSyntax {
-		extraction, err := extractSyntaxAnalysis(root)
+		extraction, err := extractSyntaxAnalysis(ctx, root)
 		return extraction, inputs, err
 	}
 	load, err := loadTyped(ctx, indexer.loadPackages, root, includeTests)
@@ -69,12 +71,15 @@ func (indexer *Indexer) extractAnalysis(ctx context.Context, root discoveredRoot
 	return extraction, inputs, err
 }
 
-func extractSyntaxAnalysis(root discoveredRoot) (moduleExtraction, error) {
+func extractSyntaxAnalysis(ctx context.Context, root discoveredRoot) (moduleExtraction, error) {
+	ctx, finish := progress.Begin(ctx, "Analyzing syntax", len(root.Files))
+	defer finish()
 	extraction := moduleExtraction{root: root, indexerVersion: IndexerVersion, indexStartedAt: time.Now().UTC(), documents: map[string]extractedDocument{}, symbols: map[string]storage.Symbol{}, coverage: storage.CoverageSyntax, coverageDeterministic: true}
 	selection := build.Default
 	selection.GOOS, selection.GOARCH, selection.CgoEnabled, selection.BuildTags = root.Variant.GOOS, root.Variant.GOARCH, root.Variant.CGOEnabled == "1", root.Variant.BuildTags
 	packagesByPath := map[string]*extractedPackage{}
 	for _, file := range root.Files {
+		progress.Item(ctx, file.PackagePath+" › "+file.PathKey)
 		content, err := syntaxAnalysisDocument(selection, file)
 		if err != nil {
 			return extraction, err
@@ -96,6 +101,7 @@ func extractSyntaxAnalysis(root discoveredRoot) (moduleExtraction, error) {
 		if coverage == storage.CoverageSyntax {
 			pkg.coverage = storage.CoverageSyntax
 		}
+		progress.Advance(ctx, 1)
 	}
 	for _, path := range sortedKeys(packagesByPath) {
 		extraction.packages = append(extraction.packages, *packagesByPath[path])

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/commons-db/git"
 	"gorm.io/gorm"
 )
@@ -92,6 +94,9 @@ func Prepare(ctx context.Context, directory, explicit string, options Options) (
 }
 
 func (request *Request) prepareSource(ctx context.Context, directory, explicit string) (string, string, error) {
+	ctx, finish := progress.Begin(ctx, "Git", 0)
+	defer finish()
+	progress.Item(ctx, "Selecting source tree")
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
 		return "", "", err

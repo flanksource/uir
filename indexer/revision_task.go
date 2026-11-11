@@ -34,7 +34,7 @@ func StartRevisionTask(ctx context.Context, indexer *Indexer, options RevisionOp
 	if len(short) > 12 {
 		short = short[:12]
 	}
-	group := clicky.StartGroup[ModuleResult](fmt.Sprintf("Index %s@%s", options.RootKey, short), clickytask.WithKind(ModuleIndexKind),
+	group := clicky.StartGroup[ModuleResult](fmt.Sprintf("Index %s@%s", options.RootKey, short), clickytask.WithGroupContext(ctx), clickytask.WithKind(ModuleIndexKind),
 		clickytask.WithLabels(map[string]string{"root": options.RootKey, "commit": options.Commit, "reason": string(options.Reason)}),
 		clickytask.WithGroupIdentity(fmt.Sprintf("%s:%s@%s tests=%t", ModuleIndexKind, options.RootKey, options.Commit, options.IncludeTests)),
 		clickytask.WithDetailsProvider(details.details))
@@ -46,7 +46,7 @@ func StartRevisionTask(ctx context.Context, indexer *Indexer, options RevisionOp
 	group.Add(options.RootKey+"@"+short, func(taskContext commonscontext.Context, progress *clickytask.Task) (ModuleResult, error) {
 		started := time.Now()
 		progress.Infof("indexing %s at %s from %s", options.RootKey, options.Commit, options.Checkout)
-		result, err := runIndexTask(taskContext, details, progress, func(ctx context.Context) (ModuleResult, error) {
+		result, err := runIndexTask(taskContext, details, func(ctx context.Context) (ModuleResult, error) {
 			return indexer.IndexRevision(ctx, options)
 		})
 		if err != nil {

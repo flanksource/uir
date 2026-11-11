@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+
+	"github.com/flanksource/clicky/task"
 )
 
 type CheckOptions struct {
@@ -116,7 +118,7 @@ func (indexer *Indexer) checkContext(ctx context.Context, root discoveredRoot, i
 	if reason == "" {
 		return nil
 	}
-	if log, found := ctx.Value(phaseLogKey{}).(phaseLog); found {
+	if log := task.TaskFromContext(ctx); log != nil {
 		log.Infof("check-current: %s at %s: %s", root.RootKey, root.LocalPath, reason)
 	}
 	extracted, err := extractModule(ctx, extractOptions{loadPackages: indexer.loadPackages, root: root, includeTests: includeTests})

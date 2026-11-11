@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 	"golang.org/x/mod/modfile"
 )
@@ -58,6 +60,8 @@ type discoveredFile struct {
 }
 
 func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredRoot, options discoveryOptions) error {
+	ctx, finish := progress.Begin(ctx, "Filesystem", 0)
+	defer finish()
 	if options.Source == nil {
 		if err := observeCheckpoint(ctx, root.LocalPath); err != nil {
 			return err
@@ -98,11 +102,13 @@ func populateRoot(ctx context.Context, root *discoveredRoot, roots []discoveredR
 		if !visible.Contains(current) {
 			return nil
 		}
+		progress.Item(ctx, current)
 		file, err := readDiscoveredFile(current, root.LocalPath, entry, moduleCache)
 		if err != nil {
 			return err
 		}
 		root.Files = append(root.Files, file)
+		progress.Advance(ctx, 1)
 		return nil
 	})
 	if err != nil {
@@ -294,6 +300,9 @@ func shouldSkipRootDiscovery(name string) bool {
 }
 
 func gitValue(ctx context.Context, directory string, args ...string) string {
+	ctx, finish := progress.Begin(ctx, "Git", 0)
+	defer finish()
+	progress.Item(ctx, strings.Join(args, " "))
 	commandArgs := append([]string{"-C", directory}, args...)
 	output, err := exec.CommandContext(ctx, "git", commandArgs...).Output()
 	if err != nil {

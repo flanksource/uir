@@ -10,31 +10,16 @@ import (
 	"time"
 
 	rpchttp "github.com/flanksource/clicky/rpc/http"
+	"github.com/flanksource/clicky/task"
 )
 
 type phaseKey struct{}
-type phaseLogKey struct{}
 type progressKey struct{}
-
-// phaseLog is where a phase reports its outcome, the phases running and the task's progress: a run's
-// task, a *clickytask.Task.
-type phaseLog interface {
-	Infof(format string, args ...any)
-	Errorf(format string, args ...any)
-	SetDescription(description string)
-	Description() string
-	SetProgress(value, maximum int)
-}
-
-// withPhaseLog makes every phase run under ctx log one line to log when it ends.
-func withPhaseLog(ctx context.Context, log phaseLog) context.Context {
-	return context.WithValue(ctx, phaseLogKey{}, log)
-}
 
 // phaseCounts is one running phase's counters, in the order they were first counted.
 type phaseCounts struct {
 	depth      int
-	log        phaseLog
+	taskID     string
 	breadcrumb string
 	mu         sync.Mutex
 	counters   []rpchttp.TimingCounter
@@ -64,19 +49,22 @@ func PhaseCount(ctx context.Context, counter string, value int64) {
 // made inside it, is added to the server timings in ctx, and it logs one line to the phase log in ctx.
 // While it runs, the phase log's description is the breadcrumb of the phases running on that log.
 func Phase(ctx context.Context, name string, fn func(context.Context) error) error {
-	counts := &phaseCounts{breadcrumb: name, counters: []rpchttp.TimingCounter{{Name: "calls", Value: 1}}}
-	log, logged := ctx.Value(phaseLogKey{}).(phaseLog)
+	counts := &phaseCounts{breadcrumb: displayPhase(name), counters: []rpchttp.TimingCounter{{Name: "calls", Value: 1}}}
+	log := task.TaskFromContext(ctx)
+	logged := log != nil
 	parent, nested := ctx.Value(phaseKey{}).(*phaseCounts)
 	if nested {
 		counts.depth = parent.depth + 1
 	}
 	if logged {
-		counts.log = log
-		if nested && parent.log == log {
-			counts.breadcrumb = parent.breadcrumb + " › " + name
+		counts.taskID = log.ID()
+		if nested && parent.taskID == log.ID() && counts.breadcrumb == "" {
+			counts.breadcrumb = parent.breadcrumb
 		}
-		defer log.SetDescription(log.Description())
-		log.SetDescription(counts.breadcrumb)
+		if displayPhase(name) != "" {
+			defer log.SetDescription(log.Description())
+			log.SetDescription(counts.breadcrumb)
+		}
 	}
 	started := time.Now()
 	var err error
@@ -87,7 +75,7 @@ func Phase(ctx context.Context, name string, fn func(context.Context) error) err
 	counts.mu.Lock()
 	defer counts.mu.Unlock()
 	rpchttp.AddTiming(ctx, rpchttp.TimingMetric{Name: name, Duration: elapsed, Counters: counts.counters})
-	if log, logged := ctx.Value(phaseLogKey{}).(phaseLog); logged {
+	if log := task.TaskFromContext(ctx); log != nil {
 		logPhase(log, counts, name, elapsed, err)
 	}
 	return err
@@ -97,14 +85,15 @@ func Phase(ctx context.Context, name string, fn func(context.Context) error) err
 // and each versioned dependency it found to index, and how many of them are done.
 type progressUnits struct {
 	mu          sync.Mutex
-	log         phaseLog
 	done, total int
 }
 
 // withProgressUnits starts log's progress at none done of one unit, the task's own module.
-func withProgressUnits(ctx context.Context, log phaseLog) context.Context {
-	log.SetProgress(0, 1)
-	return context.WithValue(ctx, progressKey{}, &progressUnits{log: log, total: 1})
+func withProgressUnits(ctx context.Context) context.Context {
+	if current := task.TaskFromContext(ctx); current != nil {
+		current.SetProgress(0, 1)
+	}
+	return context.WithValue(ctx, progressKey{}, &progressUnits{total: 1})
 }
 
 // addProgress adds total units found and done units finished to the task progress in ctx, and reports
@@ -118,10 +107,12 @@ func addProgress(ctx context.Context, total, done int) {
 	defer units.mu.Unlock()
 	units.total += total
 	units.done += done
-	units.log.SetProgress(units.done, units.total)
+	if current := task.TaskFromContext(ctx); current != nil {
+		current.SetProgress(units.done, units.total)
+	}
 }
 
-func logPhase(log phaseLog, counts *phaseCounts, name string, elapsed time.Duration, err error) {
+func logPhase(log *task.Task, counts *phaseCounts, name string, elapsed time.Duration, err error) {
 	line := strings.Repeat("  ", counts.depth) + name
 	if err != nil {
 		line += " failed after"
@@ -134,5 +125,24 @@ func logPhase(log phaseLog, counts *phaseCounts, name string, elapsed time.Durat
 		log.Errorf("%s: %v", line, err)
 		return
 	}
-	log.Infof("%s", line)
+	if displayPhase(name) == "" {
+		log.Debugf("%s", line)
+	} else {
+		log.Infof("%s", line)
+	}
+}
+
+func displayPhase(name string) string {
+	switch name {
+	case "discover", "fingerprint-check", "verify-inputs":
+		return "Filesystem"
+	case "typecheck", "extract", "render-documents":
+		return "Analyzing types"
+	case "dependencies", "local-deps", "versioned-deps":
+		return "Dependencies"
+	case "checkout", "revision-base":
+		return "Git"
+	default:
+		return ""
+	}
 }
