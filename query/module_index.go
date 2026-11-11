@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/uir"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -158,6 +159,8 @@ func (index *indexContext) prefetch(ctx context.Context, postings []scopedPostin
 		pending[posting.document] = active
 		missing = append(missing, posting.document)
 	}
+	ctx, finish := documentProgress(ctx, len(missing))
+	defer finish()
 	for start := 0; start < len(missing); start += lookupBatch {
 		batch := missing[start:min(start+lookupBatch, len(missing))]
 		contents, err := storage.DocumentContents(ctx, index.database, batch)
@@ -166,6 +169,7 @@ func (index *indexContext) prefetch(ctx context.Context, postings []scopedPostin
 		}
 		for _, id := range batch {
 			active := pending[id]
+			progress.Item(ctx, active.Source.PackagePath+" › "+active.Source.PathKey)
 			active.Document.Content = contents[id]
 			decoded, err := decodeActive(active, index.kinds)
 			if err != nil {
@@ -173,6 +177,7 @@ func (index *indexContext) prefetch(ctx context.Context, postings []scopedPostin
 			}
 			index.decoded[id] = decoded
 			index.cache.documents.put(id, decoded)
+			progress.Advance(ctx, 1)
 		}
 	}
 	return nil

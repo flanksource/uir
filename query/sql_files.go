@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/flanksource/uir/internal/buildconstraint"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -60,8 +61,11 @@ func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOpt
 				return nil, fmt.Errorf("source metrics of snapshot %s: %w", scope.snapshot.ID, err)
 			}
 		}
+		fileCtx, finish := documentProgress(ctx, len(active))
+		defer finish()
 		for _, path := range slices.Sorted(maps.Keys(active)) {
 			document := active[path]
+			progress.Item(fileCtx, document.Source.PackagePath+" › "+path)
 			match := ModuleMatch{Kind: "file", RootKey: scope.root.RootKey, Location: scope.location.CanonicalPath,
 				SnapshotID: scope.snapshot.ID.String(), Path: path, PackagePath: document.Source.PackagePath,
 				SourceID: document.Source.ID.String(), Coverage: string(document.Document.Coverage)}
@@ -76,6 +80,7 @@ func (pipeline *Pipeline) sqlFileRecords(ctx context.Context, options sqlFileOpt
 				values["file.lines"] = count
 			}
 			records = append(records, sqlRecord{match: match, values: values})
+			progress.Advance(fileCtx, 1)
 		}
 		if options.buildConstraint {
 			if err := pipeline.sqlFileBuildConstraints(ctx, scope, records[start:], active, &builds); err != nil {

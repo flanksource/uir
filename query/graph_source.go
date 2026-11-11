@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/graph"
 	"github.com/flanksource/uir/storage"
@@ -122,9 +124,11 @@ func (source *indexGraphSource) packageFacts(group string) graphPackageFacts {
 }
 
 func (source *indexGraphSource) Describe(ctx context.Context, id string) (graph.Node, error) {
-	if _, err := source.symbol(ctx, id); err != nil {
+	symbol, err := source.symbol(ctx, id)
+	if err != nil {
 		return graph.Node{}, err
 	}
+	progress.Item(ctx, symbol.QueryName)
 	return source.nodes[id], nil
 }
 
