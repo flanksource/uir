@@ -51,6 +51,21 @@ uir diff HEAD~1..HEAD --visibility all --stat
 
 ## Comparing with the worktree
 
+### Emit a patch for selective staging
+
+`--patch` emits complete original Git hunks selected by `--visibility` and `--change-type`. It supports stdin, worktree comparisons and Git commit ranges. It writes patch bytes only; it does not stage changes. A hunk mixing selected edits with other edits fails before any output. Use smaller input hunks (`git diff -U0`; apply these with `git apply --unidiff-zero`) or separate the edits first. Fully selected file additions/deletions include package/import scaffolding and declaration separators.
+
+```sh
+mkdir -p .tmp
+git diff --full-index --no-renames | uir diff --patch --visibility all --change-type moved,renamed > .tmp/refactors.patch
+git apply --cached --check .tmp/refactors.patch
+git apply --cached .tmp/refactors.patch
+```
+
+Use `git diff` to base the patch on the current index and preserve existing staged changes. `uir diff HEAD --patch --untracked` instead compares HEAD with the worktree, including untracked destinations; its patch requires an index matching that base. No matches emit an empty patch successfully. `--patch` is incompatible with formatted output, `--stat`, HTTP requests and external roots without Git hunks.
+
+`renamed` pairs unique Go declarations whose tokens differ only in their own declared name and resolved self references, with unchanged visibility and implementation. The row exposes `name_before` and its current `name`. Ambiguous candidates remain added/removed. Selected renames also include original reference-only edits proven by Go symbol resolution. Unresolved references are not selected by spelling, and a selected reference line containing other edits is rejected. No edits outside the supplied comparison are synthesized.
+
 `uir diff <rev>` is `git diff <rev>`: it runs `git diff --full-index --no-renames <commit>` in the checkout the revision resolved in (the current checkout, or `--location`) and diffs that patch as below, without the index. A pure rename would carry no blob ids, and symbols pair across files on their own. `from.commit` is the resolved commit and `to.commit` is `worktree` when any side was read from the worktree. `--snapshot-from`, `--snapshot-to`, `--auto-index`, and `--include-tests` apply to two commits and fail with a single revision; over HTTP a single revision is refused, because the server's worktree is not the caller's.
 
 Untracked files are not part of it, as with git, unless `--untracked` is set. Then the diff runs against a temporary copy of the index (`GIT_INDEX_FILE`) in which every file `git ls-files --others --exclude-standard` lists is marked intent-to-add, so those files appear as new files and a symbol moved into one pairs as `moved`. The checkout's own index is never written. `--untracked` with a range or a patch on stdin fails.
@@ -122,7 +137,7 @@ A document is decoded only when the output needs it. With `--stat`, every change
 
 Imports are not symbols, and a syntax shape names a package by its alias (`cel.Env`), so a module path change behind an unchanged alias leaves every hash equal. Each document records its file's imports (alias and path, format 11), and a file on both sides gets one `import` row per alias whose path changed or that one side alone imports (a blank or dot import is keyed by its path): `shape_before` and `shape_after` are the paths. Reordering an import block reports nothing, and an added or removed file's imports are not reported. An import binds a name in its file only, so its visibility is `internal`: import rows are shown by `--visibility internal` and `all`, never by `exported`. A commit-to-commit diff that shows them reads both sides' documents of every changed file on both sides.
 
-A rename is `removed` plus `added`, because the name is part of the identity. A parameter-type change is too, because parameter types are part of the identity; when exactly one removed and one added symbol share package, kind, owner, and name, both rows carry the same `group`, and the added row carries the old shape and a shape diff against it, so the change reads as one signature edit.
+A unique pure Go declaration rename is `renamed`, with `name_before` recording its old name. Ambiguous candidates remain `removed` plus `added`, because the name is part of the identity. A parameter-type change is also removed plus added, because parameter types are part of the identity; when exactly one removed and one added symbol share package, kind, owner, and name, both rows carry the same `group`, and the added row carries the old shape and a shape diff against it, so the change reads as one signature edit.
 
 A move to another package changes the identity too, because the package is part of it. After identity matching, the removed and added symbols are grouped by kind, owner, and name; a group of exactly one removed and one added symbol in different packages is paired when their full shapes are equal once the qualifiers naming either package (by its last import path element) are removed, since a move turns `models.Item` into `Item` and back. Both documents are read for it, and the pair is classified by its layer hashes like any other: `moved` only when nothing but its file changed, otherwise `signature`, `structure`, or `body`. `moved` is a pure move; a symbol that moved and changed keeps its changed class and is still reported under both files. The output never guesses other pairings: a name with two candidates on either side stays `removed` plus `added`.
 

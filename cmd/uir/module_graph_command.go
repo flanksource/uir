@@ -13,6 +13,7 @@ import (
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/uir/graph"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/query"
 	"github.com/flanksource/uir/symboldiff"
 	"github.com/spf13/cobra"
@@ -79,14 +80,16 @@ type moduleGraphResult struct {
 func registerModuleGraphCommand(root *cobra.Command) {
 	var command *cobra.Command
 	command = clicky.AddNamedCommandWithContext("graph", root, moduleGraphOptions{}, func(ctx context.Context, options moduleGraphOptions) (moduleGraphResult, error) {
-		if options.File != "" || options.Path != "" || options.Dialect != "" || !options.Index {
-			return graphFile(ctx, options, command.InOrStdin())
-		}
-		database, err := databaseFor(ctx)
-		if err != nil {
-			return moduleGraphResult{}, err
-		}
-		return graphModules(ctx, database, options)
+		return progress.Run(ctx, "Graphing", "module-graph", func(ctx context.Context) (moduleGraphResult, error) {
+			if options.File != "" || options.Path != "" || options.Dialect != "" || !options.Index {
+				return graphFile(ctx, options, command.InOrStdin())
+			}
+			database, err := databaseFor(ctx)
+			if err != nil {
+				return moduleGraphResult{}, err
+			}
+			return graphModules(ctx, database, options)
+		})
 	})
 	// Use names no argument: the API generator would publish a second selector parameter beside the flag.
 	command.Short = "Draw the callers and callees of one function or method, or the readers and writers of a data symbol"
@@ -190,16 +193,21 @@ func readGraphFile(ctx context.Context, options moduleGraphOptions, stdin io.Rea
 		return query.GraphFile{}, invalid("--since compares indexed snapshots of a root, not a file")
 	}
 	file := query.GraphFile{Path: options.Path, Dialect: options.Dialect}
+	ctx, finish := progress.Begin(ctx, "Filesystem", 1)
+	defer finish()
+	progress.Item(ctx, options.File)
 	var err error
 	if options.File == "-" {
 		if file.Content, err = io.ReadAll(stdin); err != nil {
 			return query.GraphFile{}, fmt.Errorf("read the graph file from stdin: %w", err)
 		}
+		progress.Advance(ctx, 1)
 		return file, nil
 	}
 	if file.Content, err = os.ReadFile(options.File); err != nil {
 		return query.GraphFile{}, fmt.Errorf("read the graph file %q: %w", options.File, err)
 	}
+	progress.Advance(ctx, 1)
 	if file.Path == "" {
 		file.Path = options.File
 	}

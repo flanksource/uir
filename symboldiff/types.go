@@ -49,7 +49,7 @@ func (visibility Visibility) shows(class Class, symbol string) bool {
 // filters rows after symbols are paired, so it never changes how a symbol is classified.
 type ChangeTypes []string
 
-var classes = []Class{ClassAdded, ClassRemoved, ClassSignature, ClassStructure, ClassBody, ClassFormat, ClassMoved, ClassImport}
+var classes = []Class{ClassAdded, ClassRemoved, ClassSignature, ClassStructure, ClassBody, ClassFormat, ClassMoved, ClassRenamed, ClassImport}
 
 // ParseChangeTypes validates --change-type patterns: each, without its !, must match at least one class.
 func ParseChangeTypes(patterns []string) (ChangeTypes, error) {
@@ -95,6 +95,7 @@ const (
 	ClassBody      Class = "body"
 	ClassFormat    Class = "format"
 	ClassMoved     Class = "moved"
+	ClassRenamed   Class = "renamed"
 	ClassImport    Class = "import"
 )
 
@@ -127,7 +128,8 @@ const (
 
 // Options selects the root, the revisions to compare, and what the diff reports.
 type Options struct {
-	RootKey string
+	EmitPatch bool
+	RootKey   string
 	// Revisions is what git diff takes: one spec (A..B, A.., ..B, A...B, A^!, A^-n, or a single
 	// revision, compared against the worktree) or two revisions. pr:N names a pull request's head.
 	Revisions    []string
@@ -170,6 +172,7 @@ func (count *LineCount) add(other LineCount) {
 // LinesError is set when a commit has no registered checkout: every file then carries it too, and
 // manifests cannot be compared.
 type Result struct {
+	Patch       []byte        `json:"-"`
 	RootKey     string        `json:"root_key"`
 	From        Side          `json:"from"`
 	To          Side          `json:"to"`
@@ -218,6 +221,7 @@ type FileDiff struct {
 // rows, over the private shapes; and for the added half of a removed-plus-added pair (Group), where it
 // diffs the old identity's shape against the new one.
 type Row struct {
+	NameBefore  string     `json:"name_before,omitempty"`
 	Class       Class      `json:"class"`
 	Kind        string     `json:"kind"`
 	Owner       string     `json:"owner,omitempty"`

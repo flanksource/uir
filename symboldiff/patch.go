@@ -1,6 +1,7 @@
 package symboldiff
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
@@ -52,7 +53,8 @@ type SourceLocator interface {
 
 // PatchOptions names a git patch, the locator its sides are read from, and what the diff reports.
 type PatchOptions struct {
-	Patch io.Reader
+	EmitPatch bool
+	Patch     io.Reader
 	// From is the commit the patch's old side was taken from, when known; empty names it patch:old.
 	From        string
 	Locator     SourceLocator
@@ -76,7 +78,14 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 	if options.Locator == nil {
 		return Result{}, fmt.Errorf("a patch diff needs a source locator to read its sides from")
 	}
-	patch, err := ParsePatch(options.Patch)
+	raw, err := io.ReadAll(options.Patch)
+	if err != nil {
+		return Result{}, fmt.Errorf("read patch: %w", err)
+	}
+	if options.EmitPatch && len(raw) == 0 {
+		return Result{Patch: []byte{}}, nil
+	}
+	patch, err := ParsePatch(bytes.NewReader(raw))
 	if err != nil {
 		return Result{}, err
 	}
@@ -119,6 +128,12 @@ func DiffPatch(ctx context.Context, options PatchOptions) (Result, error) {
 		return Result{}, err
 	}
 	result.Packages = assemble(files, rows, attribution, markers, nil, rootKey, len(changeTypes) > 0)
+	if options.EmitPatch {
+		result.Patch, err = selectPatch(raw, files, rows)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	return result, nil
 }
 
@@ -248,7 +263,11 @@ func patchPairings(files []changedFile) ([]*pairing, error) {
 			}
 		}
 	}
-	return pairAcrossPackages(matchSymbols(entries[0], entries[1]))
+	pairs, err := pairAcrossPackages(matchSymbols(entries[0], entries[1]))
+	if err != nil {
+		return nil, err
+	}
+	return pairRenames(files, pairs)
 }
 
 func patchMarkers(files []changedFile) coverageMarkers {

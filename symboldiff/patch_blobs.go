@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"golang.org/x/mod/modfile"
 )
 
@@ -47,6 +49,9 @@ func NewGitLocator(ctx context.Context, directory string) (*GitLocator, error) {
 }
 
 func runGit(ctx context.Context, directory, stdin string, args ...string) ([]byte, error) {
+	ctx, finish := progress.Begin(ctx, "Git", 0)
+	defer finish()
+	progress.Item(ctx, strings.Join(args, " "))
 	return gitRun{directory: directory, stdin: stdin}.output(ctx, args...)
 }
 

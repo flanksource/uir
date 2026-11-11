@@ -216,7 +216,7 @@ var _ = Describe("DiffPatch", func() {
 	It("refuses a change type that names no class", func(ctx SpecContext) {
 		repo := newPatchRepository()
 		_, err := DiffPatch(ctx, PatchOptions{Patch: strings.NewReader(patchOf(repo, "HEAD~1")), Locator: gitLocator(ctx, repo), Visibility: VisibilityAll, ChangeTypes: ChangeTypes{"!removd"}})
-		Expect(err).To(MatchError(`change type "!removd" matches none of added, removed, signature, structure, body, format, moved, import`))
+		Expect(err).To(MatchError(`change type "!removd" matches none of added, removed, signature, structure, body, format, moved, renamed, import`))
 	})
 
 	It("reads a worktree diff's new side from the worktree and counts lines as git does", func(ctx SpecContext) {

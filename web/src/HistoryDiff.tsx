@@ -23,7 +23,7 @@ function ChangeRow({ row, onOpen }: { row: SymbolChange; onOpen: OpenChange }) {
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-baseline gap-2">
         <button type="button" className="break-all text-left font-mono font-medium hover:underline" title={`Open ${name} in Explorer`} aria-label={`Open ${name} in Explorer`}
-          onClick={() => onOpen(row)}>{name}</button>
+          onClick={() => onOpen(row)}>{row.name_before ? `${row.name_before} → ${name}` : name}</button>
         <span className={`text-xs font-medium ${row.class === "added" ? "text-emerald-600" : row.class === "removed" ? "text-red-600" : "text-sky-600"}`}>{row.class}</span>
         {row.lines && <span className="ml-auto font-mono text-xs text-muted-foreground">+{row.lines.added} −{row.lines.removed}</span>}
       </div>
@@ -49,7 +49,7 @@ function DiffTree({ diff, group, onOpen }: { diff: SymbolDiff; group: Route["his
   if (countChanges(diff) === 0) return <div className="rounded-md border border-border bg-card p-4 text-sm">No symbol changes in this range.</div>;
   if (group === "change") {
     const rows = diff.packages.flatMap((pkg) => pkg.files.flatMap((file) => file.rows.filter((row) => !row.moved_away).map((row) => ({ pkg: pkg.path, file: file.path, row }))));
-    return <div className="rounded-md border border-border bg-card p-3">{(["added", "removed", "signature", "structure", "body", "moved"] as const).map((kind) => {
+    return <div className="rounded-md border border-border bg-card p-3">{(["added", "removed", "signature", "structure", "body", "format", "import", "moved", "renamed"] as const).map((kind) => {
       const matching = rows.filter(({ row }) => row.class === kind);
       return matching.length ? <details key={kind} open className="border-b border-border last:border-0">
         <summary className="cursor-pointer py-2 text-sm font-semibold capitalize">{kind} <span className="font-normal text-muted-foreground">{matching.length}</span></summary>

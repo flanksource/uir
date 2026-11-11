@@ -23,6 +23,7 @@ var classThemes = map[Class]changeTheme{
 	ClassBody:      {icon: icons.Code, style: uir.StyleDiffBody},
 	ClassFormat:    {icon: icons.Style, style: uir.StyleDim},
 	ClassMoved:     {icon: icons.Rename, style: uir.StyleDiffMoved},
+	ClassRenamed:   {icon: icons.Rename, style: uir.StyleDiffMoved},
 	ClassImport:    {icon: icons.Dependency, style: uir.StyleDiffSignature},
 }
 
@@ -119,6 +120,9 @@ func (row Row) tree(stat bool) api.TextTree {
 	}
 	if row.Note != "" {
 		label = label.Append("  ("+row.Note+")", uir.StyleDim)
+	}
+	if row.NameBefore != "" {
+		label = label.Append("  from "+row.NameBefore, uir.StyleDim)
 	}
 	if shape := row.singleShape(); shape != "" {
 		label = label.Append("  " + shape)

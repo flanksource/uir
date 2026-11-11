@@ -278,8 +278,8 @@ export type GitCommit = { commit: string; parents: string[]; subject: string; au
   snapshot_id?: string; snapshot_reason?: SnapshotReason; snapshot_completed_at?: string };
 export type GitHistory = { root_key: string; location: string; branches: GitRef[]; commits: GitCommit[];
   pull_requests: { number: number; commit: string }[]; pull_request_error?: string };
-export type SymbolChange = { class: "added" | "removed" | "signature" | "structure" | "body" | "moved"; kind: string;
-  owner?: string; name: string; visibility: string; shape_before?: string; shape_after?: string;
+export type SymbolChange = { class: "added" | "removed" | "signature" | "structure" | "body" | "format" | "import" | "moved" | "renamed"; kind: string;
+  owner?: string; name: string; name_before?: string; visibility: string; shape_before?: string; shape_after?: string;
   shape_diff?: { op: string; text: string; paired?: boolean; tokenizer?: "go" | "text"; tokens: { op: string; text: string }[] }[];
   path_before?: string; path_after?: string; lines?: { added: number; removed: number }; coverage?: string[]; note?: string;
   /** The copy of a moved row reported under the file the symbol left. */

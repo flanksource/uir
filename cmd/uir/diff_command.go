@@ -12,16 +12,18 @@ import (
 	"github.com/flanksource/clicky"
 	"github.com/flanksource/clicky/entity"
 	"github.com/flanksource/uir/indexer"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/symboldiff"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
 
 type diffOptions struct {
+	Patch        bool     `flag:"patch" help:"Emit selected changes as original Git hunks for git apply --cached; reject mixed hunks"`
 	Revisions    []string `args:"true"`
 	Root         string   `flag:"root" help:"Module path of the revisions; defaults to the module of the current checkout"`
 	Visibility   string   `flag:"visibility" help:"Rows to report: exported, internal, or all" default:"exported"`
-	ChangeType   []string `flag:"change-type" help:"Row classes to report: added, removed, signature, structure, body, format, moved, import; * and ! patterns (repeatable or comma separated; default all)"`
+	ChangeType   []string `flag:"change-type" help:"Row classes to report: added, removed, signature, structure, body, format, moved, renamed, import; * and ! patterns (repeatable or comma separated; default all)"`
 	Untracked    bool     `flag:"untracked" help:"Compare untracked files that are not ignored as new files when a revision is compared against the worktree"`
 	Stat         bool     `flag:"stat" help:"Add per-file and per-symbol line counts from hash-verified Git blobs, or an external root's stored blobs"`
 	SnapshotFrom string   `flag:"snapshot-from" help:"Snapshot UUID to use for <from> instead of its newest clean snapshot"`
@@ -33,15 +35,26 @@ type diffOptions struct {
 
 func registerDiffCommand(root *cobra.Command) {
 	var command *cobra.Command
-	command = clicky.AddNamedCommandWithContext("diff", root, diffOptions{}, func(ctx context.Context, options diffOptions) (symboldiff.Result, error) {
-		visibility, err := symboldiff.ParseVisibility(options.Visibility)
-		if err != nil {
-			return symboldiff.Result{}, err
+	command = clicky.AddNamedCommandWithContext("diff", root, diffOptions{}, func(ctx context.Context, options diffOptions) (diffCommandResult, error) {
+		if options.Patch {
+			if detachedRequest(ctx) {
+				return diffCommandResult{}, entity.NewStatusError(http.StatusBadRequest, "patch_output", "--patch is a CLI output mode")
+			}
+			if options.Stat || patchFormatSelected(command) {
+				return diffCommandResult{}, fmt.Errorf("--patch cannot be combined with --stat or --format")
+			}
 		}
-		if len(options.Revisions) == 0 || slices.Equal(options.Revisions, []string{"-"}) {
-			return diffPatch(ctx, options, visibility, command.InOrStdin())
-		}
-		return diffRevisions(ctx, options, visibility)
+		result, err := progress.Run(ctx, "Comparing revisions", "module-diff", func(ctx context.Context) (symboldiff.Result, error) {
+			visibility, err := symboldiff.ParseVisibility(options.Visibility)
+			if err != nil {
+				return symboldiff.Result{}, err
+			}
+			if len(options.Revisions) == 0 || slices.Equal(options.Revisions, []string{"-"}) {
+				return diffPatch(ctx, options, visibility, command.InOrStdin())
+			}
+			return diffRevisions(ctx, options, visibility)
+		})
+		return diffCommandResult{Result: result, patch: options.Patch}, err
 	})
 	command.Use = "diff [<range> | <rev> | <from> <to> | -]"
 	command.Short = "List symbols added, removed, and changed between two indexed commits, between a commit and the worktree, or in a git patch on stdin"
@@ -75,7 +88,8 @@ func diffRevisions(ctx context.Context, options diffOptions, visibility symboldi
 		return symboldiff.Result{}, err
 	}
 	request := symboldiff.Options{
-		RootKey: rootKey, Revisions: options.Revisions, SnapshotFrom: options.SnapshotFrom, SnapshotTo: options.SnapshotTo,
+		EmitPatch: options.Patch,
+		RootKey:   rootKey, Revisions: options.Revisions, SnapshotFrom: options.SnapshotFrom, SnapshotTo: options.SnapshotTo,
 		Visibility: visibility, ChangeTypes: options.ChangeType, Stat: options.Stat, AutoIndex: options.AutoIndex, IncludeTests: options.IncludeTests, Location: location,
 	}
 	resolution, err := symboldiff.ResolveRevisions(ctx, database, request)
@@ -143,7 +157,8 @@ func diffWorktree(ctx context.Context, options diffOptions, visibility symboldif
 		return symboldiff.Result{}, err
 	}
 	return symboldiff.DiffPatch(ctx, symboldiff.PatchOptions{
-		Patch: patch, From: resolution.From, Locator: locator, Visibility: visibility, ChangeTypes: options.ChangeType, Stat: options.Stat,
+		EmitPatch: options.Patch,
+		Patch:     patch, From: resolution.From, Locator: locator, Visibility: visibility, ChangeTypes: options.ChangeType, Stat: options.Stat,
 	})
 }
 
@@ -168,7 +183,37 @@ func diffPatch(ctx context.Context, options diffOptions, visibility symboldiff.V
 	if err != nil {
 		return symboldiff.Result{}, err
 	}
-	return symboldiff.DiffPatch(ctx, symboldiff.PatchOptions{Patch: stdin, Locator: locator, Visibility: visibility, ChangeTypes: options.ChangeType, Stat: options.Stat})
+	return symboldiff.DiffPatch(ctx, symboldiff.PatchOptions{EmitPatch: options.Patch, Patch: stdin, Locator: locator, Visibility: visibility, ChangeTypes: options.ChangeType, Stat: options.Stat})
+}
+
+type diffCommandResult struct {
+	symboldiff.Result
+	patch bool
+}
+
+func patchFormatSelected(command *cobra.Command) bool {
+	for _, name := range []string{"format", "json", "yaml", "csv", "html", "markdown", "pdf", "pretty", "llm", "tree", "table"} {
+		if command.Flags().Changed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (result diffCommandResult) WriteFormat(writer io.Writer, options clicky.FormatOptions) error {
+	if result.patch {
+		_, err := writer.Write(result.Patch)
+		return err
+	}
+	output, err := clicky.Format(result.Result, options)
+	if err != nil {
+		return err
+	}
+	if output != "" && !strings.HasSuffix(output, "\n") {
+		output += "\n"
+	}
+	_, err = io.WriteString(writer, output)
+	return err
 }
 
 // setFlags is the sorted names of the flags that are set.

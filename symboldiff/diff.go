@@ -55,11 +55,21 @@ func Diff(ctx context.Context, database *gorm.DB, options Options) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	files, pairings, markers, err := compareSnapshots(ctx, database, [2]selectedSide{before, after}, visibility, options.Stat)
+	files, pairings, markers, err := compareSnapshots(ctx, database, [2]selectedSide{before, after}, visibility, options.Stat || options.EmitPatch)
+	if err != nil {
+		return Result{}, err
+	}
+	pairings, err = snapshotRenames(ctx, database, scope, files, pairings, [2]selectedSide{before, after})
 	if err != nil {
 		return Result{}, err
 	}
 	result := Result{RootKey: scope.root.RootKey, From: before.info(), To: after.info(), Visibility: visibility, ChangeTypes: changeTypes, Stat: options.Stat, Packages: []PackageDiff{}}
+	if options.EmitPatch {
+		result.Patch, err = snapshotPatch(ctx, database, scope, files, pairings, markers, [2]selectedSide{before, after}, rowFilter{visibility: visibility, changeTypes: changeTypes})
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	var attribution *lineAttribution
 	var manifests []FileDiff
 	if options.Stat {
@@ -242,7 +252,7 @@ type reportedRow struct {
 	visible bool
 }
 
-var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2, ClassStructure: 3, ClassBody: 4, ClassFormat: 5, ClassMoved: 6, ClassImport: 7}
+var classOrder = map[Class]int{ClassRemoved: 0, ClassAdded: 1, ClassSignature: 2, ClassStructure: 3, ClassBody: 4, ClassFormat: 5, ClassMoved: 6, ClassRenamed: 7, ClassImport: 8}
 
 // buildRows turns changed pairings, and the changed imports of files, into rows. An unchanged pairing
 // whose source bytes differ (comments or layout inside the extent) is a format row: compared byte for
