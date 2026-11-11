@@ -9,6 +9,7 @@ import (
 
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/graph"
+	"github.com/flanksource/uir/internal/progress"
 	"github.com/flanksource/uir/storage"
 	"github.com/flanksource/uir/storage/symbolhandle"
 	"github.com/google/uuid"
@@ -241,6 +242,8 @@ type graphWalk struct {
 }
 
 func buildIndexedGraph(ctx context.Context, index *compactIndex, request graphBuild) (graphWalk, error) {
+	ctx, finish := progress.Begin(ctx, "Graphing", 0)
+	defer finish()
 	sources := newScopeSources(index.indexContext)
 	reader := newGuardReader(index.database, sources)
 	options := request.options

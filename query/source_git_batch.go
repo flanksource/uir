@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 )
 
@@ -126,6 +128,9 @@ func (git *gitSources) fail(indexes []int, reason func(verifiedSource) error) {
 
 // catFileBatch writes every object name to one git cat-file --batch process and returns its answers.
 func catFileBatch(ctx context.Context, repoRoot string, objects []string) ([]byte, error) {
+	ctx, finish := progress.Begin(ctx, "Git", 0)
+	defer finish()
+	progress.Item(ctx, fmt.Sprintf("Reading %d source blobs", len(objects)))
 	command := exec.CommandContext(ctx, "git", "-C", repoRoot, "cat-file", "--batch", "-Z")
 	command.Stdin = strings.NewReader(strings.Join(objects, "\x00") + "\x00")
 	var stderr bytes.Buffer

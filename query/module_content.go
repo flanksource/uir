@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/flanksource/uir/internal/progress"
+
 	"github.com/flanksource/uir/storage"
 	"gorm.io/gorm"
 )
@@ -53,6 +55,8 @@ type sourceRead struct {
 // blobs. Bytes with any other hash are never returned; a source that cannot be recovered carries the
 // error naming it, and the others are still read.
 func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleScope, sources []verifiedSource, gitReader GitSourceReader) []sourceRead {
+	ctx, finish := progress.Begin(ctx, "Filesystem", len(sources))
+	defer finish()
 	reads := make([]sourceRead, len(sources))
 	if scope.location.Kind == storage.LocationExternal {
 		return readExternalSources(ctx, database, scope, sources, gitReader)
@@ -66,10 +70,14 @@ func readVerifiedSources(ctx context.Context, database *gorm.DB, scope moduleSco
 	}
 	var pending []int
 	for index, source := range sources {
+		progress.Item(ctx, source.path)
 		read, fromGit := readCheckoutSource(ctx, database, scope, resolvedRoot, source)
 		reads[index] = read
 		if fromGit {
 			pending = append(pending, index)
+		}
+		if read.err == nil {
+			progress.Advance(ctx, 1)
 		}
 	}
 	(&gitSources{scope: scope, resolvedRoot: gitDirectory, sources: sources, reads: reads}).read(ctx, pending)
