@@ -69,7 +69,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    uses: flanksource/action-workflows/.github/workflows/publish-multi-platform-docker-image.yml@v1.3.0
+    uses: flanksource/action-workflows/.github/workflows/publish-multi-platform-docker-image.yml@81d560feed9eff0e3e9a2376fb6963a0ee60c413 # v1.4.0
     with:
       login_to_dockerhub: false
       platforms: linux/amd64,linux/arm64
@@ -113,8 +113,7 @@ jobs:
     if: needs.version.outputs.published == 'true'
     permissions:
       contents: write
-    # TODO: repoint to the action-workflows release tag once flanksource/action-workflows#25 merges.
-    uses: flanksource/action-workflows/.github/workflows/publish-release.yml@e17431666cf199925020281f65e212cea7f45629 # feat/publish-release-app-token
+    uses: flanksource/action-workflows/.github/workflows/publish-release.yml@81d560feed9eff0e3e9a2376fb6963a0ee60c413 # v1.4.0
     with:
       tag: ${{ needs.version.outputs.tag }}
     secrets:
