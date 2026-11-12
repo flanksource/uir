@@ -117,4 +117,4 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag }}
     secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      token: ${{ secrets.FLANKBOT }}
