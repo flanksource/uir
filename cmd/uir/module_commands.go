@@ -195,6 +195,7 @@ func (row moduleQueryRow) Row() map[string]any {
 func registerModuleCommands(root *cobra.Command) {
 	registerModuleBrowseCommands(root)
 	registerModuleGraphCommand(root)
+	registerModuleEffectsCommand(root)
 	registerModuleIndexCommands(root)
 	registerModuleStatusCommand(root)
 

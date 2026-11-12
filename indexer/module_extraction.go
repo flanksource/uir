@@ -413,6 +413,12 @@ func countSymbolFacts(content storage.DocumentContent, rows map[string]storage.S
 				return nil, nil, err
 			}
 		}
+		for _, callee := range symbol.ImplicitCalls {
+			if _, known := rows[callee]; !known {
+				return nil, nil, fmt.Errorf("implicit call %s of %s is not a known symbol", callee, *symbol.ID)
+			}
+			needed[callee] = true
+		}
 	}
 	for _, occurrence := range content.Occurrences {
 		if occurrence.Symbol != nil {

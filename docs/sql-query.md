@@ -211,6 +211,14 @@ SELECT symbol.name, path, symbol.generation FROM func:* WHERE symbol.generation 
 
 `uir history symbol <selector>` lists the snapshots, with their commits, at which one symbol's generation advanced. The selector must match exactly one declaration in the current checkout. Generations follow publication order: a historical import published on top of a newer head counts in import order, not commit order.
 
+## Effects and determinism
+
+`symbol.effects` (string) lists, sorted and comma-separated, the external effects of a function, method or package-level variable through everything it calls, references as a function value, or reads or writes as a package-level variable, however deep: `time.read`, `random.read`, `env.read`, `env.write`, `process.read`, `process.write`, `file.read`, `file.write`, `network.io`, `db.read`, `db.write`, `global.read` (a package-level variable indexed code writes), `global.write`, `goroutine`, `channel`, `lock.read`, `lock.write`, `map.order` and `unknown`. `symbol.deterministic` (boolean) is true when none applies other than the lock and `map.order` effects. Library calls are classified by the catalog in `effects/catalog.go`; Methods a catalogued library calls back on the values passed to it (`String` and `Error` for `fmt`, `MarshalJSON` for `encoding/json` including nested fields, `Less` for `sort`, and so on) count as calls. `unknown` is a call through an interface, a function value or a type parameter, a value of interface type or a function value passed to a catalogued library, a function without a body (linkname or assembly), an uncatalogued library function, an unresolved call, or a document indexed before format 12, so determinism is never over-claimed. `time.Date`, `time.Unix` and `time.Parse` are `env.read`, whatever zone they are given. Any file read counts, including files tracked in the repository. Other symbols read `NULL`. Request the fields explicitly; `SELECT *` is unchanged. `uir effects <selector>` reports one symbol's effects with the shortest path to each.
+
+```sql
+SELECT symbol.query_name FROM func:* WHERE symbol.deterministic = TRUE
+```
+
 ## Build constraints
 
 Inspect the explicit modern Go build constraint, including files excluded from the indexed build:

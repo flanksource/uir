@@ -75,9 +75,15 @@ func (builder *documentBuilder) typedDocument(file discoveredFile, typed typedFi
 		return storage.DocumentContent{}, fmt.Errorf("describe occurrences in %q: %w", file.PathKey, err)
 	}
 	assignEnclosing(symbols, occurrences)
+	if !partial {
+		if err := builder.recordEffects(source, symbols); err != nil {
+			return storage.DocumentContent{}, fmt.Errorf("record effects in %q: %w", file.PathKey, err)
+		}
+	}
 	return storage.DocumentContent{
 		Version: storage.DocumentFormatVersion, PackagePath: extracted.PackagePath,
 		Symbols: symbols, Occurrences: occurrences, Diagnostics: diagnostics, Imports: extracted.Imports,
+		EffectsRecorded: !partial,
 	}, nil
 }
 
