@@ -50,9 +50,10 @@ var catalog = map[string][]Effect{
 	"time.NewTimer": set(TimeRead, Channel), "time.NewTicker": set(TimeRead, Channel), "time.Timer.*": set(TimeRead, Channel),
 	"time.Ticker.*": set(TimeRead, Channel), "time.AfterFunc": set(TimeRead, Goroutine), "time.LoadLocation": set(FileRead),
 	"time.Local": set(EnvRead), "time.Time.Local": set(EnvRead),
-	// A time these return is in the local zone, which formatting it reads, and Parse matches a zone
-	// abbreviation against the local zone. time.Date takes its zone, and naming time.Local reads it.
-	"time.Unix": set(EnvRead), "time.UnixMilli": set(EnvRead), "time.UnixMicro": set(EnvRead), "time.Parse": set(EnvRead),
+	// Constructing or parsing a time and date is an external effect, whatever zone it is given: a time
+	// Unix returns is in the local zone, which formatting it reads, and Parse matches a zone abbreviation
+	// against the local zone.
+	"time.Date": set(EnvRead), "time.Unix": set(EnvRead), "time.UnixMilli": set(EnvRead), "time.UnixMicro": set(EnvRead), "time.Parse": set(EnvRead),
 	"context.*": none, "context.WithDeadline": set(TimeRead), "context.WithDeadlineCause": set(TimeRead),
 	"context.WithTimeout": set(TimeRead), "context.WithTimeoutCause": set(TimeRead), "context.AfterFunc": set(Goroutine),
 	"math/rand.*": set(RandomRead), "math/rand.New": none, "math/rand.NewSource": none, "math/rand.NewZipf": none,

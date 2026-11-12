@@ -301,7 +301,7 @@ var _ = Describe("symbol effects", Ordered, ContinueOnFailure, func() {
 		Entry("an assembly function", "func:Asm", false, effects.Unknown),
 		Entry("formatting a time in the local zone", "func:Epoch", false, effects.EnvRead),
 		Entry("a date in the local zone", "func:LocalDate", false, effects.EnvRead),
-		Entry("a date in UTC", "func:UTCDate", true),
+		Entry("a date in UTC", "func:UTCDate", false, effects.EnvRead),
 	)
 
 	It("explains an effect by the shortest path to the symbol that has it", func(ctx SpecContext) {
@@ -327,7 +327,7 @@ var _ = Describe("symbol effects", Ordered, ContinueOnFailure, func() {
 		for _, row := range result.Rows {
 			names = append(names, row["symbol.name"])
 		}
-		Expect(names).To(Equal([]any{"Add", "Even", "Factorial", "Greet", "Insert", "IsWord", "Keys", "Labelled", "Len", "Len", "Locked", "Odd", "Shout", "Sorted", "String", "Swap", "UTCDate", "Upper"}))
+		Expect(names).To(Equal([]any{"Add", "Even", "Factorial", "Greet", "Insert", "IsWord", "Keys", "Labelled", "Len", "Len", "Locked", "Odd", "Shout", "Sorted", "String", "Swap", "Upper"}))
 		result = runQuery(ctx, pipeline, "SELECT symbol.effects FROM func:Spawn", scope)
 		Expect(result.Rows).To(Equal([]map[string]any{{"symbol.effects": "goroutine,unknown"}}))
 	})
