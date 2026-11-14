@@ -67,7 +67,7 @@ var _ = Describe("Pinned source indexing", func() {
 		var blob storage.SourceBlob
 		Expect(database.First(&blob, "content_hash = ?", hashBytes([]byte(staged))).Error).To(Succeed())
 		Expect(string(blob.Content)).To(Equal(staged))
-		current, err := engine.CheckCurrent(ctx, root, CheckOptions{AllowIncomplete: true})
+		current, err := engine.CheckModuleCurrent(ctx, root, CheckOptions{AllowIncomplete: true})
 		Expect(err).To(HaveOccurred())
 		Expect(current.SnapshotID).To(BeEmpty())
 		var head storage.ModuleLocationHead
