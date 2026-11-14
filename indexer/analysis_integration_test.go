@@ -82,7 +82,7 @@ var _ = Describe("Project analysis", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(analysis.SnapshotID).NotTo(Equal(indexed[0].SnapshotID))
 		}
-		head, err := engine.CheckCurrent(ctx, root, CheckOptions{})
+		head, err := engine.CheckCurrent(ctx, root, false)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(head.SnapshotID).To(Equal(indexed[0].SnapshotID))
 		_, err = storage.PruneHistory(ctx, database, "example.org/heads", storage.HistoryPruneOptions{Keep: 1})

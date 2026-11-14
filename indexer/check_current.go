@@ -14,8 +14,14 @@ type CheckOptions struct {
 	AllowIncomplete bool
 }
 
-// CheckCurrent verifies an existing location head against the checkout without publishing a snapshot.
-func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, options CheckOptions) (ModuleResult, error) {
+// CheckCurrent is CheckModuleCurrent requiring complete coverage, kept with its v1.1.0 signature for
+// importers of the released API.
+func (indexer *Indexer) CheckCurrent(ctx context.Context, path string, includeTests bool) (ModuleResult, error) {
+	return indexer.CheckModuleCurrent(ctx, path, CheckOptions{IncludeTests: includeTests})
+}
+
+// CheckModuleCurrent verifies an existing location head against the checkout without publishing a snapshot.
+func (indexer *Indexer) CheckModuleCurrent(ctx context.Context, path string, options CheckOptions) (ModuleResult, error) {
 	if indexer == nil || indexer.database == nil {
 		return ModuleResult{}, errors.New("UIR index database is required")
 	}

@@ -16,7 +16,7 @@ func (indexer *Indexer) CheckModulesCurrent(ctx context.Context, path string, op
 	}
 	results := make([]ModuleResult, 0, len(roots))
 	for _, root := range roots {
-		result, err := indexer.CheckCurrent(ctx, root.LocalPath, options)
+		result, err := indexer.CheckModuleCurrent(ctx, root.LocalPath, options)
 		if err != nil {
 			return nil, err
 		}
