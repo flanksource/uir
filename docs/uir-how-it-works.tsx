@@ -11,7 +11,7 @@ import { Go, Java, K8S, K8SConfigmap, K8SPod, K8SService, Postgres, Python, SqlS
 
 type IconComponent = React.ComponentType<{ className?: string }>;
 
-const mono = 'font-mono text-[8.5pt] leading-[1.45]';
+export const mono = 'font-mono text-[8.5pt] leading-[1.45]';
 
 function UirMark({ className }: { className?: string }) {
   return <svg viewBox="0 0 256 256" className={className} aria-hidden="true">
@@ -19,20 +19,20 @@ function UirMark({ className }: { className?: string }) {
   </svg>;
 }
 
-function Command({ children, color }: { children: React.ReactNode; color: string }) {
+export function Command({ children, color }: { children: React.ReactNode; color: string }) {
   return <code className="whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[8.5pt]"
     style={{ backgroundColor: color, color: 'white' }}>{children}</code>;
 }
 
-function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+export function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <div className={`rounded-md border bg-white px-2.5 py-2 ${className}`} style={{ borderColor: COLORS.primary }}>{children}</div>;
 }
 
-function Caption({ children }: { children: React.ReactNode }) {
+export function Caption({ children }: { children: React.ReactNode }) {
   return <p className="mt-2 text-[9pt] leading-snug" style={{ color: COLORS.muted }}>{children}</p>;
 }
 
-function Block({ id, title, command, color = COLORS.primary, width = '250px', dashed, children }: {
+export function Block({ id, title, command, color = COLORS.primary, width = '250px', dashed, children }: {
   id: string; title: string; command?: string; color?: string; width?: string; dashed?: boolean; children: React.ReactNode;
 }) {
   return <BoxNode id={id} title={<span className="text-sm">{title}</span>} headerColor={color} borderColor={color}
@@ -451,6 +451,9 @@ function Output({ id, command, visual, caption }: {
   </div>;
 }
 
+/** Headless hairline connectors: half the facet primary (3) and secondary (2) weights. */
+const OUT_OF_UIR_STROKE = { primary: 1.5, secondary: 1 } as const;
+
 export function OutOfUIR() {
   const reducedMotion = usePrefersReducedMotion();
   return <Diagram className="relative">
@@ -470,13 +473,15 @@ export function OutOfUIR() {
       </div>
       {sources.map((source, index) => <Arrow key={source.key} variant="primary" from={id(`source-${source.key}`)} to={id('uir')}
         path="straight" startAnchor="right" endAnchor={{ position: 'left', offset: { y: (index - 2.5) * 14 } }}
+        showHead={false} strokeWidth={OUT_OF_UIR_STROKE.primary}
         dashness={reducedMotion ? { strokeLen: 10, nonStrokeLen: 5 } : undefined} />)}
       {!reducedMotion && sources.map((source, index) => <IntoUirPulse key={`pulse-${source.key}`}
         from={id(`source-${source.key}`)} to={id('uir')} index={index} endOffsetY={(index - 2.5) * 14} />)}
       <Arrow variant="secondary" from={id('uir')} to={id('store')} path="straight" startAnchor="right" endAnchor="left"
-        labels={{ middle: <NodePill>persisted as</NodePill> }} />
+        showHead={false} strokeWidth={OUT_OF_UIR_STROKE.secondary} labels={{ middle: <NodePill>persisted as</NodePill> }} />
       {outputs.map((output, index) => <Arrow key={output.key} variant="primary" from={id('uir')} to={id(output.key)}
-        path="straight" startAnchor={{ position: 'bottom', offset: { x: (index - 2) * 80 } }} endAnchor="top" />)}
+        path="straight" startAnchor={{ position: 'bottom', offset: { x: (index - 2) * 80 } }} endAnchor="top"
+        showHead={false} strokeWidth={OUT_OF_UIR_STROKE.primary} />)}
     </>}
   </Diagram>;
 }
