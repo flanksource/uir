@@ -7,7 +7,7 @@ import Diagram from '@flanksource/facet/diagram/Diagram';
 import Page from '@flanksource/facet/Page';
 import Section from '@flanksource/facet/Section';
 
-type Field = { name: string; type: string; pk?: boolean; fk?: boolean };
+export type Field = { name: string; type: string; pk?: boolean; fk?: boolean };
 
 function FieldRow({ name, type, pk, fk }: Field) {
   return <div className="flex items-center gap-1.5 py-0.5">
@@ -19,7 +19,7 @@ function FieldRow({ name, type, pk, fk }: Field) {
   </div>;
 }
 
-function Entity({ id, title, detail, fields, indexes = [], minWidth = '250px', accent = COLORS.primary }: {
+export function Entity({ id, title, detail, fields, indexes = [], minWidth = '250px', accent = COLORS.primary }: {
   id: string; title: string; detail: string; fields: Field[]; indexes?: string[]; minWidth?: string; accent?: string;
 }) {
   return <BoxNode id={id} title={<span className="text-base">{title}</span>} headerColor={accent} bodyColor={COLORS.background} borderColor={accent} compact minWidth={minWidth}>
@@ -31,7 +31,7 @@ function Entity({ id, title, detail, fields, indexes = [], minWidth = '250px', a
   </BoxNode>;
 }
 
-function Label({ children }: { children: React.ReactNode }) {
+export function Label({ children }: { children: React.ReactNode }) {
   return <span className="rounded px-1 text-[8.25pt] font-semibold" style={{ backgroundColor: COLORS.background, color: COLORS.muted }}>{children}</span>;
 }
 
