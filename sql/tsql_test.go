@@ -135,7 +135,58 @@ END`
 		Entry("a bare builtin is no call", "SELECT ISNUMERIC(Code) FROM dbo.Codes", []string{"read dbo.Codes"}),
 		Entry("EXEC of a three-part name keeps its database",
 			"EXEC Archive.dbo.Purge @Id", []string{"call Archive.dbo:Purge"}),
+		Entry("CREATE TABLE writes the table, a temp table nothing",
+			"CREATE TABLE dbo.Codes (Id int REFERENCES dbo.Kinds (Id))\nCREATE TABLE #t (Id int)", []string{"write dbo.Codes", "read dbo.Kinds"}),
+		Entry("ALTER, TRUNCATE and DROP write the table they name",
+			"ALTER TABLE Codes ADD Kind int\nTRUNCATE TABLE dbo.Stage\nDROP TABLE IF EXISTS dbo.Old",
+			[]string{"write dbo.Codes", "write dbo.Stage", "write dbo.Old"}),
+		Entry("EXEC of a string literal runs the statements it holds",
+			"EXEC('UPDATE dbo.Codes SET Kind = ''a'' WHERE Id IN (SELECT Id FROM dbo.Kinds)')",
+			[]string{"write dbo.Codes", "read dbo.Kinds"}),
+		Entry("sp_executesql of a string literal runs the statements it holds",
+			"EXEC sp_executesql N'DELETE FROM dbo.Stage'", []string{"write dbo.Stage"}),
 	)
+
+	DescribeTable("reports dynamic SQL it cannot read",
+		func(body string) {
+			routine, diagnostics := lowerOne("CREATE PROCEDURE dbo.P @sql nvarchar(max) AS\n"+body, "tsql")
+			Expect(targets(routine)).To(BeEmpty())
+			Expect(diagnostics).To(HaveLen(1))
+			Expect([]any{diagnostics[0].Line, diagnostics[0].Message}).To(Equal([]any{2, "unsupported SQL statement: dynamic SQL"}))
+		},
+		Entry("EXEC of a variable", "EXEC (@sql)"),
+		Entry("sp_executesql of a variable", "EXEC sp_executesql @sql"),
+	)
+
+	It("lowers a routine an EXEC literal defines as a routine of the file", func() {
+		file, err := sqlsource.LowerFile("test.sql", []byte("EXEC('CREATE OR ALTER FUNCTION dbo.Country() RETURNS varchar(2) AS\nBEGIN\n  RETURN (SELECT TOP 1 Code FROM dbo.AsEnv WHERE EnvKey = ''current'')\nEND')"), "tsql")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(file.Diagnostics).To(BeEmpty())
+		Expect(routineViews(file)).To(Equal([]routineView{
+			{ID: "dbo:Country", Line: 1, Params: []string{}, Edges: []edge{
+				{Type: read, From: "dbo:Country", To: "dbo.AsEnv", Line: 3, Guards: []string{}},
+			}},
+			{ID: ":test.sql#test.sql", Line: 1, Params: []string{}, Edges: []edge{}},
+		}))
+	})
+
+	It("writes a view it creates and does not read what the view's query reads", func() {
+		file, err := sqlsource.LowerFile("test.sql", []byte("CREATE VIEW dbo.OpenCodes AS SELECT * FROM dbo.Codes"), "tsql")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(file.Diagnostics).To(BeEmpty())
+		Expect(targets(file.Routines[0])).To(Equal([]string{"write dbo.OpenCodes"}))
+	})
+
+	It("reads non-breaking spaces as the whitespace SQL Server takes them for", func() {
+		nbsp := "  "
+		file, err := sqlsource.LowerFile("test.sql", []byte("IF @n = 0\n"+nbsp+"BEGIN\n"+nbsp+"INSERT INTO dbo.Code VALUES ('a b')\n"+nbsp+"END\nELSE\n"+nbsp+"PRINT 'present'"), "tsql")
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(file.Diagnostics).To(BeEmpty())
+		Expect(targets(file.Routines[0])).To(Equal([]string{"write dbo.Code"}))
+	})
 
 	It("records a statement that does not parse as a diagnostic and lowers the others", func() {
 		routine, diagnostics := lowerOne(`CREATE PROCEDURE dbo.Load AS

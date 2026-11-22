@@ -48,12 +48,3 @@ func conditionExpr(text string) uir.ConditionStmt {
 	expr.Type, expr.Content = uir.ASTStatementTypeExpression, &text
 	return uir.NewCondition(expr)
 }
-
-// lineAt is the 1-based line of offset in text.
-func lineAt(text string, offset int) int {
-	return strings.Count(text[:offset], "\n") + 1
-}
-
-func isSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-}

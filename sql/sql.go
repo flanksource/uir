@@ -56,9 +56,21 @@ func LowerFile(path string, src []byte, dialect string) (File, error) {
 		return File{}, fmt.Errorf("sql: %s: %w", path, err)
 	}
 	if len(f.file.Routines) == 0 {
-		return File{}, fmt.Errorf("sql: %s: no routines: the file has no CREATE PROCEDURE or CREATE FUNCTION (%d diagnostics)", path, len(f.file.Diagnostics))
+		return File{}, &NoRoutinesError{Path: path, Diagnostics: f.file.Diagnostics}
 	}
 	return f.file, nil
+}
+
+// NoRoutinesError is a file that lowers to no routine: it holds no statement
+// outside comments, or only routine definitions whose headers did not parse,
+// each a diagnostic.
+type NoRoutinesError struct {
+	Path        string
+	Diagnostics []Diagnostic
+}
+
+func (e *NoRoutinesError) Error() string {
+	return fmt.Sprintf("sql: %s: no routines: the file has no CREATE PROCEDURE or CREATE FUNCTION (%d diagnostics)", e.Path, len(e.Diagnostics))
 }
 
 // fileLowering is the state of one LowerFile call.
