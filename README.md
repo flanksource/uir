@@ -141,7 +141,7 @@ Set `UIR_DSN` to a PostgreSQL DSN or SQLite `.db` path and open `http://localhos
 
 ## Development
 
-Use Go 1.27.1 or newer, Node.js 24, and the pnpm version pinned in the root `package.json`. Install browser dependencies before building:
+Use Go 1.27.4 or newer, Node.js 24, and the pnpm version pinned in the root `package.json`. Install browser dependencies before building:
 
 ```sh
 pnpm --dir web install --frozen-lockfile
