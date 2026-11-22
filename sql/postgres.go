@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/flanksource/sqlglot-go/sqlglot"
+	"github.com/flanksource/sqlglot-go/sqlglot/access"
 
 	"github.com/flanksource/uir"
 )
@@ -146,11 +147,11 @@ func (f *fileLowering) lowerPostgresBody(text pgText, heredoc sqlglot.Token, lan
 	if err != nil {
 		return nil, fmt.Errorf("tokenize body: %w", err)
 	}
-	pg := &pgBody{f: f, text: body, opts: statementOptions{dialect: "postgres", defaultSchema: f.dialect.defaultSchema}}
+	pg := &pgBody{f: f, text: body, opts: access.StatementOptions{Dialect: "postgres", DefaultSchema: f.dialect.defaultSchema}}
 	if language == "sql" {
 		return pg.sqlStatements(), nil
 	}
-	pg.opts.intoVariables = true
+	pg.opts.IntoVariables = true
 	return pg.plpgsql()
 }
 
@@ -158,7 +159,7 @@ func (f *fileLowering) lowerPostgresBody(text pgText, heredoc sqlglot.Token, lan
 type pgBody struct {
 	f    *fileLowering
 	text pgText
-	opts statementOptions
+	opts access.StatementOptions
 }
 
 // sqlStatements lowers a LANGUAGE sql body: statements separated by

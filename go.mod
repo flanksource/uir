@@ -1,6 +1,6 @@
 module github.com/flanksource/uir
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
@@ -9,7 +9,7 @@ require (
 	github.com/flanksource/commons-db v0.1.69
 	github.com/flanksource/commons-db/cmd/query v0.1.69
 	github.com/flanksource/gavel v0.0.67
-	github.com/flanksource/sqlglot-go v1.1.1
+	github.com/flanksource/sqlglot-go v1.3.0
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260507013755-92041b743c96
@@ -164,7 +164,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-git/go-git/v5 v5.19.2 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
@@ -355,8 +355,8 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.45.0 // indirect
-	go.opentelemetry.io/otel/sdk/metric v1.45.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
