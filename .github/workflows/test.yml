@@ -99,6 +99,10 @@ jobs:
       - name: Test browser
         run: pnpm --dir web run test
 
+      # web/dist is not committed; go run ./cmd/uir embeds it via web/embed.go.
+      - name: Build browser assets
+        run: make web-build
+
       - name: Test API client
         run: pnpm --dir packages/api run test
 
