@@ -66,14 +66,41 @@ jobs:
           COMMONS_DB_URL: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/postgres?sslmode=disable
         run: go test ./... -race
 
+      - name: Check embedded browser assets
+        run: test -z "$(git status --porcelain -- web/dist)"
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # The API client spec serves the fixture through go run ./cmd/uir.
+          go-version: "1.27"
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install browser dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Install API test dependencies
+        run: pnpm --dir packages/api install --frozen-lockfile
+
       - name: Test browser
         run: pnpm --dir web run test
 
       - name: Test API client
         run: pnpm --dir packages/api run test
-
-      - name: Check embedded browser assets
-        run: test -z "$(git status --porcelain -- web/dist)"
 
   python:
     runs-on: ubuntu-latest
@@ -119,7 +146,7 @@ jobs:
           [[ $version_output =~ $version_pattern ]]
 
   release:
-    needs: [go, python, image]
+    needs: [go, web, python, image]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     permissions:
       contents: write
