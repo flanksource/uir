@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@flanksource/facet": "0.1.74",
+    "@flanksource/icons": "1.0.65",
     "react": "~19.3.0",
     "react-dom": "~19.3.0",
     "tailwindcss": "^4.3.3",

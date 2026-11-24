@@ -35,13 +35,14 @@ export function Caption({ children }: { children: React.ReactNode }) {
 export function Block({ id, title, command, color = COLORS.primary, width = '250px', dashed, children }: {
   id: string; title: string; command?: string; color?: string; width?: string; dashed?: boolean; children: React.ReactNode;
 }) {
-  return <BoxNode id={id} title={<span className="text-sm">{title}</span>} headerColor={color} borderColor={color}
-    bodyColor={COLORS.background} compact minWidth={width} dashed={dashed}>
+  const node = <BoxNode id={id} title={<span className="text-sm">{title}</span>} headerColor={color} borderColor={color}
+    bodyColor={COLORS.background} compact minWidth={width}>
     <div style={{ width: `calc(${width} - 24px)` }}>
       {command && <div className="mb-2 flex justify-end"><Command color={color}>{command}</Command></div>}
       {children}
     </div>
   </BoxNode>;
+  return dashed ? <div className="contents [&>div]:border-dashed">{node}</div> : node;
 }
 
 function Lowerer({ parser, note, icons }: { parser: string; note: string; icons: IconComponent[] }) {
@@ -61,13 +62,13 @@ function Lowerer({ parser, note, icons }: { parser: string; note: string; icons:
  */
 type KindCategory = 'container' | 'typed' | 'callable' | 'member';
 
-const BUILTIN_KIND_CATEGORIES: Readonly<Record<string, KindCategory>> = {
-  package: 'container', module: 'container',
-  type: 'typed', interface: 'typed', record: 'typed', table: 'typed',
-  func: 'callable', method: 'callable', constructor: 'callable', endpoint: 'callable',
-  field: 'member', var: 'member', const: 'member', builtin: 'member', column: 'member', index: 'member',
-  foreign_key: 'member', annotation: 'member',
-};
+const BUILTIN_KIND_CATEGORIES = new Map<string, KindCategory>([
+  ['package', 'container'], ['module', 'container'],
+  ['type', 'typed'], ['interface', 'typed'], ['record', 'typed'], ['table', 'typed'],
+  ['func', 'callable'], ['method', 'callable'], ['constructor', 'callable'], ['endpoint', 'callable'],
+  ['field', 'member'], ['var', 'member'], ['const', 'member'], ['builtin', 'member'], ['column', 'member'], ['index', 'member'],
+  ['foreign_key', 'member'], ['annotation', 'member'],
+]);
 
 const CATEGORY_OUTLINES: Readonly<Record<KindCategory, { rx: number; dash?: string }>> = {
   callable: { rx: 5 },
@@ -86,7 +87,7 @@ type GraphRelationship = { from: string; to: string; kind: string; guard?: strin
 const SYMBOL_HEIGHT = 28;
 
 function kindCategory(symbol: GraphSymbol): KindCategory {
-  const category = symbol.category ?? BUILTIN_KIND_CATEGORIES[symbol.kind];
+  const category = symbol.category ?? BUILTIN_KIND_CATEGORIES.get(symbol.kind);
   if (!category) throw new Error(`symbol ${symbol.key} has custom kind ${symbol.kind} but no category`);
   return category;
 }
@@ -428,7 +429,7 @@ function IntoUirPulse({ from, to, index, endOffsetY }: { from: string; to: strin
   return <Arrow variant="primary" from={from} to={to} path="straight" startAnchor="right" showHead={false}
     endAnchor={{ position: 'left', offset: { y: endOffsetY } }} strokeWidth={8} color={COLORS.accent}
     dashness={{ strokeLen: 0.1, nonStrokeLen: PULSE_PERIOD, animation: cyclesPerSecond }}
-    arrowBodyProps={{ strokeLinecap: 'round', 'data-uir-pulse': '' }} />;
+    arrowBodyProps={{ strokeLinecap: 'round' }} />;
 }
 
 const outputs: Array<{ key: string; command: string; visual: React.ReactNode; caption: string }> = [

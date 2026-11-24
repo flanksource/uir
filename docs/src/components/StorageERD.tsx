@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { COLORS } from '@flanksource/facet/diagram/colors'
 import {
   ModulesAndPublication, FilesAndDocuments, SymbolLocations, SymbolReferences,
   SnapshotMembership, SymbolAllocation, SymbolDeltas,
@@ -24,10 +23,9 @@ export function StorageERD({ section, label }: { section: keyof typeof diagrams;
   const Content = diagrams[section]
   if (!Content) throw new Error(`Unknown storage ERD section: ${section}`)
   return (
-    <figure className="uir-diagram uir-erd" aria-label={label}>
-      <div className="uir-diagram-scroll" tabIndex={0} role="region" aria-label={label}
-        style={{ backgroundColor: COLORS.background }}>
-        <div className="uir-erd-canvas">{mounted && <Content />}</div>
+    <figure className="mx-auto my-6 w-fit max-w-full" aria-label={label}>
+      <div className="overflow-x-auto rounded-xl bg-[#f7fbfe] [scrollbar-width:thin]" tabIndex={0} role="region" aria-label={label}>
+        <div className="w-max min-h-[210px] px-6 leading-normal">{mounted && <Content />}</div>
       </div>
     </figure>
   )

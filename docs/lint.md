@@ -4,6 +4,16 @@ The [request-state example](../lint/testdata/request-state/.uir.yaml) rejects pa
 
 `uir lint` executes rules from `.uir.yaml`. Each SQL row becomes a Gavel violation with its original source location, even when the SELECT list only contains metric values. Queries can combine metrics with the existing definitions, callers, callees, reads, writes and implementation navigation functions.
 
+## SQL migration sources
+
+The [SQL migration example](../lint/testdata/sql-migrations/.uir.yaml) maps OIPA deployment folders into SQL with named captures for script name, phase, and country labels. Run `uir lint` or `gavel lint uir` from that directory. Both report findings at the physical `SQLData.xml` location. A SQL-only project can omit `go.mod`.
+
+A `sources` entry selects files with `match` or `match_regex`. A CEL transform returns `content`, a project-relative `filename`, and a UIR `package`. Its optional `metadata` supplies `name`, `phase`, and `labels` on the `sql.script` symbol. Transforms receive `file.path`, `file.content`, and a `captures` map of named regex groups. Use `read(path)` for a companion file relative to the matched input, and `xmlpath(xml, selector)` for a descriptor field. The selected source tree supplies both inputs and scopes findings when either changes.
+
+The SQL producer accepts `tsql`, `postgres`, or `sqlite`. An optional `default_schema` applies to unqualified references. Use `reads(table:...)` and `writes(table:...)` for table rules, and `references(sql.function:...)` with `role = 'call'` or `writes(sql.function:...)` for function rules. Set `lint.compatibility_level` to check documented SQL Server feature requirements such as `GENERATE_SERIES` at level 160. Parser diagnostics and incomplete analysis are error findings. [SQL Server compatibility requirements for `GENERATE_SERIES`](https://learn.microsoft.com/en-us/sql/t-sql/functions/generate-series-transact-sql?view=sql-server-ver17)
+
+For an explicit SQL-only run, use `gavel lint sql migrations -- --dialect tsql --compatibility-level 130` or `sqlglot lint --dialect tsql --compatibility-level 130 migrations`.
+
 Copy [the runnable example](../lint/testdata/project/.uir.yaml) to your project root as `.uir.yaml`. It flags files with fewer than 100 lines and three definitions, functions with more than three parameters, and bodies longer than 50 lines.
 
 ```sh
@@ -31,11 +41,11 @@ An optional top-level `_expires` accepts an RFC3339 timestamp, for example `_exp
 
 The nearest configuration inside the repository defines the project root for file filters. A fragment's project root is the directory containing `.uir.d/`, not `.uir.d/` itself. With only home or external ancestor configuration, lint uses the Git root, or the current directory outside Git. Outside Git, a non-home ancestor configuration defines the project root. An explicit file defines its own project root. Discovery follows ancestors of the invocation directory; it does not recursively load configurations below it.
 
-Analysis selects the enclosing Go module at the invocation directory, or at the explicit configuration's directory with `--config`. Running in a package subdirectory still analyzes its whole enclosing module. Nested modules are separate and require explicit selection. A directory without an enclosing `go.mod` fails with an actionable error.
+Go analysis selects the enclosing module at the invocation directory, or at the explicit configuration's directory with `--config`. Running in a package subdirectory still analyzes its whole enclosing module. Nested modules are separate and require explicit selection. The Go producer requires an enclosing `go.mod`.
 
 `--all` selects every registered module's primary location, applies the selected configuration to all of them, and pins their snapshots into one combined query scope. Register modules with `uir add` first. Cross-module callers, callees and other navigation can then traverse those selected modules. External producer locations use their existing snapshots. Under `--all`, include/exclude file patterns are relative to each module. `--all` cannot combine with `--changed`, `--staged` or `--snapshot`; it supports `--no-index`.
 
-Version 1 accepts `version`, optional `_expires`, `lint.include_tests` (default false) and `lint.rules`. Every unexpired file requires at least one rule with a unique `id`, SQL `query` and nonempty `message`. Severity is `error` by default, or `warning` or `info`. The IDs `uir/coverage` and `uir/index` are reserved for index warnings. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
+Version 1 accepts `version`, optional `_expires`, `sources`, `lint.include_tests` (default false), `lint.compatibility_level`, and `lint.rules`. Every unexpired file requires a source mapping or a rule. Give each rule a unique `id`, SQL `query` and nonempty `message`. Severity defaults to `error` and also supports `warning` and `info`. Built-in rule IDs include `uir/coverage`, `uir/index`, and `sql-compatibility-level`. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
 
 For shared rules, save this as `~/.uir.yaml`:
 
@@ -86,7 +96,7 @@ Lint infers analysis requirements from the selected SQL rules. File metrics, bui
 
 Syntax and typed snapshots have separate persisted analysis heads and do not advance normal index heads. Repeated runs reuse unchanged analysis, including dirty checkouts, without loading packages or publishing another snapshot. Reuse validates source bytes, manifests, build options, test selection and the indexer version. Typed reuse also validates imported local package source and workspace module manifests; changes in unrelated workspace package source do not invalidate it.
 
-`--no-index` requires fresh analysis of each needed mode and fails explicitly when it is missing or stale. It never publishes snapshots. `--snapshot` selects historical indexed facts and skips freshness checks; combine it with the configuration that should evaluate that history. The two flags are mutually exclusive. Mixed configurations execute syntax rules before typed rules, then restore configuration order in the report. A typed-analysis failure preserves completed syntax findings.
+`--no-index` requires fresh Go analysis of each needed mode and fails explicitly when it is missing or stale. For mapped SQL sources, use `--snapshot` to evaluate an existing publication. `--snapshot` selects historical indexed facts and skips freshness checks. Combine it with the configuration that should evaluate that history. The two flags are mutually exclusive. Mixed configurations execute syntax rules before typed rules, then restore configuration order in the report. A typed-analysis failure preserves completed syntax findings.
 
 `--changed` reports tracked differences from HEAD plus nonignored untracked paths while analyzing the live checkout. An optional commit or range selects an immutable source: a single commit compares with its first parent (or the empty tree for an initial commit), `A..B` compares endpoints and analyzes B, and `A...B` compares the unique merge base with B and analyzes B. Omitted range endpoints mean HEAD. `--staged` analyzes the exact captured index, including its staged `.uir.yaml` and module manifests; later staged or unstaged edits cannot alter that capture. Conflicted indexes fail explicitly. Both modes require a local Git checkout.
 
@@ -102,9 +112,9 @@ Every diagnostic of a package that is not fully indexed is a warning on its file
 
 Error findings and execution failures exit nonzero. Warnings and info alone exit zero. JSON output is an array containing the Gavel `LinterResult` fields, including `success`, `error`, `duration`, `violations`, `file_count` and `rule_count`. `success` describes execution, so an error-severity finding may appear in a successful report while the command exits nonzero.
 
-Gavel discovers global and project UIR configuration and runs the installed `uir` binary as a native linter. Use `gavel lint uir` for Gavel snapshots, baselines, summaries and UI. Native documents configured through `lint.linters.uir.config` in `.gavel.yaml` are written into a unique project `.uir.d/gavel-*.yaml` fragment with a deadline-based `_expires`, then removed when execution finishes. UIR performs configuration validation and merging; Gavel does not import the UIR library. Analysis runs with the selected module context; a normal file scope filters reported findings afterward. Changing `.uir.yaml` or a `.uir.d/` fragment reports the full owning module. Fileless run warnings survive file scopes.
+`gavel lint uir` discovers global and project UIR configuration and invokes the installed `uir` binary. Use it for Gavel snapshots, baselines, summaries and UI. Native documents configured through `lint.linters.uir.config` in `.gavel.yaml` are written into a unique project `.uir.d/gavel-*.yaml` fragment with a deadline-based `_expires`, then removed when execution finishes. UIR validates and merges the configuration. Analysis runs with the selected module context and a normal file scope filters reported findings afterward. Changing `.uir.yaml` or a `.uir.d/` fragment reports the full owning module. Fileless run warnings survive file scopes.
 
-The Gavel report APIs and commons-db prepared-source APIs are available in the released dependencies pinned in `go.mod`. A sibling checkout is optional for development. Use `GOWORK=off make build` to validate those published dependencies independently of a local workspace.
+When developing changes that span Gavel, UIR, and SQLGlot, link the checkouts in a local `go.work`. Use `GOWORK=off make build` to check the published dependency pins before releasing.
 
 To run the included sample against an isolated database:
 
