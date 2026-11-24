@@ -1,0 +1,28 @@
+# UIR
+
+A universal intermediate representation for indexing, querying, and comparing code.
+
+- [UIR](/index)
+- [Getting started](/getting-started)
+- [Module-root indexing and queries](/module-indexing)
+- [Incremental Go indexing](/indexing)
+- [Publish original Git sources](/git-backed-publication)
+- [Historical external snapshots](/historical-import)
+- [Querying indexed modules](/query)
+- [SQL examples](/sql-examples)
+- [SQL architecture linting](/lint)
+- [Call graphs](/graph)
+- [Diffing two commits](/diff)
+- [Test runs, coverage and flakiness](/tests)
+- [Browser and API](/serve)
+- [CLI configuration](/cli)
+- [SQL language reference](/sql-query)
+- [UIR Model Reference](/model)
+- [Symbols and references](/symbols)
+- [Universal Intermediate Representation (UIR) API Specification](/architecture)
+- [UIR storage design](/storage)
+- [Storage ERD](/storage-erd)
+- [Snapshot-aware symbol index: schema review](/symbol-index-storage)
+- [Compact symbol handles and symbol deltas](/symbol-compact-ids)
+- [Symbol index benchmarks](/benchmarks)
+- [Producer plugins and uir import --plugin repomap](/repomap-producer)
