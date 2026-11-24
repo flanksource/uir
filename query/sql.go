@@ -49,7 +49,7 @@ func (pipeline *Pipeline) runSQL(ctx context.Context, input string, options Modu
 	return pipeline.executeSQL(ctx, input, options, nil)
 }
 
-func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options ModuleScopeOptions, visit func(SQLRow) error) (ModuleQueryResult, error) {
+func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options ModuleScopeOptions, visit func(QueryRow) error) (ModuleQueryResult, error) {
 	if pipeline == nil || pipeline.database == nil {
 		return ModuleQueryResult{}, errors.New("UIR query database is required")
 	}
@@ -155,7 +155,7 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 		return ModuleQueryResult{}, err
 	}
 	index := newCompactIndex(base)
-	index.declarationProjection = rows.needsMetrics() && !rows.needsProperties() && !rows.required["symbol.type"] && !parsed.Projection.Wildcard
+	index.declarationProjection = visit == nil && rows.needsMetrics() && !rows.needsProperties() && !rows.required["symbol.type"] && !parsed.Projection.Wildcard
 	if rows.required["symbol.type"] {
 		if err := index.requireVariableTypes(ctx); err != nil {
 			return ModuleQueryResult{}, err

@@ -17,6 +17,7 @@ import (
 type compactIndex struct {
 	*indexContext
 	dispatch map[string][]ModuleSymbol
+	forLint  bool
 }
 
 func newCompactIndex(index *indexContext) *compactIndex {

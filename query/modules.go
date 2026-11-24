@@ -106,6 +106,10 @@ func (pipeline *Pipeline) RunModules(ctx context.Context, input string, options 
 }
 
 func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options ModuleScopeOptions) (ModuleQueryResult, error) {
+	return pipeline.runExpr(ctx, expression, options, nil)
+}
+
+func (pipeline *Pipeline) runExpr(ctx context.Context, expression *Expr, options ModuleScopeOptions, visit func(QueryRow) error) (ModuleQueryResult, error) {
 	if pipeline == nil || pipeline.database == nil {
 		return ModuleQueryResult{}, errors.New("UIR query database is required")
 	}
@@ -127,6 +131,13 @@ func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
+	if visit != nil {
+		for _, scope := range selection.scopes {
+			if scope.snapshot.AnalysisMode == storage.AnalysisSyntax {
+				return ModuleQueryResult{}, errors.New("compact lint requires typed facts; selected snapshot contains syntax analysis")
+			}
+		}
+	}
 	clock.lap("scope")
 	coverage, err := session.scopeCoverage(ctx, selection.scopes)
 	if err != nil {
@@ -137,10 +148,13 @@ func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options
 		{Name: "parse", Value: string(expressionOperation(expression))}, {Name: "scope", Value: fmt.Sprintf("%d snapshots", len(selection.scopes))},
 		selectionCoverageStage(selection, coverage),
 	}}
-	if err := session.execute(ctx, expression, selection, &result, clock); err != nil {
-		return ModuleQueryResult{}, err
+	if err := session.execute(ctx, expression, selection, &result, clock, visit); err != nil {
+		if visit == nil {
+			return ModuleQueryResult{}, err
+		}
+		return result, err
 	}
-	if len(result.Matches) > options.Limit {
+	if visit == nil && len(result.Matches) > options.Limit {
 		result.Matches = result.Matches[:options.Limit]
 	}
 	result.Stages = append(result.Stages, ResolutionStage{Name: "execute", Value: fmt.Sprintf("%d rows", result.Total)})
@@ -150,11 +164,11 @@ func (pipeline *Pipeline) RunExpr(ctx context.Context, expression *Expr, options
 
 // execute evaluates the expression over the selected scopes into result. With nothing to evaluate, or
 // a symbol no scope resolves while registered checkouts lack a head, the result has no rows.
-func (pipeline *Pipeline) execute(ctx context.Context, expression *Expr, selection moduleScopeSelection, result *ModuleQueryResult, clock *stageClock) error {
+func (pipeline *Pipeline) execute(ctx context.Context, expression *Expr, selection moduleScopeSelection, result *ModuleQueryResult, clock *stageClock, visit func(QueryRow) error) error {
 	if len(selection.scopes) == 0 {
 		return nil
 	}
-	err := pipeline.runCompact(ctx, expression, selection.scopes, result, clock)
+	err := pipeline.runCompact(ctx, expression, selection.scopes, result, clock, visit)
 	var unresolved *UnresolvedSymbolError
 	if selection.missingHeads > 0 && errors.As(err, &unresolved) {
 		result.Total = 0

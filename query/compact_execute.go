@@ -67,17 +67,21 @@ func expressionOperation(expression *Expr) Operation {
 	return ""
 }
 
-func (pipeline *Pipeline) runCompact(ctx context.Context, expression *Expr, scopes []moduleScope, result *ModuleQueryResult, clock *stageClock) error {
+func (pipeline *Pipeline) runCompact(ctx context.Context, expression *Expr, scopes []moduleScope, result *ModuleQueryResult, clock *stageClock, visit func(QueryRow) error) error {
 	base, err := newIndexContext(ctx, pipeline, scopes)
 	if err != nil {
 		return err
 	}
 	clock.lap("index")
 	index := newCompactIndex(base)
+	index.forLint = visit != nil
 	value, err := index.evaluate(ctx, expression, result)
 	clock.lap("evaluate")
 	var ambiguous ambiguousSymbols
 	if errors.As(err, &ambiguous) {
+		if index.forLint {
+			return fmt.Errorf("%w; qualify the name or use a glob to match every candidate", err)
+		}
 		result.Symbols = ambiguous.symbols
 		result.Matches, err = index.candidates(ctx, ambiguous.symbols)
 		if err != nil {
@@ -89,6 +93,9 @@ func (pipeline *Pipeline) runCompact(ctx context.Context, expression *Expr, scop
 	}
 	if err != nil {
 		return err
+	}
+	if visit != nil {
+		return index.visitCompactMatches(ctx, value, result, visit)
 	}
 	result.Symbols, result.Matches, result.Declarations, result.Path = value.symbols, value.matches, value.declarations, value.path
 	if result.Matches == nil {
@@ -118,6 +125,9 @@ func (index *compactIndex) evaluate(ctx context.Context, expression *Expr, resul
 			return compactValue{}, err
 		}
 		if len(symbols) == 0 {
+			if index.forLint {
+				return compactValue{}, nil
+			}
 			return compactValue{}, &UnresolvedSymbolError{Symbol: expression.Symbol, Coverage: coverageSummary(result.Coverage)}
 		}
 		if _, exact := globLiteral(expression.Symbol); len(symbols) > 1 && exact {

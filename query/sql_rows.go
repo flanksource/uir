@@ -31,15 +31,16 @@ type sqlRecord struct {
 }
 
 type sqlRows struct {
-	fields     map[string]string
-	alias      string
-	columns    []QueryColumn
-	order      []*sqlsyntax.Ordering
-	predicate  sqlPredicate
-	required   map[string]bool
-	buildTags  map[string]bool
-	fileSource bool
-	visit      func(SQLRow) error
+	fields      map[string]string
+	alias       string
+	columns     []QueryColumn
+	order       []*sqlsyntax.Ordering
+	predicate   sqlPredicate
+	required    map[string]bool
+	buildTags   map[string]bool
+	fileSource  bool
+	visit       func(QueryRow) error
+	symbolAlias bool
 }
 
 func (rows *sqlRows) field(name string) (string, string, error) {
@@ -86,6 +87,7 @@ func (rows *sqlRows) bind(query *sqlsyntax.Query) error {
 			return sqlError(column.Pos, "%s", err)
 		}
 		name := column.Alias
+		rows.symbolAlias = rows.symbolAlias || name == "symbol"
 		if name == "" {
 			name = column.Field
 		}
@@ -210,7 +212,7 @@ func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQuery
 			for _, column := range rows.columns {
 				projected[column.Name] = record.values[column.Field]
 			}
-			if err := rows.visit(SQLRow{Values: projected, Match: record.match, WitnessSymbol: record.witness}); err != nil {
+			if err := rows.visit(record.queryRow(projected, rows.symbolAlias)); err != nil {
 				return err
 			}
 		}
@@ -227,6 +229,15 @@ func (rows *sqlRows) project(records []sqlRecord, limit int, result *ModuleQuery
 		result.Matches = append(result.Matches, record.match)
 	}
 	return nil
+}
+
+func (record sqlRecord) queryRow(projected map[string]any, symbolAlias bool) QueryRow {
+	row := QueryRow{Values: projected, Match: record.match, WitnessSymbol: record.witness, SymbolAlias: symbolAlias}
+	if symbol, ok := record.values["symbol"].(ModuleSymbol); ok {
+		row.Symbol = &symbol
+		row.Properties, _ = record.values["symbol.props"].(map[string]any)
+	}
+	return row
 }
 
 func sqlCompareValues(left, right any) int {
