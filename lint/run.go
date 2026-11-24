@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
-	"strings"
 
 	"github.com/flanksource/clicky/task"
 	"github.com/flanksource/uir/internal/progress"
@@ -21,21 +20,25 @@ import (
 )
 
 type Options struct {
-	Rules     []string
-	Tags      []string
-	Include   []string
-	Exclude   []string
-	NoIndex   bool
-	Snapshot  string
-	GroupBy   string
-	Changed   bool
-	Staged    bool
-	Revision  string
-	Source    *git.PreparedSource
-	Files     []string
-	WorkDir   string
-	All       bool
-	Directory string
+	Rules              []string
+	Tags               []string
+	Include            []string
+	Exclude            []string
+	NoIndex            bool
+	Snapshot           string
+	GroupBy            string
+	Changed            bool
+	Staged             bool
+	Revision           string
+	Source             *git.PreparedSource
+	Files              []string
+	WorkDir            string
+	All                bool
+	Directory          string
+	SQLOnly            bool
+	Dialect            string
+	CompatibilityLevel int
+	sqlFiles           []mappedSource
 }
 
 func Run(ctx context.Context, database *gorm.DB, config *Config, options Options) *Result {
@@ -77,13 +80,14 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 		return err
 	}
 	rules := selection.Rules
+	mapped := options.Snapshot == "" && (options.SQLOnly || len(config.Sources) > 0)
 	result.RuleCount = len(rules)
 	for _, rule := range rules {
 		if rule.message == nil {
 			return fmt.Errorf("rule %s: configuration must be compiled with lint.Load", rule.ID)
 		}
 	}
-	if len(rules) == 0 || (options.Files != nil && len(options.Files) == 0) {
+	if len(rules) == 0 && !mapped || (options.Files != nil && len(options.Files) == 0) {
 		return nil
 	}
 	pipeline, err := query.NewPipeline(database)
@@ -92,20 +96,37 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 	}
 	coverage := map[string]bool{}
 	files := map[string]bool{}
+	var mappedFacts sqlPublication
+	var mappedSnapshot string
+	if mapped {
+		mappedFacts, mappedSnapshot, err = mappedSQLSnapshot(ctx, database, config, options, selection)
+		if err != nil {
+			return err
+		}
+		for _, finding := range mappedFacts.findings {
+			result.addFinding(finding, nil)
+			files[finding.File] = true
+		}
+		result.FileCount = len(files)
+		result.Sources = mappedFacts.reportSources(result.WorkDir)
+	}
 	var sourceSets map[string]string
 	defer result.orderRules(rules)
 	position := 0
 	for _, mode := range []storage.AnalysisMode{storage.AnalysisSyntax, storage.AnalysisTyped} {
 		selected := false
 		for _, rule := range rules {
-			selected = selected || rule.requirements.Mode == mode
+			selected = selected || rule.mode == mode
 		}
 		if !selected {
 			continue
 		}
-		scope, err := snapshots(ctx, database, config, options, mode)
+		scope, err := lintScope(ctx, database, config, options, mode, mapped, mappedSnapshot)
 		if err != nil {
 			return err
+		}
+		if scope.SnapshotID == "" && len(scope.SnapshotIDs) == 0 {
+			continue
 		}
 		currentSets, err := analysisSourceSets(ctx, database, scope)
 		if err != nil {
@@ -116,7 +137,7 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 		}
 		sourceSets = currentSets
 		for _, rule := range rules {
-			if rule.requirements.Mode != mode {
+			if rule.mode != mode {
 				continue
 			}
 			position++
@@ -124,27 +145,35 @@ func execute(ctx context.Context, database *gorm.DB, config *Config, options Opt
 				current.SetName(fmt.Sprintf("Linting: %s %d/%d", rule.ID, position, len(rules)))
 				current.SetProgress(position-1, len(rules))
 			}
-			queried, err := pipeline.VisitSQL(ctx, rule.Query, scope, func(row query.SQLRow) error {
+			queried, err := rule.visit(ctx, pipeline, scope, func(row query.QueryRow) error {
+				reportPath := row.Match.Path
+				file := filepath.Join(row.Match.Location, row.Match.Path)
+				mappedSource, mappedRow := mappedFacts.files[row.Match.Path]
+				mappedRow = mappedRow && row.Match.SnapshotID == mappedSnapshot
+				if mappedRow {
+					reportPath = mappedSource.reportPath()
+					file = filepath.Join(result.WorkDir, filepath.FromSlash(reportPath))
+				}
 				if row.Match.Path != "" {
-					path, err := filepath.Rel(result.WorkDir, filepath.Join(row.Match.Location, row.Match.Path))
+					path, err := filepath.Rel(result.WorkDir, file)
 					if options.All {
 						path = row.Match.Path
 					}
 					if err != nil {
 						return err
 					}
-					if !selection.MatchesPath(filepath.ToSlash(path)) {
+					if !mappedRow && !selection.MatchesPath(filepath.ToSlash(path)) {
 						return nil
 					}
 				}
-				var message strings.Builder
-				if err := rule.message.Execute(&message, row.Values); err != nil {
+				message, err := rule.renderMessage(row, reportPath)
+				if err != nil {
 					return err
 				}
-				finding := models.NewViolationBuilder().WithMessage(message.String()).WithSource("uir").WithRuleFromLinter("uir", rule.ID).Build()
+				finding := models.NewViolationBuilder().WithMessage(message).WithSource("uir").WithRuleFromLinter("uir", rule.ID).Build()
 				finding.Severity = rule.Severity
 				if row.Match.Path != "" {
-					finding.File = filepath.Join(row.Match.Location, row.Match.Path)
+					finding.File = file
 					files[finding.File] = true
 				}
 				if row.Match.Line != nil {

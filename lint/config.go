@@ -1,4 +1,4 @@
-// Package lint executes SQL architecture rules against immutable UIR snapshots.
+// Package lint executes architecture rules against immutable UIR snapshots.
 package lint
 
 import (
@@ -13,31 +13,35 @@ import (
 	"github.com/flanksource/gavel/models"
 	"github.com/flanksource/uir/indexer"
 	"github.com/flanksource/uir/query"
+	"github.com/flanksource/uir/storage"
 	"gopkg.in/yaml.v3"
 )
 
 const ConfigName = ".uir.yaml"
 
 type Config struct {
-	Version         int      `yaml:"version"`
-	Lint            Settings `yaml:"lint"`
-	Path            string   `yaml:"-"`
-	Root            string   `yaml:"-"`
+	Version         int             `yaml:"version"`
+	Sources         []SourceMapping `yaml:"sources,omitempty"`
+	Lint            Settings        `yaml:"lint"`
+	Path            string          `yaml:"-"`
+	Root            string          `yaml:"-"`
 	includeTestsSet bool
 }
 
 type Settings struct {
-	IncludeTests bool   `yaml:"include_tests"`
-	Rules        []Rule `yaml:"rules"`
+	IncludeTests       bool   `yaml:"include_tests"`
+	Rules              []Rule `yaml:"rules"`
+	CompatibilityLevel int    `yaml:"compatibility_level,omitempty"`
 }
 
 type Rule struct {
-	ID           string                   `yaml:"id"`
-	Severity     models.ViolationSeverity `yaml:"severity"`
-	Message      string                   `yaml:"message"`
-	Query        string                   `yaml:"query"`
-	message      *template.Template
-	requirements query.SQLRequirements
+	ID         string                   `yaml:"id"`
+	Severity   models.ViolationSeverity `yaml:"severity"`
+	Message    string                   `yaml:"message"`
+	Query      string                   `yaml:"query"`
+	message    *template.Template
+	mode       storage.AnalysisMode
+	expression *query.Expr
 }
 
 func Load(path string) (config *Config, err error) {
@@ -48,11 +52,13 @@ func Load(path string) (config *Config, err error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	var document struct {
-		Expires string `yaml:"_expires"`
-		Version int    `yaml:"version"`
+		Expires string          `yaml:"_expires"`
+		Version int             `yaml:"version"`
+		Sources []SourceMapping `yaml:"sources"`
 		Lint    struct {
-			IncludeTests *bool  `yaml:"include_tests"`
-			Rules        []Rule `yaml:"rules"`
+			IncludeTests       *bool  `yaml:"include_tests"`
+			Rules              []Rule `yaml:"rules"`
+			CompatibilityLevel int    `yaml:"compatibility_level"`
 		} `yaml:"lint"`
 	}
 	if err := decoder.Decode(&document); err != nil {
@@ -62,7 +68,7 @@ func Load(path string) (config *Config, err error) {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return nil, fmt.Errorf("%s: expected one YAML document: %v", path, err)
 	}
-	config = &Config{Version: document.Version, Lint: Settings{Rules: document.Lint.Rules}}
+	config = &Config{Version: document.Version, Sources: document.Sources, Lint: Settings{Rules: document.Lint.Rules, CompatibilityLevel: document.Lint.CompatibilityLevel}}
 	if document.Lint.IncludeTests != nil {
 		config.includeTestsSet = true
 		config.Lint.IncludeTests = *document.Lint.IncludeTests
@@ -78,14 +84,29 @@ func Load(path string) (config *Config, err error) {
 	if config.Version != 1 {
 		return nil, fmt.Errorf("%s: unsupported version %d", path, config.Version)
 	}
-	if len(config.Lint.Rules) == 0 {
+	if len(config.Lint.Rules) == 0 && len(config.Sources) == 0 {
 		return nil, errors.New("lint.rules must contain at least one rule")
 	}
+	if err := validateSources(config.Sources); err != nil {
+		return nil, err
+	}
+	if err := validateCompatibilityLevel(config.Lint.CompatibilityLevel); err != nil {
+		return nil, err
+	}
+	for _, rule := range config.Lint.Rules {
+		if rule.ID == compatibilityRuleID {
+			return nil, fmt.Errorf("lint rule ID %q is reserved", rule.ID)
+		}
+	}
+	return config, compileRules(config.Lint.Rules)
+}
+
+func compileRules(rules []Rule) error {
 	seen := map[string]bool{}
-	for i := range config.Lint.Rules {
-		rule := &config.Lint.Rules[i]
+	for i := range rules {
+		rule := &rules[i]
 		if strings.TrimSpace(rule.ID) == "" || rule.ID == indexer.RuleCoverage || rule.ID == indexer.RuleIndex || seen[rule.ID] {
-			return nil, fmt.Errorf("invalid or duplicate lint rule ID %q", rule.ID)
+			return fmt.Errorf("invalid or duplicate lint rule ID %q", rule.ID)
 		}
 		seen[rule.ID] = true
 		if rule.Severity == "" {
@@ -94,21 +115,21 @@ func Load(path string) (config *Config, err error) {
 		switch rule.Severity {
 		case models.SeverityError, models.SeverityWarning, models.SeverityInfo:
 		default:
-			return nil, fmt.Errorf("rule %s: invalid severity %q", rule.ID, rule.Severity)
+			return fmt.Errorf("rule %s: invalid severity %q", rule.ID, rule.Severity)
 		}
 		if strings.TrimSpace(rule.Message) == "" {
-			return nil, fmt.Errorf("rule %s: message is required", rule.ID)
+			return fmt.Errorf("rule %s: message is required", rule.ID)
 		}
-		rule.requirements, err = query.AnalyzeSQLRows(rule.Query)
-		if err != nil {
-			return nil, fmt.Errorf("rule %s: %w", rule.ID, err)
+		var err error
+		if err := rule.compileQuery(); err != nil {
+			return fmt.Errorf("rule %s: %w", rule.ID, err)
 		}
 		rule.message, err = template.New(rule.ID).Option("missingkey=error").Parse(rule.Message)
 		if err != nil {
-			return nil, fmt.Errorf("rule %s message: %w", rule.ID, err)
+			return fmt.Errorf("rule %s message: %w", rule.ID, err)
 		}
 	}
-	return config, nil
+	return nil
 }
 
 func (config *Config) Select(ids []string) ([]Rule, error) {

@@ -22,6 +22,11 @@ func (linter *sqlLinter) Run(ctx commonsContext.Context, _ *clicky.Task) ([]mode
 	return linter.result.Violations, err
 }
 
+func (linter *sqlLinter) RunResult(ctx commonsContext.Context, task *clicky.Task) (*linters.LinterResult, error) {
+	_, err := linter.Run(ctx, task)
+	return linter.result.LinterResult, err
+}
+
 func (*sqlLinter) Name() string                              { return "uir" }
 func (*sqlLinter) DefaultIncludes() []string                 { return nil }
 func (*sqlLinter) DefaultExcludes() []string                 { return nil }
@@ -40,7 +45,7 @@ func (result *Result) filterFiles(files []string) {
 	linters.FilterViolationsByUserScope([]*linters.LinterResult{result.LinterResult}, result.WorkDir, files)
 	groups := result.Groups[:0]
 	for _, group := range result.Groups {
-		filtered := &linters.LinterResult{Violations: group.Violations, WorkDir: result.WorkDir}
+		filtered := &linters.LinterResult{Violations: group.Violations, WorkDir: result.WorkDir, Sources: result.Sources}
 		linters.FilterViolationsByUserScope([]*linters.LinterResult{filtered}, result.WorkDir, files)
 		if len(filtered.Violations) != 0 {
 			group.Violations = filtered.Violations
