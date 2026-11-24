@@ -42,6 +42,10 @@ table "connections" {
     type = jsonb
     null = true
   }
+  column "secrets" {
+    type = jsonb
+    null = true
+  }
   column "insecure_tls" {
     type = boolean
     null = false
