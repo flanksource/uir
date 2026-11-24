@@ -40,7 +40,7 @@ The Go package is the canonical model, with parallel Python and Java ports. The 
 
 <OverviewDiagram />
 
-See [how UIR works](/how-it-works) for the full lowering, storage, and analysis diagrams.
+See [how UIR lowers sources](/how-it-works) and [what the model can answer](/#one-model-answers-many-questions).
 
 ## Start here
 
@@ -3309,7 +3309,7 @@ For an in-memory UIR document, `NodeTree.Walk` and structured identifier compari
 
 # How UIR works
 
-UIR gives code, SQL, and domain-specific data a shared vocabulary of symbols and relationships. The two diagrams show how producers publish those facts and how the CLI uses them.
+UIR gives code, SQL, and domain-specific data a shared vocabulary of symbols and relationships. The diagram shows how producers lower and publish those facts.
 
 ## Everything lowers into one model
 
@@ -3317,11 +3317,7 @@ UIR gives code, SQL, and domain-specific data a shared vocabulary of symbols and
 
 See [module indexing](/module-indexing) and [historical imports](/historical-import) for the input and publication contracts.
 
-## One model answers many questions
-
-<ProductDiagram kind="outputs" caption="Queries, call graphs, symbol diffs, SQL lint rules, and the browser read the same model. Snapshots are stored in SQLite or PostgreSQL." />
-
-Use the [getting started guide](/getting-started) to index a sample module and trace its calls.
+Explore [what the model can answer](/#one-model-answers-many-questions), or use the [getting started guide](/getting-started) to index a sample module and trace its calls.
 
 # **Universal Intermediate Representation (UIR) API Specification**
 
@@ -6621,6 +6617,10 @@ bash .tmp/bench/explain.sh postgres github.com/flanksource/commons github.com/fl
     <p>Compare symbols across Git commits and see changes to signatures, structure, and bodies.</p>
   </Link>
 </div>
+
+## One model answers many questions
+
+<ProductDiagram kind="outputs" caption="Queries, call graphs, symbol diffs, SQL lint rules, and the browser read the same model. Snapshots are stored in SQLite or PostgreSQL." />
 
 ## Index and query a Go module
 

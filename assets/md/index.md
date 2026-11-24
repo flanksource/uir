@@ -43,6 +43,10 @@
   </Link>
 </div>
 
+## One model answers many questions
+
+<ProductDiagram kind="outputs" caption="Queries, call graphs, symbol diffs, SQL lint rules, and the browser read the same model. Snapshots are stored in SQLite or PostgreSQL." />
+
 ## Index and query a Go module
 
 After [installing the CLI](/getting-started#install-the-cli), run `uir add` from a Go module, then find a function and its callers. Replace `Run` with the function you want to trace.

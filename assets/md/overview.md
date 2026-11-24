@@ -6,7 +6,7 @@ The Go package is the canonical model, with parallel Python and Java ports. The 
 
 <OverviewDiagram />
 
-See [how UIR works](/how-it-works) for the full lowering, storage, and analysis diagrams.
+See [how UIR lowers sources](/how-it-works) and [what the model can answer](/#one-model-answers-many-questions).
 
 ## Start here
 
