@@ -50,6 +50,10 @@ func (p *plParser) query(from, to int) []uir.Statement {
 	case "SELECT", "WITH":
 		return p.lower(from, to, "")
 	case "EXECUTE":
+		if p.audit != nil {
+			p.audit.execute(p.pgBody, from, to)
+			return nil
+		}
 		p.f.diagnose(p.text.line(p.text.tokens[from].Start), p.text.span(from, to), "dynamic SQL is not lowered")
 	}
 	return nil
@@ -70,7 +74,15 @@ func (p *plParser) simple() []uir.Statement {
 	_, to := p.statementEnd()
 	keyword := p.word(from)
 	switch {
-	case skippedStatements[keyword], p.assignment(from, to):
+	case p.assignment(from, to):
+		if p.audit != nil {
+			p.audit.assignment(p, from, to)
+		}
+		return nil
+	case skippedStatements[keyword]:
+		if p.audit != nil && keyword == "ASSERT" && from < to {
+			p.audit.read(p.pgBody, from+1, to, "SELECT ")
+		}
 		return nil
 	case keyword == "PERFORM", keyword == "CALL":
 		if from == to {
@@ -80,10 +92,22 @@ func (p *plParser) simple() []uir.Statement {
 	case keyword == "RETURN" && p.word(from+1) == "QUERY" && from+2 <= to:
 		return p.query(from+2, to)
 	case keyword == "RETURN":
+		if p.audit != nil {
+			if p.word(from+1) == "NEXT" {
+				from++
+			}
+			if from < to {
+				p.audit.read(p.pgBody, from+1, to, "SELECT ")
+			}
+		}
 		return nil
 	case keyword == "OPEN":
 		return p.iteratedCursor(from, to)
 	case keyword == "EXECUTE":
+		if p.audit != nil {
+			p.audit.execute(p.pgBody, from, to)
+			return nil
+		}
 		p.f.diagnose(p.text.line(p.text.tokens[from].Start), p.text.span(from, to), "dynamic SQL is not lowered")
 		return nil
 	}

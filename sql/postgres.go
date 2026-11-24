@@ -157,9 +157,10 @@ func (f *fileLowering) lowerPostgresBody(text pgText, heredoc sqlglot.Token, lan
 
 // pgBody lowers one routine body.
 type pgBody struct {
-	f    *fileLowering
-	text pgText
-	opts access.StatementOptions
+	f     *fileLowering
+	text  pgText
+	opts  access.StatementOptions
+	audit *plMigration
 }
 
 // sqlStatements lowers a LANGUAGE sql body: statements separated by
@@ -176,6 +177,13 @@ func (b *pgBody) sqlStatements() []uir.Statement {
 // tokens after from when prefix is set; a statement that cannot be lowered
 // is a diagnostic.
 func (b *pgBody) lower(from, to int, prefix string) []uir.Statement {
+	if b.audit != nil {
+		if prefix != "" {
+			from++
+		}
+		b.audit.read(b, from, to, prefix)
+		return nil
+	}
 	at := site{path: b.f.path, line: b.text.line(b.text.tokens[from].Start), text: b.text.span(from, to)}
 	parsed := at.text
 	if prefix != "" {

@@ -152,6 +152,11 @@ func (p *plParser) caseStatement() {
 	for p.i++; p.i < len(p.text.tokens) && (p.word(p.i) != "END" || p.word(p.i+1) != "CASE"); p.i++ {
 	}
 	p.expect("END", "CASE")
+	if p.audit != nil {
+		p.audit.unsupported(p.pgBody, from, "a PL/pgSQL CASE statement cannot be inspected")
+		p.expect(";")
+		return
+	}
 	p.f.diagnose(p.text.line(p.text.tokens[from].Start), p.text.span(from, p.i-1), "a plpgsql CASE statement is not lowered")
 	p.expect(";")
 }
@@ -169,7 +174,10 @@ func (p *plParser) endStatement() {
 func (p *plParser) block() []uir.Statement {
 	if p.skip("DECLARE") {
 		for !p.at("BEGIN") {
-			p.until(";")
+			from, to := p.until(";")
+			if p.audit != nil {
+				p.audit.assignment(p, from, to)
+			}
 		}
 	}
 	p.expect("BEGIN")
@@ -213,6 +221,10 @@ func (p *plParser) ifChain() []uir.Statement {
 // condition is what the condition [from, to] reads, and the condition.
 func (p *plParser) condition(from, to int) ([]uir.Statement, uir.ConditionStmt) {
 	text := p.text.span(from, to)
+	if p.audit != nil {
+		p.audit.read(p.pgBody, from, to, "SELECT 1 WHERE ")
+		return nil, conditionExpr(text)
+	}
 	at := site{path: p.f.path, line: p.text.line(p.text.tokens[from].Start), text: text}
 	reads, err := lowerStatement("SELECT 1 WHERE "+text, at, p.opts)
 	if err != nil {
