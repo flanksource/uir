@@ -21,7 +21,7 @@ make docs-build
 pnpm --dir docs run preview
 ```
 
-Vocs builds a fully static site under `docs/dist/public`. Serve that directory with a static host. Set `baseUrl` in `vocs.config.ts` when a production URL is chosen; Vocs uses it to generate canonical URLs, the sitemap, and robots metadata. Set `basePath` as well when hosting under a subpath.
+Vocs builds a fully static site under `docs/dist/public`. For GitHub Pages, run `UIR_DOCS_BASE_PATH=/uir make docs-build` to prefix navigation and asset URLs. Publish the contents of `docs/dist/public` at the root of `gh-pages` with a `.nojekyll` file.
 
 ## Edit content
 
@@ -34,6 +34,8 @@ Plans, analyses, and the proposed symbol-reference storage design remain reposit
 ## Diagrams
 
 The introduction and module-indexing pages render live React diagrams using Facet's `Diagram`, `BoxNode`, and `Arrow` components. Edit `src/components/Diagrams.tsx` to change their content. `documentation.ts` inserts the publication diagram under the generated module guide's storage heading. Narrow screens can scroll each diagram horizontally, including with the keyboard after focusing its frame.
+
+The landing page uses the UIR SVG artwork in `public/brand/` and embeds the analysis diagram. **How UIR works** embeds the lowering diagram. Both diagrams come from `uir-how-it-works.tsx` and are also used by the standalone diagram pages.
 
 The Storage ERD reference page reuses the seven entity diagrams exported by `uir-gorm-erd.tsx` through `src/components/StorageERD.tsx`. It retains the original proposed-design status and links to the implementation and design references. Edit `src/pages/storage-erd.mdx` for its explanatory text.
 

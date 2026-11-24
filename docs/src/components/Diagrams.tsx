@@ -7,12 +7,16 @@ import Arrow from '@flanksource/facet/diagram/Arrow'
 import { COLORS } from '@flanksource/facet/diagram/colors'
 import './diagrams.css'
 
+const canvasClass = 'w-max min-h-[210px] leading-normal'
+const scrollClass = 'overflow-x-auto rounded-xl bg-[#f7fbfe] [scrollbar-width:thin]'
+const captionClass = 'mt-3 text-sm text-[var(--vocs-text-color-secondary)]'
+
 function BrowserDiagram({ children }: Pick<ComponentProps<typeof Diagram>, 'children'>) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
   return mounted
-    ? <Diagram className="uir-diagram-canvas">{children}</Diagram>
-    : <div className="uir-diagram-canvas" />
+    ? <Diagram className={canvasClass}>{children}</Diagram>
+    : <div className={canvasClass} />
 }
 
 function Stage({ id, title, items, color = COLORS.primary }: {
@@ -33,9 +37,8 @@ function Stage({ id, title, items, color = COLORS.primary }: {
 
 export function OverviewDiagram() {
   return (
-    <figure className="uir-diagram" aria-label="UIR architecture: producers, model, storage, and consumers">
-      <div className="uir-diagram-scroll" tabIndex={0} role="region" aria-label="UIR architecture diagram"
-        style={{ backgroundColor: COLORS.background }}>
+    <figure className="my-6" aria-label="UIR architecture: producers, model, storage, and consumers">
+      <div className={scrollClass} tabIndex={0} role="region" aria-label="UIR architecture diagram">
         <BrowserDiagram>
           {(id) => (
             <>
@@ -59,16 +62,15 @@ export function OverviewDiagram() {
           )}
         </BrowserDiagram>
       </div>
-      <figcaption>Extractors produce UIR facts. Snapshot storage makes those facts available to queries, graphs, diffs, and the browser. The model can also be used directly as a library.</figcaption>
+      <figcaption className={captionClass}>Extractors produce UIR facts. Snapshot storage makes those facts available to queries, graphs, diffs, and the browser. The model can also be used directly as a library.</figcaption>
     </figure>
   )
 }
 
 export function PublicationDiagram() {
   return (
-    <figure className="uir-diagram" aria-label="Go indexing and atomic snapshot publication">
-      <div className="uir-diagram-scroll" tabIndex={0} role="region" aria-label="Snapshot publication diagram"
-        style={{ backgroundColor: COLORS.background }}>
+    <figure className="my-6" aria-label="Go indexing and atomic snapshot publication">
+      <div className={scrollClass} tabIndex={0} role="region" aria-label="Snapshot publication diagram">
         <BrowserDiagram>
           {(id) => (
             <>
@@ -99,7 +101,7 @@ export function PublicationDiagram() {
           )}
         </BrowserDiagram>
       </div>
-      <figcaption>For a changed Go module, extraction finishes before publication starts. Snapshot facts and the version-checked location head commit together. Readers resolve sources and package input hashes to load the saved documents.</figcaption>
+      <figcaption className={captionClass}>For a changed Go module, extraction finishes before publication starts. Snapshot facts and the version-checked location head commit together. Readers resolve sources and package input hashes to load the saved documents.</figcaption>
     </figure>
   )
 }

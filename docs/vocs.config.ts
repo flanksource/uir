@@ -1,16 +1,27 @@
 import { defineConfig } from 'vocs/config'
 
+const basePath = process.env.UIR_DOCS_BASE_PATH ?? '/'
+const brandAssets = `${basePath.replace(/\/$/, '')}/brand`
+
 export default defineConfig({
   title: 'UIR',
   description: 'A universal intermediate representation for indexing, querying, and comparing code.',
+  basePath,
+  accentColor: 'light-dark(#3578e5, #0ea5e9)',
+  iconUrl: `${brandAssets}/favicon.svg`,
+  logoUrl: {
+    light: `${brandAssets}/uir-horizontal.svg`,
+    dark: `${brandAssets}/uir-horizontal-reversed.svg`,
+  },
   renderStrategy: 'full-static',
   topNav: [
     { text: 'Guides', link: '/getting-started' },
+    { text: 'How it works', link: '/how-it-works' },
     { text: 'Model', link: '/model' },
     { text: 'GitHub', link: 'https://github.com/flanksource/uir', external: true },
   ],
   sidebar: [
-    { text: 'Introduction', link: '/' },
+    { text: 'Introduction', link: '/overview' },
     { text: 'Getting started', link: '/getting-started' },
     {
       text: 'Index and publish',
@@ -45,6 +56,7 @@ export default defineConfig({
     {
       text: 'Architecture and design',
       items: [
+        { text: 'How UIR works', link: '/how-it-works' },
         { text: 'Architecture', link: '/architecture' },
         { text: 'Storage', link: '/storage' },
         { text: 'Storage ERD', link: '/storage-erd' },

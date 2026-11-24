@@ -1,0 +1,109 @@
+.uir-hero {
+  display: grid;
+  align-content: center;
+  gap: 1.5rem;
+  min-height: 25rem;
+  padding: clamp(1.5rem, 5vw, 3.75rem);
+  padding-inline-end: clamp(13rem, 31%, 22rem);
+  border-radius: 1.25rem;
+  background: #131f3b url('/brand/uir-symbol-reversed.svg') no-repeat right 1.25rem center / min(27%, 16rem);
+  color: #fff;
+}
+
+.uir-hero h1 {
+  max-width: 16ch;
+  margin: 0;
+  color: inherit;
+  font-size: clamp(2.4rem, 5.2vw, 4.125rem);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.04;
+  text-wrap: balance;
+}
+
+.uir-hero p {
+  max-width: 64ch;
+  margin: 0;
+  color: #dbe4f3;
+  line-height: 1.65;
+}
+
+.uir-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.uir-actions a {
+  padding: 0.55rem 0.9rem;
+  border: 1px solid #8097bc;
+  border-radius: 0.5rem;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.uir-actions a.uir-action-primary {
+  border-color: #3578e5;
+  background: #3578e5;
+  color: #030711;
+}
+
+.uir-actions a:hover {
+  border-color: #0ea5e9;
+  text-decoration: underline;
+}
+
+.uir-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.5rem), 1fr));
+  gap: 1rem;
+  margin-block: 1.25rem 2rem;
+}
+
+.uir-features a.uir-feature {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  border: 1px solid light-dark(#cbd5e1, #465875);
+  border-radius: 0.75rem;
+  background: light-dark(#f4f7fc, #18253d);
+  color: light-dark(#131f3b, #edf3fc);
+  text-decoration: none;
+}
+
+.uir-feature h3,
+.uir-feature p {
+  margin: 0;
+  color: inherit;
+}
+
+.uir-feature h3 {
+  font-size: 1.125rem;
+}
+
+.uir-feature p {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.uir-feature:hover h3 {
+  text-decoration: underline;
+}
+
+.uir-actions a:focus-visible,
+.uir-feature:focus-visible {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 3px;
+}
+
+@media (max-width: 700px) {
+  .uir-hero {
+    min-height: auto;
+    padding-inline-end: clamp(1.5rem, 5vw, 3.75rem);
+    padding-block-start: 6.5rem;
+    background-position: left 1.2rem top 1.1rem;
+    background-size: 4.5rem;
+  }
+}
