@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@flanksource/facet':
-        specifier: 0.1.74
-        version: 0.1.74(@babel/core@7.29.7(supports-color@8.1.1))(@babel/template@7.29.7)(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@17.0.2)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)
+        specifier: 0.1.75
+        version: 0.1.75(@babel/core@7.29.7(supports-color@8.1.1))(@babel/template@7.29.7)(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@17.0.2)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)
       '@flanksource/icons':
-        specifier: 1.0.65
-        version: 1.0.65(react@19.3.0)
+        specifier: 1.0.66
+        version: 1.0.66(react@19.3.0)
       react:
         specifier: ~19.3.0
         version: 19.3.0
@@ -423,8 +423,8 @@ packages:
       streamdown:
         optional: true
 
-  '@flanksource/facet@0.1.74':
-    resolution: {integrity: sha512-+d8F4uMYI/eQ6PZdIMIl+nLvf8naxYU1eZZ45NZ4oLwgnODkSaJKK9udLSvCb4MfiGIcdhqwtC6NBtkq+/eoaA==}
+  '@flanksource/facet@0.1.75':
+    resolution: {integrity: sha512-xWBIAODmDE3VIDtJWLf3V4RCnd6U+7GzOfFK1YoJbL7+TLvTjIcySnuNF1+eTeQ3GCMJq4O4F0+/wJJ1P881rA==}
     engines: {node: '>=20.19'}
     peerDependencies:
       react: '>=18'
@@ -437,6 +437,11 @@ packages:
 
   '@flanksource/icons@1.0.65':
     resolution: {integrity: sha512-Z8EW8V0c4YJWs529wS3RNrN/1Q65eYgxqrkln3djUzBLg3acfHLYUGmXoSBQnPXQSGO4No+2wr9uLVsnE53wlA==}
+    peerDependencies:
+      react: '*'
+
+  '@flanksource/icons@1.0.66':
+    resolution: {integrity: sha512-xhA7z6actm24wPILQ02L9IOzZlsvaEqRvSX0HiJdTc8mdAIPg9GaMS1kF80PC84qqicRlauRL1h1vRiz8JttlA==}
     peerDependencies:
       react: '*'
 
@@ -4566,7 +4571,7 @@ snapshots:
       - '@babel/template'
       - '@types/react'
 
-  '@flanksource/facet@0.1.74(@babel/core@7.29.7(supports-color@8.1.1))(@babel/template@7.29.7)(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@17.0.2)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)':
+  '@flanksource/facet@0.1.75(@babel/core@7.29.7(supports-color@8.1.1))(@babel/template@7.29.7)(@shikijs/langs@1.29.2)(@shikijs/themes@1.29.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@17.0.2)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)':
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/commands': 6.11.1
@@ -4633,6 +4638,10 @@ snapshots:
       react: 19.3.0
 
   '@flanksource/icons@1.0.65(react@19.3.0)':
+    dependencies:
+      react: 19.3.0
+
+  '@flanksource/icons@1.0.66(react@19.3.0)':
     dependencies:
       react: 19.3.0
 
