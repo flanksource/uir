@@ -9,13 +9,19 @@ import (
 	"github.com/flanksource/uir/query/sqlsyntax"
 )
 
-// SQLRow retains the source witness independently of the selected columns.
-type SQLRow struct {
-	Values map[string]any
-	Match  ModuleMatch
+// QueryRow retains the symbol and source witness independently of the selected columns.
+type QueryRow struct {
+	Values      map[string]any
+	Match       ModuleMatch
+	Symbol      *ModuleSymbol
+	Properties  map[string]any
+	SymbolAlias bool
 	// WitnessSymbol owns the source location, independently of projected symbols.
 	WitnessSymbol *ModuleSymbol
 }
+
+// SQLRow is the row type accepted by VisitSQL.
+type SQLRow = QueryRow
 
 // ValidateSQLRows checks row-producing SQL syntax without opening an index.
 func ValidateSQLRows(input string) error {
@@ -33,7 +39,7 @@ func ValidateSQLRows(input string) error {
 }
 
 // VisitSQL visits every selected row, without interactive pagination.
-func (pipeline *Pipeline) VisitSQL(ctx context.Context, input string, scope ModuleScopeOptions, visit func(SQLRow) error) (ModuleQueryResult, error) {
+func (pipeline *Pipeline) VisitSQL(ctx context.Context, input string, scope ModuleScopeOptions, visit func(QueryRow) error) (ModuleQueryResult, error) {
 	if visit == nil {
 		return ModuleQueryResult{}, errors.New("SQL row visitor is required")
 	}

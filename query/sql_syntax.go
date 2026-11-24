@@ -75,6 +75,7 @@ func (pipeline *Pipeline) sqlSyntaxRows(ctx context.Context, parsed *sqlsyntax.Q
 				symbol.ID = *declaration.ID
 			}
 			values := map[string]any{"path": match.Path, "line": *match.Line, "column": *match.Column, "package": match.PackagePath, "module": match.RootKey, "snapshot": match.SnapshotID, "role": "definition",
+				"symbol": symbol, "symbol.props": declaration.Props,
 				"symbol.kind": symbol.Kind, "symbol.name": name, "symbol.query_name": symbol.QueryName, "symbol.module": symbol.ModuleKey, "symbol.package": symbol.PackagePath,
 				"symbol.metrics.param_count": declaration.Metrics.ParamCount, "symbol.metrics.body_lines": nil}
 			if declaration.Metrics.BodyLines != nil {
