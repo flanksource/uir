@@ -4,7 +4,7 @@ A universal intermediate representation for indexing, querying, and comparing co
 
 <!--
 Sitemap:
-- [UIR](/index)
+- [UIR overview](/overview)
 - [Getting started](/getting-started)
 - [Module-root indexing and queries](/module-indexing)
 - [Incremental Go indexing](/indexing)
@@ -21,22 +21,26 @@ Sitemap:
 - [SQL language reference](/sql-query)
 - [UIR Model Reference](/model)
 - [Symbols and references](/symbols)
+- [How UIR works](/how-it-works)
 - [Universal Intermediate Representation (UIR) API Specification](/architecture)
 - [UIR storage design](/storage)
 - [Storage ERD](/storage-erd)
 - [Snapshot-aware symbol index: schema review](/symbol-index-storage)
 - [Compact symbol handles and symbol deltas](/symbol-compact-ids)
 - [Symbol index benchmarks](/benchmarks)
+- [UIR · Universal Intermediate Representation](/index): Index a codebase once, then query, graph, lint, and diff its symbols in one model.
 - [Producer plugins and uir import --plugin repomap](/repomap-producer)
 -->
 
-# UIR
+# UIR overview
 
 Universal Intermediate Representation is a language-agnostic model for describing code: modules, packages, types, methods, records, tables, endpoints, and the statements inside method bodies. Extractors emit UIR; generators and analysers consume it.
 
 The Go package is the canonical model, with parallel Python and Java ports. The CLI indexes Go modules into immutable snapshots so you can navigate symbols, trace call relationships, and compare revisions.
 
 <OverviewDiagram />
+
+See [how UIR works](/how-it-works) for the full lowering, storage, and analysis diagrams.
 
 ## Start here
 
@@ -3303,6 +3307,22 @@ These names are illustrative; inspect indexed symbols for a real module. See the
 
 For an in-memory UIR document, `NodeTree.Walk` and structured identifier comparisons remain independent of the relational index. `Find(...).WithName(...)` compares `GetName()` and `String()`, but its skip-filter traversal may miss descendants of a heterogeneous root. Prefer `Walk` when searching the entire tree.
 
+# How UIR works
+
+UIR gives code, SQL, and domain-specific data a shared vocabulary of symbols and relationships. The two diagrams show how producers publish those facts and how the CLI uses them.
+
+## Everything lowers into one model
+
+<ProductDiagram kind="inputs" caption="The Go indexer builds typed facts directly. SQL, XML, and other producers can publish validated JSON with their own symbol kinds and properties." />
+
+See [module indexing](/module-indexing) and [historical imports](/historical-import) for the input and publication contracts.
+
+## One model answers many questions
+
+<ProductDiagram kind="outputs" caption="Queries, call graphs, symbol diffs, SQL lint rules, and the browser read the same model. Snapshots are stored in SQLite or PostgreSQL." />
+
+Use the [getting started guide](/getting-started) to index a sample module and trace its calls.
+
 # **Universal Intermediate Representation (UIR) API Specification**
 
 This document provides the detailed API specification for the Universal Intermediate Representation (UIR). The UIR is a universal Abstract Syntax Tree (AST) format designed to represent source code, data structures, and service definitions from multiple languages and domains in a unified structure.
@@ -6556,6 +6576,62 @@ bash .tmp/bench/explain.sh postgres github.com/flanksource/commons github.com/fl
 ```
 
 `lib.sh` exports `GOWORK=off` and a fixed Git author and date. It refuses any commit whose `git rev-parse --show-toplevel` is not the fixture itself under `$TMPDIR/s9bench/`.
+
+<section className="uir-hero" aria-labelledby="uir-title">
+  <h1 id="uir-title">One model for every codebase you run.</h1>
+  <p>UIR is the Universal Intermediate Representation. It lowers Go, SQL routines, XML, and domain-specific sources into one model of code. Index a repository once, then query symbols, trace calls, enforce SQL rules, and diff changes across commits.</p>
+
+  <div className="uir-actions">
+    <Link className="uir-action-primary" to="/getting-started">Get started</Link>
+    <Link to="/how-it-works">How it works</Link>
+    <a href="https://github.com/flanksource/uir">View on GitHub</a>
+  </div>
+</section>
+
+## What UIR does
+
+<div className="uir-features">
+  <Link to="/module-indexing" className="uir-feature">
+    <h3>Many sources, one model</h3>
+    <p>Lower Go, PL/pgSQL, T-SQL, and XML, or publish symbols and relationships from your own domain.</p>
+  </Link>
+
+  <Link to="/storage" className="uir-feature">
+    <h3>Snapshot indexing</h3>
+    <p>Build immutable snapshots in SQLite or PostgreSQL with <code>uir add</code> and <code>uir reindex</code>.</p>
+  </Link>
+
+  <Link to="/query" className="uir-feature">
+    <h3>Query with selectors or SQL</h3>
+    <p>Find symbols and follow relationships, or use SQL to query metrics and aggregate results.</p>
+  </Link>
+
+  <Link to="/graph" className="uir-feature">
+    <h3>Bounded call graphs</h3>
+    <p>Explore callers and callees to a set depth and see the conditions around each call.</p>
+  </Link>
+
+  <Link to="/lint" className="uir-feature">
+    <h3>SQL lint rules</h3>
+    <p>Enforce architecture rules in CI and report violations at the source line.</p>
+  </Link>
+
+  <Link to="/diff" className="uir-feature">
+    <h3>Rename-aware diffs</h3>
+    <p>Compare symbols across Git commits and see changes to signatures, structure, and bodies.</p>
+  </Link>
+</div>
+
+## Index and query a Go module
+
+After [installing the CLI](/getting-started#install-the-cli), run `uir add` from a Go module, then find a function and its callers. Replace `Run` with the function you want to trace.
+
+```bash
+uir add .
+uir query 'func:Run <'
+```
+
+[Read the docs introduction](/overview) or use the [Go model](/model) directly.
 
 # Producer plugins and `uir import --plugin repomap`
 

@@ -2,7 +2,7 @@
 
 A universal intermediate representation for indexing, querying, and comparing code.
 
-- [UIR](/index)
+- [UIR overview](/overview)
 - [Getting started](/getting-started)
 - [Module-root indexing and queries](/module-indexing)
 - [Incremental Go indexing](/indexing)
@@ -19,10 +19,12 @@ A universal intermediate representation for indexing, querying, and comparing co
 - [SQL language reference](/sql-query)
 - [UIR Model Reference](/model)
 - [Symbols and references](/symbols)
+- [How UIR works](/how-it-works)
 - [Universal Intermediate Representation (UIR) API Specification](/architecture)
 - [UIR storage design](/storage)
 - [Storage ERD](/storage-erd)
 - [Snapshot-aware symbol index: schema review](/symbol-index-storage)
 - [Compact symbol handles and symbol deltas](/symbol-compact-ids)
 - [Symbol index benchmarks](/benchmarks)
+- [UIR · Universal Intermediate Representation](/index): Index a codebase once, then query, graph, lint, and diff its symbols in one model.
 - [Producer plugins and uir import --plugin repomap](/repomap-producer)
