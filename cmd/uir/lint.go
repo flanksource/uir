@@ -68,7 +68,7 @@ func registerLintCommand(root *cobra.Command, runtime *commandRuntime) {
 			return results, nil
 		})
 	})
-	command.Short = "Run SQL architecture rules from .uir.yaml"
+	command.Short = "Run architecture rules from .uir.yaml"
 	command.Args = cobra.MaximumNArgs(1)
 	command.Use = "lint [revision|A..B|A...B]"
 	clicky.MarkLocalOnly(command)

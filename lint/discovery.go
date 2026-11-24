@@ -15,6 +15,8 @@ type DiscoveryOptions struct {
 	Boundary string
 }
 
+var ErrNoConfig = errors.New("no UIR lint configuration")
+
 func Discover(options DiscoveryOptions) (*Config, error) {
 	if options.Explicit != "" {
 		if options.Boundary != "" && !insideSource(options.Explicit, options.Boundary) {
@@ -34,7 +36,7 @@ func Discover(options DiscoveryOptions) (*Config, error) {
 		return nil, err
 	}
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("no %s configuration inside %s or its configured ancestors", ConfigName, directory)
+		return nil, fmt.Errorf("%w: no %s configuration inside %s or its configured ancestors", ErrNoConfig, ConfigName, directory)
 	}
 	config := &Config{Version: 1, Root: directory}
 	if root != "" {
@@ -48,6 +50,7 @@ func Discover(options DiscoveryOptions) (*Config, error) {
 		}
 	}
 	positions := map[string]int{}
+	sourcePositions := map[string]int{}
 	for _, path := range paths {
 		layer, err := Load(path)
 		if errors.Is(err, errExpiredConfig) {
@@ -62,6 +65,18 @@ func Discover(options DiscoveryOptions) (*Config, error) {
 		}
 		if layer.includeTestsSet {
 			config.Lint.IncludeTests = layer.Lint.IncludeTests
+		}
+		if layer.Lint.CompatibilityLevel != 0 {
+			config.Lint.CompatibilityLevel = layer.Lint.CompatibilityLevel
+		}
+		for _, source := range layer.Sources {
+			key := source.selector()
+			if position, exists := sourcePositions[key]; exists {
+				config.Sources[position] = source
+			} else {
+				sourcePositions[key] = len(config.Sources)
+				config.Sources = append(config.Sources, source)
+			}
 		}
 		for _, rule := range layer.Lint.Rules {
 			if position, exists := positions[rule.ID]; exists {

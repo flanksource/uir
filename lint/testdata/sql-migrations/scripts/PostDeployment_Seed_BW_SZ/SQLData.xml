@@ -1,0 +1,6 @@
+-- SQL body of the OIPA migration
+DELETE FROM finance.ledger;
+GO
+INSERT INTO dbo.audit_log (value) SELECT dbo.mask_pan('example');
+GO
+SELECT value FROM GENERATE_SERIES(1, 3);

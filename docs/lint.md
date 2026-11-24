@@ -1,8 +1,8 @@
-# SQL architecture linting
+# Architecture linting
 
 The [request-state example](../lint/testdata/request-state/.uir.yaml) rejects package-level variables of the exact request-scoped context, configuration, runtime and database types used by OIPA's Ruleguard rule. It uses `symbol.type`, including inferred types and aliases, and preserves each variable name's source location. Run `uir lint --config lint/testdata/request-state/.uir.yaml` with an isolated database to inspect the example. The example is a self-contained module; use `GOWORK=off` when running it from this development workspace. Incomplete typed coverage or missing type facts fail this rule's query rather than silently passing it.
 
-`uir lint` executes rules from `.uir.yaml`. Each SQL row becomes a Gavel violation with its original source location, even when the SELECT list only contains metric values. Queries can combine metrics with the existing definitions, callers, callees, reads, writes and implementation navigation functions.
+`uir lint` runs SQL and compact queries from `.uir.yaml`. Each match becomes a Gavel finding at its original source location. A leading `SELECT` after whitespace and comments selects SQL. Compact rules use the same expressions as `uir query`.
 
 ## SQL migration sources
 
@@ -45,7 +45,7 @@ Go analysis selects the enclosing module at the invocation directory, or at the 
 
 `--all` selects every registered module's primary location, applies the selected configuration to all of them, and pins their snapshots into one combined query scope. Register modules with `uir add` first. Cross-module callers, callees and other navigation can then traverse those selected modules. External producer locations use their existing snapshots. Under `--all`, include/exclude file patterns are relative to each module. `--all` cannot combine with `--changed`, `--staged` or `--snapshot`; it supports `--no-index`.
 
-Version 1 accepts `version`, optional `_expires`, `sources`, `lint.include_tests` (default false), `lint.compatibility_level`, and `lint.rules`. Every unexpired file requires a source mapping or a rule. Give each rule a unique `id`, SQL `query` and nonempty `message`. Severity defaults to `error` and also supports `warning` and `info`. Built-in rule IDs include `uir/coverage`, `uir/index`, and `sql-compatibility-level`. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
+Version 1 accepts `version`, optional `_expires`, `sources`, `lint.include_tests` (default false), `lint.compatibility_level`, and `lint.rules`. Every unexpired file requires a source mapping or a rule. Give each rule a unique `id`, a `query`, and a nonempty `message`. Severity defaults to `error` and also supports `warning` and `info`. Built-in rule IDs include `uir/coverage`, `uir/index`, and `sql-compatibility-level`. Unknown fields, duplicate YAML keys, extra documents, invalid queries and invalid templates fail validation.
 
 For shared rules, save this as `~/.uir.yaml`:
 
@@ -90,9 +90,24 @@ GOWORK=off .bin/uir --dsn .tmp/hack-build-tag-example.db lint --config lint/test
 
 The fixture deliberately includes violations and reports eight warnings, including an excluded platform file, a test file and a nested hack directory. `myhack/` and files that require `hack` do not produce findings. Warning-only runs exit zero. Use `gavel fixtures fixtures/hack-build-tag.md` for executable acceptance.
 
-Messages use Go `text/template` with SELECT aliases as map keys. For example, `SELECT symbol.name AS name` exposes `{{.name}}`. Use `{{index . "symbol.name"}}` for an unaliased dotted column. Missing keys accessed by name fail execution. Rules return every matching row: explicit `LIMIT` and terminal `graph()`/`path()` results are rejected. The interactive query limit does not apply to lint.
+Messages use Go `text/template`. `{{.symbol}}` renders the qualified name of the matched symbol. Its identity fields are `module`, `package`, `kind`, `name`, `query_name`, and `params`, the ordered list of published parameter types. `filename`, `filepath`, `line`, and `location` identify the finding site. For example, `{{.symbol.location}}` can render `scripts/PostDeployment_Seed/SQLData.xml:42`. `filepath` is relative to the checkout, and `location` omits the line suffix when there is no line. `.kind` contains producer-specific properties such as `.kind.phase`.
 
-Lint infers analysis requirements from the selected SQL rules. File metrics, build headers and direct callable metric queries use syntax analysis without loading Go packages or resolving imported modules. Type fields, canonical identities, references, relationships and navigation functions use typed analysis. Typed analysis loads imported type information to resolve the current module's facts; it publishes documents only for the selected module and never recursively indexes dependencies. Normal `uir add` and `uir reindex` retain their existing dependency indexing behavior.
+For a write rule, `.symbol` identifies the written object. The finding still points to the statement that writes it.
+
+```yaml
+version: 1
+lint:
+  rules:
+    - id: block-reference-data-writes
+      query: '*.ascode ~w | *.astranslation ~w'
+      message: 'Deployment script must not write to {{.symbol}}'
+```
+
+SQL projection aliases remain available as message keys. `SELECT symbol.name AS name` exposes `{{.name}}`, and an explicit alias named `symbol` or `kind` takes precedence over the corresponding object. Referencing a missing key fails the rule.
+
+Rules visit every match without the interactive result limit. SQL `LIMIT`, terminal graphs, and call paths are invalid in lint rules. In compact rules, an absent symbol matches no rows and an ambiguous exact name fails with a rule error.
+
+Compact rules use typed analysis. SQL file metrics, build headers, and direct callable metric queries can use syntax analysis without loading Go packages or resolving imported modules. Typed analysis resolves the selected module’s facts using imported type information and publishes documents only for that module. Normal `uir add` and `uir reindex` retain their existing dependency indexing behavior.
 
 Syntax and typed snapshots have separate persisted analysis heads and do not advance normal index heads. Repeated runs reuse unchanged analysis, including dirty checkouts, without loading packages or publishing another snapshot. Reuse validates source bytes, manifests, build options, test selection and the indexer version. Typed reuse also validates imported local package source and workspace module manifests; changes in unrelated workspace package source do not invalidate it.
 

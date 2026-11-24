@@ -1,7 +1,9 @@
 package lint
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 
 	"github.com/flanksource/uir/query"
 )
@@ -14,6 +16,25 @@ type Selection struct {
 func (config *Config) Filter(options Options) (*Selection, error) {
 	if options.GroupBy != "" && options.GroupBy != "file" && options.GroupBy != "symbol" {
 		return nil, fmt.Errorf("invalid --group-by %q: expected symbol or file", options.GroupBy)
+	}
+	if options.NoIndex && len(config.Sources) > 0 {
+		return nil, fmt.Errorf("mapped sources require indexing; select an existing snapshot with --snapshot")
+	}
+	level := cmp.Or(options.CompatibilityLevel, config.Lint.CompatibilityLevel)
+	if err := validateCompatibilityLevel(level); err != nil {
+		return nil, err
+	}
+	if options.CompatibilityLevel != 0 && options.Dialect != "" && options.Dialect != "tsql" {
+		return nil, fmt.Errorf("a database compatibility level requires the tsql dialect")
+	}
+	if level != 0 && (options.SQLOnly || len(config.Sources) > 0) {
+		rule, err := compatibilityRule(level)
+		if err != nil {
+			return nil, err
+		}
+		withCompatibility := *config
+		withCompatibility.Lint.Rules = append(slices.Clone(config.Lint.Rules), rule)
+		config = &withCompatibility
 	}
 	rules, err := config.Select(options.Rules)
 	if err != nil {

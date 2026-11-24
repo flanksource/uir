@@ -4,6 +4,7 @@ go 1.27.4
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/flanksource/clicky v1.21.97
 	github.com/flanksource/commons v1.64.1
 	github.com/flanksource/commons-db v0.1.69
@@ -104,7 +105,6 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
