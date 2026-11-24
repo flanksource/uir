@@ -24,9 +24,10 @@ const (
 // indexWarning matches the one lint-shaped warning of a file published degraded.
 func indexWarning(file, message string) types.GomegaMatcher {
 	return MatchAllFields(Fields{
-		"File": Equal(file), "Line": BeZero(), "Column": BeZero(), "Message": PointTo(MatchRegexp(message)),
+		"File": Equal(file), "Line": BeZero(), "Column": BeZero(), "EndLine": BeZero(), "EndColumn": BeZero(), "Path": BeEmpty(), "Message": PointTo(MatchRegexp(message)),
 		"Source": Equal("uir"), "Rule": PointTo(Equal(models.Rule{Type: models.RuleTypeDeny, Package: "uir", Method: RuleIndex})),
 		"Severity": Equal(models.SeverityWarning), "Fixable": BeFalse(), "FixApplicability": BeEmpty(), "Code": BeNil(), "CreatedAt": BeZero(),
+		"Excerpt": BeNil(), "Anchor": BeNil(), "Locations": BeEmpty(), "Fingerprint": BeEmpty(),
 	})
 }
 

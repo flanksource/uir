@@ -9,13 +9,13 @@ require (
 	github.com/flanksource/commons v1.64.2
 	github.com/flanksource/commons-db v0.1.88
 	github.com/flanksource/commons-db/cmd/query v0.1.88
-	github.com/flanksource/gavel v0.0.94
-	github.com/flanksource/sqlglot-go v1.3.5
+	github.com/flanksource/gavel v0.0.80-0.20261124164458-8d9e762ca8ee
+	github.com/flanksource/sqlglot-go v1.3.7
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3
 	github.com/google/uuid v1.6.1-0.20241114170450-2d3c2a9cc518
-	github.com/onsi/ginkgo/v2 v2.33.1
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	github.com/pkg/diff v0.0.0-20241224192749-4e6772a4315c
 	github.com/samber/lo v1.53.0
@@ -105,6 +105,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bluekeyes/go-gitdiff v0.8.1 // indirect
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
@@ -144,12 +145,12 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fergusstrange/embedded-postgres v1.34.0 // indirect
 	github.com/firebase/genkit/go v1.13.1 // indirect
-	github.com/flanksource/captain v0.0.89 // indirect
-	github.com/flanksource/clicky/aichat v1.21.94 // indirect
+	github.com/flanksource/captain v0.0.92 // indirect
+	github.com/flanksource/clicky/aichat v1.21.100 // indirect
 	github.com/flanksource/clicky/valkey v1.21.94 // indirect
 	github.com/flanksource/commons-db/recordstore v0.1.88 // indirect
 	github.com/flanksource/commons-db/tracing v0.1.88 // indirect
-	github.com/flanksource/gomplate/v3 v3.24.91 // indirect
+	github.com/flanksource/gavel/sdk v0.1.0 // indirect
 	github.com/flanksource/gomplate/v4 v4.0.3 // indirect
 	github.com/flanksource/is-healthy v1.0.93 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
@@ -165,7 +166,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-git/go-git/v5 v5.19.2 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.7 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.9 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
@@ -217,6 +218,7 @@ require (
 	github.com/henvic/httpretty v0.1.4 // indirect
 	github.com/hexops/gotextdiff v1.0.3 // indirect
 	github.com/hirochachacha/go-smb2 v1.1.0 // indirect
+	github.com/hmarr/codeowners v1.2.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/itchyny/gojq v0.12.19 // indirect
@@ -238,7 +240,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/labstack/echo/v4 v4.16.3 // indirect
+	github.com/labstack/echo/v4 v4.16.4 // indirect
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/lann/builder v0.0.0-20180802200727-47ae307949d0 // indirect
 	github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0 // indirect

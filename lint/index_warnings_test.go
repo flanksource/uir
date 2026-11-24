@@ -38,10 +38,11 @@ var _ = Describe("lint over a module with a file that cannot be indexed", func()
 			Expect(first.Violations).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{"File": Equal(filepath.Join(root, "small.go")), "Rule": gstruct.PointTo(HaveField("Method", "small"))})))
 			Expect(indexWarnings(first)).To(HaveExactElements(
 				gstruct.MatchAllFields(gstruct.Fields{
-					"File": Equal(filepath.Join(root, "checkout.go")), "Line": BeZero(), "Column": BeZero(),
+					"File": Equal(filepath.Join(root, "checkout.go")), "Line": BeZero(), "Column": BeZero(), "EndLine": BeZero(), "EndColumn": BeZero(), "Path": BeEmpty(),
 					"Message": gstruct.PointTo(MatchRegexp(`^validate extracted document: .*"checkout.go": symbol 2: key is already declared by symbol 1 .*; indexed as an empty document$`)),
 					"Source":  Equal("uir"), "Rule": gstruct.PointTo(Equal(models.Rule{Type: models.RuleTypeDeny, Package: "uir", Method: indexer.RuleIndex})),
 					"Severity": Equal(models.SeverityWarning), "Fixable": BeFalse(), "FixApplicability": BeEmpty(), "Code": BeNil(), "CreatedAt": BeZero(),
+					"Excerpt": BeNil(), "Anchor": BeNil(), "Locations": BeEmpty(), "Fingerprint": BeEmpty(),
 				}),
 			))
 
