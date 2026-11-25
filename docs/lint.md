@@ -12,7 +12,7 @@ A `sources` entry selects files with `match` or `match_regex`. A CEL transform r
 
 The SQL producer accepts `tsql`, `postgres`, or `sqlite`. An optional `default_schema` applies to unqualified references. Use `reads(table:...)` and `writes(table:...)` for table rules, and `references(sql.function:...)` with `role = 'call'` or `writes(sql.function:...)` for function rules. Set `lint.compatibility_level` to check documented SQL Server feature requirements such as `GENERATE_SERIES` at level 160. Parser diagnostics and incomplete analysis are error findings. [SQL Server compatibility requirements for `GENERATE_SERIES`](https://learn.microsoft.com/en-us/sql/t-sql/functions/generate-series-transact-sql?view=sql-server-ver17)
 
-For an explicit SQL-only run, use `gavel lint sql migrations -- --dialect tsql --compatibility-level 130` or `sqlglot lint --dialect tsql --compatibility-level 130 migrations`.
+For an explicit SQL-only run, use `gavel lint sql migrations -- --dialect tsql --compatibility-level 130`.
 
 Copy [the runnable example](../lint/testdata/project/.uir.yaml) to your project root as `.uir.yaml`. It flags files with fewer than 100 lines and three definitions, functions with more than three parameters, and bodies longer than 50 lines.
 
