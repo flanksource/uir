@@ -370,8 +370,8 @@ github.com/flanksource/repomap v0.4.1 h1:Cl5CiwYJX/NKes9qy0U3fKshO4jR0+wzND8+VfB
 github.com/flanksource/repomap v0.4.1/go.mod h1:cEV1sJNWhOruzSU65LtH/k6kkjZSZW4rOUwl86DrO7w=
 github.com/flanksource/sandbox-runtime v1.0.2 h1:dEaVyUpeaCAn3GOiWcNDrPguaey1Gx9eTsPAc27W3Eg=
 github.com/flanksource/sandbox-runtime v1.0.2/go.mod h1:x5Ywc1MrP3lTgmj0VUCeFJzrDZ3mBhBV4Gdc/ioV76M=
-github.com/flanksource/sqlglot-go v1.3.7 h1:zMftNtunOkDP+J/EfRpro2gvsm0/tt7/YB3CW8khJbo=
-github.com/flanksource/sqlglot-go v1.3.7/go.mod h1:zVZqNPg5/oT4kcaLGF2Q6fcQy/KYnTPxLOo2okSD1dY=
+github.com/flanksource/sqlglot-go v1.3.9 h1:qrEwQWVVvxXHTGjUxuXc+x/CGX+zcOWC5RgHl7kNVgg=
+github.com/flanksource/sqlglot-go v1.3.9/go.mod h1:zVZqNPg5/oT4kcaLGF2Q6fcQy/KYnTPxLOo2okSD1dY=
 github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=
 github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
 github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx59Ho=
@@ -752,8 +752,6 @@ github.com/pelletier/go-toml/v2 v2.4.3 h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdD
 github.com/pelletier/go-toml/v2 v2.4.3/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/peterbourgon/diskv v2.0.1+incompatible h1:UBdAOUP5p4RWqPBg048CAvpKN+vxiaj6gdUUzhl4XmI=
 github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
-github.com/pgplex/pgparser v0.2.0 h1:BB7I/Mrwetiw07PTq/AlXcKfajlCwoJfwB7KZ7V9irI=
-github.com/pgplex/pgparser v0.2.0/go.mod h1:DWhK7oZJn/16KTFeOQ+mk78+sRnEYya1XPghIoP9NFU=
 github.com/pierrec/lz4/v4 v4.1.26 h1:GrpZw1gZttORinvzBdXPUXATeqlJjqUG/D87TKMnhjY=
 github.com/pierrec/lz4/v4 v4.1.26/go.mod h1:EoQMVJgeeEOMsCqCzqFm2O0cJvljX2nGZjcRIPL34O4=
 github.com/pjbgf/sha1cd v0.6.0 h1:3WJ8Wz8gvDz29quX1OcEmkAlUg9diU4GxJHqs0/XiwU=

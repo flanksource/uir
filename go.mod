@@ -10,7 +10,7 @@ require (
 	github.com/flanksource/commons-db v0.1.88
 	github.com/flanksource/commons-db/cmd/query v0.1.88
 	github.com/flanksource/gavel v0.0.80-0.20261124164458-8d9e762ca8ee
-	github.com/flanksource/sqlglot-go v1.3.7
+	github.com/flanksource/sqlglot-go v1.3.9
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3
@@ -281,7 +281,6 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
-	github.com/pgplex/pgparser v0.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
