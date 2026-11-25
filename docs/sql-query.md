@@ -117,6 +117,8 @@ Selector values can use double quotes, for example `func:"Premium Calc (Annual)"
 | `relationship.kind`, `relationship.resolution` | string | Native kind and `static`, `dynamic`, `ambiguous`, or `unresolved` resolution. |
 | `relationship.props`, `relationship.props.<field>` | object or schema type | Native relationship properties, when present. |
 
+A `table` or `column` symbol declared by an HCL source is queried the same whether its table block sets `partial = true` or not: the flag says what a schema comparison does with the members the table omits (a complete table's are dropped, a partial one's are kept), not which symbols exist. See [lint](lint.md) and [selected SQL migrations](../sql/migrate/README.md).
+
 Symbol `SELECT *` includes the symbol, its identity/name/ownership/property fields, witness fields, and relationship fields. It does not automatically include variable types or metrics; request them explicitly. Missing optional facts are `NULL`; unavailable required type/metric capabilities fail as described below.
 
 File sources have a separate field set: `path`, `module`, `package`, `snapshot`, `file.lines`, `file.definitions`, `file.functions`, `file.structs`, and `file.build_constraint`. Their wildcard includes the first eight fields, omitting `file.build_constraint`. Symbol sources do not expose file metrics, and file sources do not expose `symbol` fields.

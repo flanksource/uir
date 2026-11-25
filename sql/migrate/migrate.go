@@ -10,6 +10,7 @@ package migrate
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	// Registers the "sqlserver" dialect with the engine.
@@ -68,8 +69,10 @@ func ParseSelection(id string) (Selection, error) {
 // Reference. Target is the baseline and must be a complete catalogue. A
 // complete Reference plans in complete scope, so selecting a member only the
 // target holds drops it. A declared Reference plans in declared scope over the
-// objects it declares: it never plans a drop, and what it does not mention is
-// left out of the plan.
+// objects it declares. A declared table is complete unless it is partial: the
+// members a complete one omits can be selected and are dropped, while those of
+// a partial one are kept and listed as preserved. An undeclared object is left
+// out of the plan and is never dropped.
 type Request struct {
 	Reference  uir.UIR     `json:"reference"`
 	Target     uir.UIR     `json:"target"`
@@ -121,7 +124,19 @@ func planRequest(request Request, reference, target model.Schema) (engine.PlanRe
 	}
 	input := engine.PlanRequest{Dialect: dialect, Scope: scope, Current: target, Desired: desired}
 	if declared {
+		keepPartial(&input.Desired, reference)
 		input.Context = unmanaged(target, scope.Objects)
 	}
 	return input, nil
+}
+
+// keepPartial marks the desired tables the reference declares partial, so the
+// planner keeps the members those tables do not name instead of dropping them.
+func keepPartial(desired *model.Schema, reference model.Schema) {
+	for i := range desired.Tables {
+		at := slices.IndexFunc(reference.Tables, func(t model.Table) bool { return t.Name == desired.Tables[i].Name })
+		if at >= 0 {
+			desired.Tables[i].Partial = reference.Tables[at].Partial
+		}
+	}
 }

@@ -12,8 +12,9 @@ import (
 
 // planScope is the engine scope of a plan. A complete reference manages every
 // object of the target's schemas, as the catalogue says they are all inspected.
-// A declared reference manages only the objects it names, so the plan can add
-// and change them but never drop anything.
+// A declared reference manages only the objects it names: an undeclared object is
+// never dropped, and a declared table is complete (the members it omits are
+// dropped when selected) unless it is partial (they are kept).
 func planScope(referenceCatalog, targetCatalog *uir.SQLCatalog, reference model.Schema) (engine.Scope, error) {
 	if !targetCatalog.Complete {
 		return engine.Scope{}, fmt.Errorf("target must be a complete SQL Server catalogue: it is the baseline the plan applies to")
@@ -55,18 +56,37 @@ func unmanaged(target model.Schema, managed []model.Name) []model.Name {
 	return out
 }
 
-// requireDeclared refuses a selection of something only the target holds: a
-// declared reference never plans a drop, so it cannot ask for one.
+// requireDeclared refuses a selection a declared reference cannot make. An
+// undeclared object is never dropped. A member of a declared table the reference
+// does not name is a drop when the table is complete, so it can be selected (the
+// overlay then requires the target to hold it), and is refused when the table is
+// partial, which keeps every member it does not name.
 func requireDeclared(reference model.Schema, selections []Selection) error {
 	for _, s := range selections {
-		if !referenceHolds(reference, s) {
-			return fmt.Errorf("selection %s names something the declared reference does not declare; a declared scope never plans a drop", s.ID())
+		if !isMemberKind(s.Kind) {
+			if !declaresObject(reference, s) {
+				return fmt.Errorf("selection %s: %s %s is not declared by the reference, and a declared reference never drops an object it does not declare", s.ID(), s.Kind, qualified(s.Object))
+			}
+			continue
+		}
+		at := slices.IndexFunc(reference.Tables, func(t model.Table) bool { return t.Name == s.Object })
+		switch {
+		case at < 0:
+			return fmt.Errorf("selection %s: table %s is not declared by the reference, and a declared reference never drops an object it does not declare", s.ID(), qualified(s.Object))
+		case reference.Tables[at].Partial && !holdsMember(reference.Tables[at], s):
+			return fmt.Errorf("selection %s: table %s is declared partial, so it keeps every member it does not name and a drop of %s %q cannot be selected", s.ID(), qualified(s.Object), s.Kind, s.Member)
 		}
 	}
 	return nil
 }
 
-func referenceHolds(reference model.Schema, s Selection) bool {
+func isMemberKind(kind string) bool {
+	return slices.Contains([]string{"column", "index", "foreign-key", "check"}, kind)
+}
+
+func qualified(name model.Name) string { return name.Schema + "." + name.Name }
+
+func declaresObject(reference model.Schema, s Selection) bool {
 	switch s.Kind {
 	case "table":
 		return slices.ContainsFunc(reference.Tables, func(t model.Table) bool { return t.Name == s.Object })
@@ -78,8 +98,7 @@ func referenceHolds(reference model.Schema, s Selection) bool {
 	case "sequence":
 		return slices.ContainsFunc(reference.Sequences, func(q model.Sequence) bool { return q.Name == s.Object })
 	}
-	at := slices.IndexFunc(reference.Tables, func(t model.Table) bool { return t.Name == s.Object })
-	return at >= 0 && holdsMember(reference.Tables[at], s)
+	return false
 }
 
 func holdsMember(table model.Table, s Selection) bool {

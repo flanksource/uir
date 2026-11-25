@@ -1,7 +1,9 @@
 package migrate_test
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
 	"github.com/flanksource/sqlglot-go/migrate/engine"
@@ -22,15 +24,37 @@ var _ = Describe("Declared reference catalogues", func() {
 		return t
 	}
 	// reference declares orders with a wider label and without total, its index and its check.
-	reference := func() uir.UIR {
+	declaration := func(partial bool) uir.UIR {
 		schema, err := migrate.Schema(document(100))
 		Expect(err).NotTo(HaveOccurred())
 		table := &schema.Tables[0]
 		table.Columns = slices.DeleteFunc(table.Columns, func(c model.Column) bool { return c.Name == "total" })
-		table.Indexes, table.Checks = table.Indexes[:1], nil
+		table.Indexes, table.Checks, table.Partial = table.Indexes[:1], nil, partial
 		catalogue, err := migrate.Enrich(uir.UIR{}, model.Schema{Tables: schema.Tables}, declared("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		return catalogue
+	}
+	reference := func() uir.UIR { return declaration(false) }
+	// omitted are the members of orders the target holds and the declaration does not name.
+	omitted := []migrate.Selection{
+		{Kind: "check", Object: orders, Member: "CK_total"},
+		{Kind: "column", Object: orders, Member: "total"},
+		{Kind: "index", Object: orders, Member: "IX_total"},
+	}
+	ordersOf := func(schema model.Schema) model.Table {
+		at := slices.IndexFunc(schema.Tables, func(t model.Table) bool { return t.Name == orders })
+		Expect(at).To(BeNumerically(">=", 0))
+		return schema.Tables[at]
+	}
+	// acknowledged says which drops an artifact requires acknowledging.
+	acknowledged := func(artifact engine.Artifact) []string {
+		var out []string
+		for _, change := range artifact.Changes {
+			if change.Action == "drop" && slices.Contains(engine.Acknowledgements(artifact), change.ID) {
+				out = append(out, change.Action+" "+change.Kind+" "+change.Member)
+			}
+		}
+		return out
 	}
 	actions := func(changes []model.Change) []string {
 		var out []string
@@ -50,19 +74,70 @@ var _ = Describe("Declared reference catalogues", func() {
 		Expect(engine.Validate(artifact)).To(Succeed())
 	})
 
-	It("never plans a drop for what the declared table lacks and lists it as preserved", func() {
+	It("plans a selectable, destructive drop for each member a complete declared table omits", func() {
+		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: reference(), Target: target(), Selections: omitted})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actions(artifact.Changes)).To(ConsistOf("drop column total", "drop index IX_total", "drop check CK_total"))
+		Expect(artifact.Preserved).To(BeEmpty())
+		Expect(ordersOf(artifact.Desired).Partial).To(BeFalse())
+		for _, change := range artifact.Changes {
+			Expect(change.Destructive).To(BeTrue(), change.ID)
+		}
+		Expect(acknowledged(artifact)).To(ConsistOf("drop column total", "drop index IX_total", "drop check CK_total"))
+		Expect(engine.Validate(artifact)).To(Succeed())
+	})
+
+	It("plans the same drops and the declared change when the complete table is selected whole", func() {
 		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: reference(), Target: target(), Selections: []migrate.Selection{{Kind: "table", Object: orders}}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actions(artifact.Changes)).To(ConsistOf("modify column label", "drop column total", "drop index IX_total", "drop check CK_total"))
+		Expect(artifact.Preserved).To(BeEmpty())
+		Expect(acknowledged(artifact)).To(ConsistOf("drop column total", "drop index IX_total", "drop check CK_total"))
+		for _, change := range artifact.Changes {
+			Expect(change.Object).NotTo(Equal(audit))
+		}
+	})
+
+	It("keeps a partial declared table's omitted members and lists them as preserved", func() {
+		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: declaration(true), Target: target(), Selections: []migrate.Selection{{Kind: "table", Object: orders}}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(actions(artifact.Changes)).To(Equal([]string{"modify column label"}))
 		Expect(actions(artifact.Preserved)).To(ConsistOf("drop column total", "drop index IX_total", "drop check CK_total"))
+		Expect(acknowledged(artifact)).To(BeEmpty())
+		Expect(ordersOf(artifact.Desired).Partial).To(BeTrue())
 		for _, change := range slices.Concat(artifact.Changes, artifact.Preserved) {
 			Expect(change.Object).NotTo(Equal(audit))
 		}
 	})
 
-	It("refuses a selection of something only the target holds, since a declared scope cannot drop it", func() {
-		_, err := migrate.Select(migrate.Request{Reference: reference(), Target: target(), Selections: []migrate.Selection{{Kind: "column", Object: orders, Member: "total"}}})
-		Expect(err).To(MatchError(ContainSubstring("does not declare; a declared scope never plans a drop")))
+	It("carries the partial flag into the desired schema of a member selection", func() {
+		input, err := migrate.Select(migrate.Request{Reference: declaration(true), Target: target(), Selections: []migrate.Selection{{Kind: "column", Object: orders, Member: "label"}}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ordersOf(input.Desired).Partial).To(BeTrue())
+		Expect(ordersOf(input.Current).Partial).To(BeFalse())
+	})
+
+	DescribeTable("refuses selecting a drop the reference cannot make, and says why",
+		func(reference func() uir.UIR, selection migrate.Selection, message string) {
+			_, err := migrate.Select(migrate.Request{Reference: reference(), Target: target(), Selections: []migrate.Selection{selection}})
+			Expect(err).To(MatchError(ContainSubstring(message)))
+		},
+		Entry("a column of a partial table, which keeps what it does not name", func() uir.UIR { return declaration(true) },
+			migrate.Selection{Kind: "column", Object: orders, Member: "total"}, "table dbo.orders is declared partial"),
+		Entry("an index of a partial table", func() uir.UIR { return declaration(true) },
+			migrate.Selection{Kind: "index", Object: orders, Member: "IX_total"}, "table dbo.orders is declared partial"),
+		Entry("a member of a table the reference does not declare", reference,
+			migrate.Selection{Kind: "column", Object: audit, Member: "id"}, "table dbo.audit is not declared"),
+		Entry("an undeclared table, which a declared scope never drops", reference,
+			migrate.Selection{Kind: "table", Object: audit}, "table dbo.audit is not declared"),
+	)
+
+	It("fails the plan of a partial table the target does not have, with the planner's message", func() {
+		invoices := model.Name{Schema: "dbo", Name: "invoices"}
+		missing, err := migrate.Enrich(uir.UIR{}, model.Schema{Tables: []model.Table{{Name: invoices, Partial: true, Columns: []model.Column{{Name: "id", Type: "int"}}}}}, declared("dbo"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = migrate.BuildArtifact(migrate.Request{Reference: missing, Target: target(), Selections: []migrate.Selection{{Kind: "table", Object: invoices}}})
+		Expect(err).To(MatchError(ContainSubstring("declared partial and does not exist")))
 	})
 
 	It("plans the same selection of a complete reference in complete scope, where selecting a target-only member drops it", func() {
@@ -73,6 +148,30 @@ var _ = Describe("Declared reference catalogues", func() {
 		Expect(artifact.Scope.Mode).To(Equal(engine.ScopeComplete))
 		Expect(actions(artifact.Changes)).To(Equal([]string{"drop index IX_total"}))
 		Expect(engine.Acknowledgements(artifact)).To(HaveLen(1))
+	})
+
+	It("round trips the partial flag through persisted UIR JSON and omits it when false", func() {
+		for _, partial := range []bool{true, false} {
+			encoded, err := json.Marshal(declaration(partial))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.Contains(string(encoded), `"partial"`)).To(Equal(partial))
+			var decoded uir.UIR
+			Expect(uir.Unmarshal(encoded, &decoded)).To(Succeed())
+			Expect(decoded.Tables[0].Partial).To(Equal(partial))
+			schema, err := migrate.Schema(decoded)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(schema.Tables[0].Partial).To(Equal(partial))
+		}
+	})
+
+	It("refuses a partial table in a complete catalogue, which an inspection never produces", func() {
+		partial := model.Schema{Tables: []model.Table{{Name: orders, Partial: true, Columns: []model.Column{{Name: "id", Type: "int"}}}}}
+		_, err := migrate.Enrich(uir.UIR{}, partial, complete("dbo"))
+		Expect(err).To(MatchError(ContainSubstring("complete catalogue cannot hold partial table dbo.orders")))
+		stored := declaration(true)
+		stored.SQLCatalog.Declared, stored.SQLCatalog.Complete = false, true
+		_, err = migrate.Schema(stored)
+		Expect(err).To(MatchError(ContainSubstring("complete catalogue cannot hold partial table dbo.orders")))
 	})
 
 	It("marks a declared catalogue and refuses a stored one that is neither complete nor declared, or both", func() {

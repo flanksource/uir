@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/indexer"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -82,6 +83,26 @@ var _ = Describe("HCL sources", func() {
 			"HCL view blocks are not supported"),
 		Entry("invalid HCL", "table {", "evaluate sqlserver HCL"),
 	)
+
+	It("keeps a table's partial = true on its published declaration, and a complete table is not partial", func() {
+		root := GinkgoT().TempDir()
+		table := func(name, attributes string) string {
+			return "table \"" + name + "\" {\n  schema = schema.dbo\n" + attributes + "  column \"id\" {\n    type = int\n  }\n}\n"
+		}
+		writeTree(root, map[string]string{
+			".sqlglot-go.yaml": "version: 1\nmappings:\n  - match: 'schema/*.hcl'\n",
+			"schema/a.hcl":     "schema \"dbo\" {}\n" + table("vendor", "  partial = true\n") + table("tenant", ""),
+		})
+		sources, err := readMappedSources(root, []SourceMapping{{Project: ".sqlglot-go.yaml", Dialect: "tsql"}})
+		Expect(err).NotTo(HaveOccurred())
+		document, err := hclDocument(sources[0])
+		Expect(err).NotTo(HaveOccurred())
+		partial := map[string]bool{}
+		for _, node := range document.Nodes {
+			partial[node.(uir.RecordTable).Type] = node.(uir.RecordTable).Partial
+		}
+		Expect(partial).To(Equal(map[string]bool{"vendor": true, "tenant": false}))
+	})
 
 	It("accepts a default without a constraint name, which a declaration may leave to the server", func() {
 		root := GinkgoT().TempDir()

@@ -40,6 +40,8 @@ An HCL source declares one schema, since a document has one package, and publish
   message: '{{.table}}.{{.name}} is named like a GUID but is a character column'
 ```
 
+A `table` block says whether it names every member of its table. It does unless the block sets `partial = true`, which declares only some columns, indexes, keys or checks of a table that exists elsewhere (a vendor table, say). Lint publishes the declared columns of both kinds as symbols in the same way, so a rule sees no difference. The flag matters when the same HCL is the reference of a schema comparison: the members a complete table omits are planned as destructive drops, and those a partial table omits are kept. See [Selected SQL Server migrations](../sql/migrate/README.md).
+
 Findings on an HCL source are reported at the HCL file, positioned in the declaration listing UIR generates for it rather than in the HCL text. The [HCL example](../lint/testdata/hcl-tables/.uir.yaml) runs three such rules over a tenant and a vendor table.
 
 The SQL producer accepts `tsql`, `postgres`, or `sqlite`. An optional `default_schema` applies to unqualified references. Use `reads(table:...)` and `writes(table:...)` for table rules, and `references(sql.function:...)` with `role = 'call'` or `writes(sql.function:...)` for function rules. Set `lint.compatibility_level` to check documented SQL Server feature requirements such as `GENERATE_SERIES` at level 160. Parser diagnostics and incomplete analysis are error findings. [SQL Server compatibility requirements for `GENERATE_SERIES`](https://learn.microsoft.com/en-us/sql/t-sql/functions/generate-series-transact-sql?view=sql-server-ver17)

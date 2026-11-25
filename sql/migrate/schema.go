@@ -41,6 +41,9 @@ func Schema(document uir.UIR) (model.Schema, error) {
 		name := model.Name{Schema: table.Package, Name: table.Type}
 		switch table.RecordType {
 		case uir.RecordTypeTable:
+			if table.Partial && catalog.Complete {
+				return out, partialInComplete(name)
+			}
 			t, err := tableSchema(table, catalog.Complete)
 			if err != nil {
 				return out, fmt.Errorf("table %s.%s: %w", name.Schema, name.Name, err)
@@ -117,7 +120,7 @@ func compareNames(a, b model.Name) int {
 // default constraint, since a drop needs the name; a declared one may leave a
 // default unnamed and let the server name it.
 func tableSchema(table uir.RecordTable, complete bool) (model.Table, error) {
-	out := model.Table{Name: model.Name{Schema: table.Package, Name: table.Type}}
+	out := model.Table{Name: model.Name{Schema: table.Package, Name: table.Type}, Partial: table.Partial}
 	for _, column := range table.Columns {
 		c, err := columnSchema(column)
 		if err != nil {

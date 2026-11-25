@@ -37,6 +37,9 @@ func Enrich(document uir.UIR, schema model.Schema, scope engine.Scope) (uir.UIR,
 		out.SQLCatalog.Sequences = append(out.SQLCatalog.Sequences, importSequence(sequence))
 	}
 	for _, table := range schema.Tables {
+		if table.Partial && scope.Mode == engine.ScopeComplete {
+			return out, partialInComplete(table.Name)
+		}
 		t, err := importTable(table)
 		if err != nil {
 			return out, err
@@ -81,6 +84,10 @@ func Enrich(document uir.UIR, schema model.Schema, scope engine.Scope) (uir.UIR,
 		return out, err
 	}
 	return out, nil
+}
+
+func partialInComplete(name model.Name) error {
+	return fmt.Errorf("a complete catalogue cannot hold partial table %s.%s: only a declared catalogue can name some of a table's members", name.Schema, name.Name)
 }
 
 // keepExtracted copies onto an imported table the facts the catalogue does not
@@ -138,6 +145,7 @@ func importTable(input model.Table) (uir.RecordTable, error) {
 		b.WithForeignKeys(f)
 	}
 	out := b.Build()
+	out.Partial = input.Partial
 	out.PrimaryKey = slices.Clone(primary)
 	for _, c := range input.Checks {
 		out.Checks = append(out.Checks, uir.SQLCheck{Name: c.Name, Expression: c.Expression})

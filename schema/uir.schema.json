@@ -3477,6 +3477,10 @@
           "description": "The package or database scheme the node belongs to",
           "type": "string"
         },
+        "partial": {
+          "description": "Partial marks a table of a declared catalogue (an HCL declaration) that names only some of its members. A planner keeps the target's members it does not name instead of dropping them. A catalogue read from a database never sets it.",
+          "type": "boolean"
+        },
         "primaryKey": {
           "type": "array",
           "items": {

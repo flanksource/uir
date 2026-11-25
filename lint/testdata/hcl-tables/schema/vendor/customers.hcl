@@ -1,7 +1,8 @@
 schema "dbo" {}
 
 table "AcmeCustomers" {
-  schema = schema.dbo
+  schema  = schema.dbo
+  partial = true
   column "CustomerGUID" {
     type = uniqueidentifier
   }
