@@ -1,0 +1,20 @@
+version: 1
+sources:
+  - project: .sqlglot-go.yaml
+    dialect: tsql
+    default_schema: dbo
+lint:
+  rules:
+    - id: script-reads-declared-table
+      query: >-
+        SELECT symbol.name AS name FROM reads(table:acmeorders) WHERE symbol IN table:acmeorders
+      message: 'script reads declared table {{.name}}'
+    - id: script-writes-declared-table
+      query: >-
+        SELECT symbol.name AS name FROM writes(table:acmecustomers) WHERE symbol IN table:acmecustomers
+      message: 'script writes declared table {{.name}}'
+    - id: guid-named-character-column
+      query: >-
+        SELECT symbol.name AS name, symbol.owner AS table FROM column:*
+        WHERE symbol.name IMATCH '*guid' AND symbol.props.field_type = 'string'
+      message: '{{.table}}.{{.name}} is named like a GUID but is a character column'

@@ -10,6 +10,38 @@ The [SQL migration example](../lint/testdata/sql-migrations/.uir.yaml) maps OIPA
 
 A `sources` entry selects files with `match` or `match_regex`. A CEL transform returns `content`, a project-relative `filename`, and a UIR `package`. Its optional `metadata` supplies `name`, `phase`, and `labels` on the `sql.script` symbol. Transforms receive `file.path`, `file.content`, and a `captures` map of named regex groups. Use `read(path)` for a companion file relative to the matched input, and `xmlpath(xml, selector)` for a descriptor field. The selected source tree supplies both inputs and scopes findings when either changes.
 
+A `sources` entry can instead take its whole mapping from a sqlglot project, so the files, ignore rules, IDs, phases and labels live in one `.sqlglot-go.yaml` that `sqlglot migrate plan` reads too. Set `project` to the project file's path, relative to the `.uir.yaml`, with `dialect` and optionally `default_schema`. The [project example](../lint/testdata/sql-migrations-project/.uir.yaml) maps the same script as the example above and publishes the same symbols, module keys, names and findings.
+
+```yaml
+version: 1
+sources:
+  - project: .sqlglot-go.yaml
+    dialect: tsql
+    default_schema: dbo
+```
+
+The project's own default `select` is not applied: UIR analyses every mapped source and carries its labels, so a rule can select on them. A SQL source's `name`, `phase` and `labels` become the `sql.script` properties as in a transform's `metadata`; without a `name` the script is named after its file. A project entry that also sets `match`, `match_regex`, `producer` or `transform` is a configuration error naming them, and so is a missing project file or a file that a project and another entry both map. Findings land on the physical file when its bytes are the published content; a source built from another file (a transform that reads a companion) is reported at its bundle path with its content inline. Its inputs are the mapped file and every companion the transform read, so a change to any of them selects the source for `--changed` and scope matching.
+
+An HCL source of the project (`kind: hcl`, or a `.hcl` file) declares tables for the analysis. Its `tsql` HCL is evaluated to a declared catalogue, and each table, column, index and foreign key is published as a symbol of the same module under the names the SQL producer gives the objects a script reads or writes (schema and name lower-cased for `tsql` and `sqlite`). A `reads(table:orders)` or `writes(table:orders)` witness therefore resolves to the declaration, and `table:orders` selects it, so a rule can combine them:
+
+```yaml
+- id: script-reads-declared-table
+  query: SELECT symbol.name AS name FROM reads(table:orders) WHERE symbol IN table:orders
+  message: 'script reads declared table {{.name}}'
+```
+
+An HCL source declares one schema, since a document has one package, and publishes tables, columns, indexes and foreign keys only. A rule matches a column by `symbol.name`, its table by `symbol.owner`, and its type by the column properties `symbol.props.sql_type` (the SQL type name as written, such as `varchar`), `symbol.props.field_type` (the portable type: `string` for every character type, `uuid` for `uniqueidentifier`, and so on; absent when there is none) and `symbol.props.nullable`. Every builtin `column` symbol carries them, whichever producer declared it. For example, a GUID-named column that is not a `uniqueidentifier`:
+
+```yaml
+- id: guid-named-character-column
+  query: >-
+    SELECT symbol.name AS name, symbol.owner AS table FROM column:*
+    WHERE symbol.name IMATCH '*guid' AND symbol.props.field_type = 'string'
+  message: '{{.table}}.{{.name}} is named like a GUID but is a character column'
+```
+
+Findings on an HCL source are reported at the HCL file, positioned in the declaration listing UIR generates for it rather than in the HCL text. The [HCL example](../lint/testdata/hcl-tables/.uir.yaml) runs three such rules over a tenant and a vendor table.
+
 The SQL producer accepts `tsql`, `postgres`, or `sqlite`. An optional `default_schema` applies to unqualified references. Use `reads(table:...)` and `writes(table:...)` for table rules, and `references(sql.function:...)` with `role = 'call'` or `writes(sql.function:...)` for function rules. Set `lint.compatibility_level` to check documented SQL Server feature requirements such as `GENERATE_SERIES` at level 160. Parser diagnostics and incomplete analysis are error findings. [SQL Server compatibility requirements for `GENERATE_SERIES`](https://learn.microsoft.com/en-us/sql/t-sql/functions/generate-series-transact-sql?view=sql-server-ver17)
 
 For an explicit SQL-only run, use `gavel lint sql migrations -- --dialect tsql --compatibility-level 130` or `sqlglot lint --dialect tsql --compatibility-level 130 migrations`.
