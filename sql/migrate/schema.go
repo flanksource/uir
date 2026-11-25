@@ -6,14 +6,22 @@ import (
 	"strings"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
-	"github.com/flanksource/sqlglot-go/migrate/sqlserver"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/uir"
 )
 
+// Schema projects a catalogue document into the neutral schema the planner
+// reads. A complete catalogue (SQLCatalog.Complete) holds every object of its
+// schemas; a declared one (SQLCatalog.Declared) holds only the objects it
+// names. A catalogue that is neither, such as a partial inspection, or both is
+// refused.
 func Schema(document uir.UIR) (model.Schema, error) {
 	catalog := document.SQLCatalog
-	if catalog == nil || !catalog.Complete || catalog.Version != CatalogVersion || catalog.Dialect != "tsql" || len(catalog.Schemas) == 0 {
+	if catalog == nil || (!catalog.Complete && !catalog.Declared) || catalog.Version != CatalogVersion || catalog.Dialect != "tsql" || len(catalog.Schemas) == 0 {
 		return model.Schema{}, fmt.Errorf("migration requires a complete SQL Server catalogue at version %d", CatalogVersion)
+	}
+	if catalog.Complete && catalog.Declared {
+		return model.Schema{}, fmt.Errorf("SQL catalogue is both complete and declared; it is one or the other")
 	}
 	seen := map[string]bool{}
 	for _, scope := range catalog.Schemas {
@@ -33,7 +41,7 @@ func Schema(document uir.UIR) (model.Schema, error) {
 		name := model.Name{Schema: table.Package, Name: table.Type}
 		switch table.RecordType {
 		case uir.RecordTypeTable:
-			t, err := tableSchema(table)
+			t, err := tableSchema(table, catalog.Complete)
 			if err != nil {
 				return out, fmt.Errorf("table %s.%s: %w", name.Schema, name.Name, err)
 			}
@@ -81,10 +89,21 @@ func Schema(document uir.UIR) (model.Schema, error) {
 	slices.SortFunc(out.Definitions, func(a, b model.Definition) int { return compareNames(a.Name, b.Name) })
 	slices.SortFunc(out.TableTypes, func(a, b model.TableType) int { return compareNames(a.Name, b.Name) })
 	slices.SortFunc(out.Sequences, func(a, b model.Sequence) int { return compareNames(a.Name, b.Name) })
-	if _, err := sqlserver.Plan(model.Request{Current: out, Desired: out}); err != nil {
-		return out, err
+	return out, validate(out, catalog)
+}
+
+// validate plans the schema against itself, which fails when the dialect
+// cannot read it.
+func validate(schema model.Schema, catalog *uir.SQLCatalog) error {
+	scope := engine.Scope{Mode: engine.ScopeComplete, Schemas: catalog.Schemas}
+	if !catalog.Complete {
+		scope = engine.Scope{Mode: engine.ScopeDeclared, Schemas: catalog.Schemas, Objects: objectNames(schema)}
+		if len(scope.Objects) == 0 {
+			return fmt.Errorf("a declared catalogue must declare at least one object")
+		}
 	}
-	return out, nil
+	_, err := engine.Plan(engine.PlanRequest{Dialect: dialect, Scope: scope, Current: schema, Desired: schema})
+	return err
 }
 
 func compareNames(a, b model.Name) int {
@@ -94,7 +113,10 @@ func compareNames(a, b model.Name) int {
 	return strings.Compare(a.Name, b.Name)
 }
 
-func tableSchema(table uir.RecordTable) (model.Table, error) {
+// tableSchema projects a table. An inspected (complete) catalogue names every
+// default constraint, since a drop needs the name; a declared one may leave a
+// default unnamed and let the server name it.
+func tableSchema(table uir.RecordTable, complete bool) (model.Table, error) {
 	out := model.Table{Name: model.Name{Schema: table.Package, Name: table.Type}}
 	for _, column := range table.Columns {
 		c, err := columnSchema(column)
@@ -104,7 +126,7 @@ func tableSchema(table uir.RecordTable) (model.Table, error) {
 		out.Columns = append(out.Columns, c)
 	}
 	for _, column := range out.Columns {
-		if column.Default != nil && column.Default.Name == "" {
+		if complete && column.Default != nil && column.Default.Name == "" {
 			return out, fmt.Errorf("column %s: default constraint name is missing", column.Name)
 		}
 	}
@@ -273,14 +295,4 @@ func objectNames(schema model.Schema) []model.Name {
 		out = append(out, s.Name)
 	}
 	return out
-}
-
-func sameScopes(a, b *uir.SQLCatalog) error {
-	x, y := slices.Clone(a.Schemas), slices.Clone(b.Schemas)
-	slices.Sort(x)
-	slices.Sort(y)
-	if !slices.Equal(x, y) {
-		return fmt.Errorf("reference and target catalogue scopes differ")
-	}
-	return nil
 }

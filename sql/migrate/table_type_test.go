@@ -31,7 +31,7 @@ var _ = Describe("Table types and sequences", func() {
 	snapshot := model.Schema{TableTypes: []model.TableType{fieldList}, Sequences: []model.Sequence{ids}, Definitions: []model.Definition{spawn}}
 
 	It("round trips table types and sequences a procedure depends on through persisted UIR JSON", func() {
-		document, err := migrate.Enrich(uir.UIR{}, snapshot, []string{"dbo"})
+		document, err := migrate.Enrich(uir.UIR{}, snapshot, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		encoded, err := json.Marshal(document)
 		Expect(err).NotTo(HaveOccurred())
@@ -43,29 +43,29 @@ var _ = Describe("Table types and sequences", func() {
 	})
 
 	It("keeps target table types when a procedure taking one is selected", func() {
-		target, err := migrate.Enrich(uir.UIR{}, model.Schema{TableTypes: snapshot.TableTypes, Sequences: snapshot.Sequences}, []string{"dbo"})
+		target, err := migrate.Enrich(uir.UIR{}, model.Schema{TableTypes: snapshot.TableTypes, Sequences: snapshot.Sequences}, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
-		reference, err := migrate.Enrich(uir.UIR{}, snapshot, []string{"dbo"})
+		reference, err := migrate.Enrich(uir.UIR{}, snapshot, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
-		plan, err := migrate.Plan(migrate.Request{Reference: reference, Target: target, Selections: []migrate.Selection{{Kind: "procedure", Object: spawn.Name}}})
+		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: reference, Target: target, Selections: []migrate.Selection{{Kind: "procedure", Object: spawn.Name}}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(plan.Steps).To(HaveLen(1))
-		Expect(plan.Steps[0].Change.Object).To(Equal(spawn.Name))
+		Expect(artifact.Changes).To(HaveLen(1))
+		Expect(artifact.Changes[0].Object).To(Equal(spawn.Name))
 	})
 
 	It("fails naming the table type a selected procedure takes when only the reference has it", func() {
-		target, err := migrate.Enrich(uir.UIR{}, model.Schema{}, []string{"dbo"})
+		target, err := migrate.Enrich(uir.UIR{}, model.Schema{}, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
-		reference, err := migrate.Enrich(uir.UIR{}, snapshot, []string{"dbo"})
+		reference, err := migrate.Enrich(uir.UIR{}, snapshot, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		_, err = migrate.Select(migrate.Request{Reference: reference, Target: target, Selections: []migrate.Selection{{Kind: "procedure", Object: spawn.Name}}})
 		Expect(err).To(MatchError(ContainSubstring(`procedure dbo.SpawnActivitiesByBillGroup takes table type dbo.SpawnActivityFieldList, which the desired schema lacks; select table-type:"dbo"."SpawnActivityFieldList"`)))
 	})
 
 	It("creates a selected table type and sequence before the procedure taking the type", func() {
-		target, err := migrate.Enrich(uir.UIR{}, model.Schema{}, []string{"dbo"})
+		target, err := migrate.Enrich(uir.UIR{}, model.Schema{}, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
-		reference, err := migrate.Enrich(uir.UIR{}, snapshot, []string{"dbo"})
+		reference, err := migrate.Enrich(uir.UIR{}, snapshot, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		var selections []migrate.Selection
 		for _, id := range []string{`procedure:"dbo"."SpawnActivitiesByBillGroup"`, `table-type:"dbo"."SpawnActivityFieldList"`, `sequence:"dbo"."ActivityIDs"`} {
@@ -73,18 +73,20 @@ var _ = Describe("Table types and sequences", func() {
 			Expect(err).NotTo(HaveOccurred())
 			selections = append(selections, s)
 		}
-		plan, err := migrate.Plan(migrate.Request{Reference: reference, Target: target, Selections: selections})
+		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: reference, Target: target, Selections: selections})
 		Expect(err).NotTo(HaveOccurred())
-		var changes []string
-		for _, step := range plan.Steps {
-			changes = append(changes, step.Change.Kind+" "+step.Change.Object.Name)
+		var created []string
+		for _, unit := range artifact.Units {
+			for _, op := range unit.Ops {
+				created = append(created, op.Object.Name)
+			}
 		}
-		Expect(changes).To(ConsistOf("sequence ActivityIDs", "table-type SpawnActivityFieldList", "procedure SpawnActivitiesByBillGroup"))
-		Expect(changes[len(changes)-1]).To(Equal("procedure SpawnActivitiesByBillGroup"))
+		Expect(created).To(ConsistOf("ActivityIDs", "SpawnActivityFieldList", "SpawnActivitiesByBillGroup"))
+		Expect(created[len(created)-1]).To(Equal("SpawnActivitiesByBillGroup"))
 	})
 
 	It("rejects a table type outside catalogue coverage", func() {
-		_, err := migrate.Enrich(uir.UIR{}, model.Schema{TableTypes: snapshot.TableTypes}, []string{"sales"})
+		_, err := migrate.Enrich(uir.UIR{}, model.Schema{TableTypes: snapshot.TableTypes}, complete("sales"))
 		Expect(err).To(MatchError(ContainSubstring("outside catalogue coverage")))
 	})
 })

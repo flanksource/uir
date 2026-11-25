@@ -3766,10 +3766,13 @@
       "additionalProperties": false
     },
     "SQLCatalog": {
-      "description": "SQLCatalog records the inspection contract. A missing or older version cannot establish that absent database members are safe to remove.",
+      "description": "SQLCatalog records the inspection contract. A missing or older version cannot establish that absent database members are safe to remove. Complete says the catalogue holds every object of its schemas; Declared says it holds only the objects it names, as an HCL declaration does. A catalogue is one or the other, never both, and one that is neither is a partial inspection.",
       "type": "object",
       "properties": {
         "complete": {
+          "type": "boolean"
+        },
+        "declared": {
           "type": "boolean"
         },
         "dialect": {

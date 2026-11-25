@@ -1,17 +1,28 @@
 // Package migrate projects inspected UIR schemas into sqlglot migration inputs
 // and overlays selected reference members onto the target schema.
+//
+// Planning is offline (engine.Plan): no database is read, so the dependents a
+// column change forces to be rebuilt (indexes, keys, foreign keys in both
+// directions, checks, defaults, statistics) come from the baseline catalogue,
+// which is the target. A dependent the target does not hold is invisible to
+// the plan.
 package migrate
 
 import (
 	"fmt"
 	"strings"
 
+	// Registers the "sqlserver" dialect with the engine.
+	_ "github.com/flanksource/sqlglot-go/database/migrate/dialect/sqlserver"
 	model "github.com/flanksource/sqlglot-go/migrate"
-	"github.com/flanksource/sqlglot-go/migrate/sqlserver"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/uir"
 )
 
 const CatalogVersion = 3
+
+// dialect is the engine dialect every UIR catalogue plans with ("tsql" in UIR).
+const dialect = "sqlserver"
 
 type Selection struct {
 	Kind   string     `json:"kind"`
@@ -53,39 +64,64 @@ func ParseSelection(id string) (Selection, error) {
 	return s, nil
 }
 
+// Request plans the migration of Target toward the selected parts of
+// Reference. Target is the baseline and must be a complete catalogue. A
+// complete Reference plans in complete scope, so selecting a member only the
+// target holds drops it. A declared Reference plans in declared scope over the
+// objects it declares: it never plans a drop, and what it does not mention is
+// left out of the plan.
 type Request struct {
 	Reference  uir.UIR     `json:"reference"`
 	Target     uir.UIR     `json:"target"`
 	Selections []Selection `json:"selections"`
 }
 
-func Plan(request Request) (model.Plan, error) {
-	input, err := Select(request)
-	if err != nil {
-		return model.Plan{}, err
-	}
-	return sqlserver.Plan(input)
+// Select applies the selections to the target and returns the engine request
+// that plans the difference, after planning it once to prove the selected
+// desired schema is valid.
+func Select(request Request) (engine.PlanRequest, error) {
+	input, _, err := plan(request)
+	return input, err
 }
 
-func Select(request Request) (model.Request, error) {
+func plan(request Request) (engine.PlanRequest, engine.Artifact, error) {
 	reference, err := Schema(request.Reference)
 	if err != nil {
-		return model.Request{}, fmt.Errorf("reference: %w", err)
+		return engine.PlanRequest{}, engine.Artifact{}, fmt.Errorf("reference: %w", err)
 	}
 	target, err := Schema(request.Target)
 	if err != nil {
-		return model.Request{}, fmt.Errorf("target: %w", err)
+		return engine.PlanRequest{}, engine.Artifact{}, fmt.Errorf("target: %w", err)
 	}
-	if err := sameScopes(request.Reference.SQLCatalog, request.Target.SQLCatalog); err != nil {
-		return model.Request{}, err
+	input, err := planRequest(request, reference, target)
+	if err != nil {
+		return input, engine.Artifact{}, err
+	}
+	artifact, err := engine.Plan(input)
+	if err != nil {
+		return input, artifact, fmt.Errorf("selected desired schema: %w", err)
+	}
+	return input, artifact, nil
+}
+
+func planRequest(request Request, reference, target model.Schema) (engine.PlanRequest, error) {
+	scope, err := planScope(request.Reference.SQLCatalog, request.Target.SQLCatalog, reference)
+	if err != nil {
+		return engine.PlanRequest{}, err
+	}
+	declared := scope.Mode == engine.ScopeDeclared
+	if declared {
+		if err := requireDeclared(reference, request.Selections); err != nil {
+			return engine.PlanRequest{}, err
+		}
 	}
 	desired, err := overlay(reference, target, request.Selections)
 	if err != nil {
-		return model.Request{}, err
+		return engine.PlanRequest{}, err
 	}
-	input := model.Request{Current: target, Desired: desired}
-	if _, err := sqlserver.Plan(input); err != nil {
-		return model.Request{}, fmt.Errorf("selected desired schema: %w", err)
+	input := engine.PlanRequest{Dialect: dialect, Scope: scope, Current: target, Desired: desired}
+	if declared {
+		input.Context = unmanaged(target, scope.Objects)
 	}
 	return input, nil
 }

@@ -105,6 +105,7 @@ Selector values can use double quotes, for example `func:"Premium Calc (Annual)"
 | `symbol.module`, `symbol.package` | string | The projected symbol's module key and package path. |
 | `symbol.owner`, `symbol.visibility` | string | Owning declaration's name and `exported` or `internal` visibility. |
 | `symbol.props`, `symbol.props.<field>` | object or schema type | Producer properties, including declared nested fields. |
+| `symbol.props.sql_type`, `symbol.props.field_type`, `symbol.props.nullable` | string, string, boolean | Builtin `column` symbols only: the SQL type name as declared, the portable UIR type, and whether the column accepts NULL. |
 | `symbol.type` | string | Resolved package-variable type; see [variable types](#resolved-variable-types). |
 | `symbol.metrics.param_count`, `symbol.metrics.body_lines` | integer | Callable measures; see [metrics](#stored-metrics). |
 | `symbol.metrics.<name>` | integer | A [producer metric](#producer-metrics) declared by a selected kind. |

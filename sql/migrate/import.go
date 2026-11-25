@@ -6,16 +6,26 @@ import (
 	"strings"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/sqlglot-go/sqlglot"
 	"github.com/flanksource/uir"
 )
 
-// Enrich replaces database facts with the complete inspected catalogue, while
+// Enrich replaces database facts with the catalogue schema holds, while
 // retaining what only the extractor knows: source locations, descriptions,
 // annotations and row counts of tables and their columns, view output columns
 // and routine signatures. A fact the catalogue holds always comes from it.
-func Enrich(document uir.UIR, schema model.Schema, scopes []string) (uir.UIR, error) {
-	out := uir.UIR{SQLCatalog: &uir.SQLCatalog{Version: CatalogVersion, Dialect: "tsql", Schemas: slices.Clone(scopes), Complete: true}}
+// scope.Mode says what the catalogue is: complete holds every object of
+// scope.Schemas, as an inspection reads them; declared holds only the objects
+// of schema, as an HCL declaration does, and is never read as a statement that
+// anything else is absent. The declared objects are the schema's, so
+// scope.Objects must be empty.
+func Enrich(document uir.UIR, schema model.Schema, scope engine.Scope) (uir.UIR, error) {
+	if scope.Mode != engine.ScopeComplete && scope.Mode != engine.ScopeDeclared || len(scope.Objects) != 0 {
+		return uir.UIR{}, fmt.Errorf("catalogue scope needs mode %q or %q and no objects, got mode %q with %d objects", engine.ScopeComplete, engine.ScopeDeclared, scope.Mode, len(scope.Objects))
+	}
+	out := uir.UIR{SQLCatalog: &uir.SQLCatalog{Version: CatalogVersion, Dialect: "tsql", Schemas: slices.Clone(scope.Schemas),
+		Complete: scope.Mode == engine.ScopeComplete, Declared: scope.Mode == engine.ScopeDeclared}}
 	for _, tableType := range schema.TableTypes {
 		t, err := importTableType(tableType)
 		if err != nil {
