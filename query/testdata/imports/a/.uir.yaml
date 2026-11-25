@@ -1,0 +1,18 @@
+version: 1
+lint:
+  include_tests: false
+  rules:
+    - id: dep-budget-package
+      severity: error
+      message: "{{.package}} imports {{.count}} third-party packages (budget 4); largest: {{.largest}}"
+      query: |
+        SELECT path, package, count, largest
+        FROM package_imports()
+        WHERE count >= 4
+    - id: dep-budget-package-warning
+      severity: warning
+      message: "{{.package}} imports {{.count}} third-party packages (warning at 1); largest: {{.largest}}"
+      query: |
+        SELECT path, package, count, largest
+        FROM package_imports()
+        WHERE count >= 1 AND count < 4

@@ -32,11 +32,10 @@ func AnalyzeSQLRows(input string) (SQLRequirements, error) {
 	if !file && !callable {
 		return SQLRequirements{Mode: mode}, nil
 	}
-	fields := syntaxFields()
+	rows := sqlRows{fields: syntaxFields()}
 	if file {
-		fields = sqlFileFields
+		rows = sqlRows{fields: sqlTables["files"].fields, table: "files"}
 	}
-	rows := sqlRows{fields: fields, fileSource: file}
 	if err := rows.bind(parsed); err != nil {
 		return SQLRequirements{Mode: mode}, nil
 	}

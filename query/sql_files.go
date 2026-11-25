@@ -22,6 +22,37 @@ var sqlFileFields = map[string]string{
 
 var sqlFileWildcardFields = []string{"path", "module", "package", "snapshot", "file.lines", "file.definitions", "file.functions", "file.structs"}
 
+// sqlTable is a source of rows that are not symbols: its fields and the columns of SELECT *.
+type sqlTable struct {
+	fields   map[string]string
+	wildcard []string
+}
+
+// sqlTables are the table functions, by name.
+var sqlTables = map[string]sqlTable{
+	"files":           {fields: sqlFileFields, wildcard: sqlFileWildcardFields},
+	"package_imports": {fields: sqlImportFields, wildcard: sqlImportWildcardFields},
+}
+
+// sqlTableName is the table function a source calls, or "" for a symbol source.
+func sqlTableName(source *sqlSource) string {
+	if _, found := sqlTables[source.function.Name]; found {
+		return source.function.Name
+	}
+	return ""
+}
+
+func (pipeline *Pipeline) sqlTableRecords(ctx context.Context, source *sqlSource, rows sqlRows, scopes []moduleScope) ([]sqlRecord, error) {
+	if rows.table == "package_imports" {
+		return pipeline.sqlImportRecords(ctx, scopes)
+	}
+	return pipeline.sqlFileRecords(ctx, sqlFileOptions{
+		scopes: scopes, lines: rows.required["file.lines"], includeExcluded: source.options.includeExcluded,
+		declarations:    rows.required["file.functions"] || rows.required["file.structs"],
+		buildConstraint: rows.required["file.build_constraint"], buildTags: sortedKeys(rows.buildTags),
+	})
+}
+
 type sqlFileOptions struct {
 	scopes          []moduleScope
 	lines           bool

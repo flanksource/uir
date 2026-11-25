@@ -249,6 +249,9 @@ func (indexer *Indexer) reuseLocalGroup(ctx context.Context, graph localDependen
 			if err := createSiblingShapes(ctx, transaction, heads[index], extractions[index].siblingShapes); err != nil {
 				return err
 			}
+			if err := createImportGraph(ctx, transaction, heads[index], extractions[index].importGraph); err != nil {
+				return err
+			}
 			locations[extraction.root.LocalPath] = location
 			results[index] = result
 		}

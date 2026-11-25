@@ -21,6 +21,7 @@ type SQLFunction struct {
 
 var SQLFunctions = []SQLFunction{
 	{Name: "files", Arguments: 0, Options: []string{"include_excluded"}},
+	{Name: "package_imports", Arguments: 0},
 	{Name: "definitions", Arguments: 1},
 	{Name: "callers", Arguments: 1, Options: []string{"depth"}, Depth: 1},
 	{Name: "callees", Arguments: 1, Options: []string{"depth"}, Depth: 1},
@@ -75,8 +76,8 @@ func bindSQLSource(source *sqlsyntax.Source, kinds symbolhandle.Kinds, nested bo
 	if nested && bound.function.Terminal {
 		return nil, sqlError(source.Pos, "%s is a terminal result and cannot be nested", name)
 	}
-	if nested && name == "files" {
-		return nil, sqlError(source.Pos, "files() is a file source and cannot be used in symbol navigation")
+	if _, table := sqlTables[name]; nested && table {
+		return nil, sqlError(source.Pos, "%s() is a table source and cannot be used in symbol navigation", name)
 	}
 	var named []*sqlsyntax.Option
 	for _, parameter := range source.Parameters {

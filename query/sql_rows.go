@@ -38,7 +38,7 @@ type sqlRows struct {
 	predicate   sqlPredicate
 	required    map[string]bool
 	buildTags   map[string]bool
-	fileSource  bool
+	table       string
 	visit       func(QueryRow) error
 	symbolAlias bool
 }
@@ -47,7 +47,7 @@ func (rows *sqlRows) field(name string) (string, string, error) {
 	field := name
 	if rows.alias != "" && strings.HasPrefix(field, rows.alias+".") {
 		field = "symbol.props." + strings.TrimPrefix(field, rows.alias+".")
-		if rows.fileSource {
+		if rows.table != "" {
 			field = strings.TrimPrefix(name, rows.alias+".")
 			if _, exists := rows.fields[field]; !exists {
 				field = "file." + field
@@ -73,8 +73,8 @@ func (rows *sqlRows) bind(query *sqlsyntax.Query) error {
 	columns := query.Projection.Columns
 	if query.Projection.Wildcard {
 		wildcard := sqlWildcardFields
-		if rows.fileSource {
-			wildcard = sqlFileWildcardFields
+		if rows.table != "" {
+			wildcard = sqlTables[rows.table].wildcard
 		}
 		for _, field := range wildcard {
 			columns = append(columns, &sqlsyntax.Column{Field: field})

@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -80,7 +81,10 @@ func indexModule(ctx context.Context, database *gorm.DB, extraction moduleExtrac
 		if result.Warnings, err = snapshotWarnings(base.snapshot.Diagnostics); err != nil {
 			return ModuleResult{}, storage.ModuleLocation{}, err
 		}
-		return result, location, createSiblingShapes(ctx, database, base.snapshot, extraction.siblingShapes)
+		return result, location, errors.Join(
+			createSiblingShapes(ctx, database, base.snapshot, extraction.siblingShapes),
+			createImportGraph(ctx, database, base.snapshot, extraction.importGraph),
+		)
 	}
 	snapshot, err := publishSnapshot(ctx, database, snapshotPublication{
 		root: root, location: location, base: base, extraction: extraction, force: options.Force, startedAt: startedAt, reason: options.Reason,
@@ -232,6 +236,11 @@ func publishSnapshotRows(ctx context.Context, database *gorm.DB, publication sna
 			return err
 		}
 		return createSiblingShapes(ctx, database, snapshot, publication.extraction.siblingShapes)
+	}); err != nil {
+		return err
+	}
+	if err := Phase(ctx, "import-graph", func(ctx context.Context) error {
+		return createImportGraph(ctx, database, snapshot, publication.extraction.importGraph)
 	}); err != nil {
 		return err
 	}

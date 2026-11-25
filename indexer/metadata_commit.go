@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -46,10 +47,17 @@ func (indexer *Indexer) metadataExtraction(ctx context.Context, options extractO
 	if siblings != 0 {
 		return moduleExtraction{}, false, nil
 	}
+	graph, err := storage.LoadSnapshotImportGraph(ctx, indexer.database, base.ID)
+	if errors.Is(err, storage.ErrNoImportGraph) {
+		return moduleExtraction{}, false, nil
+	}
+	if err != nil {
+		return moduleExtraction{}, false, err
+	}
 	extraction := moduleExtraction{
 		root: root, baseSnapshotID: base.ID, indexerVersion: IndexerVersion, indexStartedAt: time.Now().UTC(),
 		contextHash: base.ContextHash, coverage: base.Coverage, coverageDeterministic: true,
-		diagnostics: base.Diagnostics, documents: map[string]extractedDocument{},
+		diagnostics: base.Diagnostics, documents: map[string]extractedDocument{}, importGraph: &graph,
 	}
 	grouped := map[string][]discoveredFile{}
 	for _, file := range root.Files {
