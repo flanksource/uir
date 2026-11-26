@@ -9,8 +9,8 @@ require (
 	github.com/flanksource/commons v1.65.0
 	github.com/flanksource/commons-db v0.1.91
 	github.com/flanksource/commons-db/cmd/query v0.1.91
-	github.com/flanksource/gavel v0.0.94
-	github.com/flanksource/sqlglot-go v1.4.1-0.20261126042051-b5886ce0fd9c
+	github.com/flanksource/gavel v0.0.103
+	github.com/flanksource/sqlglot-go v1.6.1
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3
@@ -149,7 +149,6 @@ require (
 	github.com/flanksource/clicky/valkey v1.21.94 // indirect
 	github.com/flanksource/commons-db/recordstore v0.1.91 // indirect
 	github.com/flanksource/commons-db/tracing v0.1.91 // indirect
-	github.com/flanksource/gomplate/v3 v3.24.91 // indirect
 	github.com/flanksource/gomplate/v4 v4.0.4 // indirect
 	github.com/flanksource/is-healthy v1.0.93 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
