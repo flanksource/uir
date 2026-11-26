@@ -5,6 +5,7 @@ import (
 	"log"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/sql/migrate"
 )
@@ -13,11 +14,12 @@ func main() {
 	name := model.Name{Schema: "dbo", Name: "orders"}
 	target := model.Schema{Tables: []model.Table{{Name: name, Columns: []model.Column{{Name: "label", Type: "nvarchar(20)", Nullable: true}, {Name: "target_only", Type: "int", Nullable: true}}}}}
 	reference := model.Schema{Tables: []model.Table{{Name: name, Columns: []model.Column{{Name: "label", Type: "nvarchar(100)", Nullable: true}}}}}
-	left, err := migrate.Enrich(uir.UIR{}, reference, []string{"dbo"})
+	scope := engine.Scope{Mode: engine.ScopeComplete, Schemas: []string{"dbo"}}
+	left, err := migrate.Enrich(uir.UIR{}, reference, scope)
 	if err != nil {
 		log.Fatal(err)
 	}
-	right, err := migrate.Enrich(uir.UIR{}, target, []string{"dbo"})
+	right, err := migrate.Enrich(uir.UIR{}, target, scope)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -26,7 +28,11 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("Artifact SHA-256: %s\n", artifact.Hash)
-	for _, step := range artifact.Plan.Steps {
-		fmt.Println(step.SQL)
+	for _, unit := range artifact.Units {
+		for _, op := range unit.Ops {
+			for _, statement := range op.Statements {
+				fmt.Println(statement.SQL)
+			}
+		}
 	}
 }

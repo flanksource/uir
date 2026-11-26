@@ -104,6 +104,11 @@ var _ = Describe("Fingerprint", func() {
 			columns := ordersColumns()
 			return ordersTable().Build(), ordersTable(columns[1], columns[0]).Build()
 		}, privateChange),
+		Entry("marking a declared table partial is a private change of the table", func() (uir.Node, uir.Node) {
+			partial := ordersTable().Build()
+			partial.Partial = true
+			return ordersTable().Build(), partial
+		}, privateChange),
 		Entry("rewriting a view definition with the same output columns is a content change", func() (uir.Node, uir.Node) {
 			return ordersView("select_v1"), ordersView("select_v2")
 		}, contentChange),

@@ -1,0 +1,14 @@
+version: 1
+mappings:
+  - match: 'scripts/{PreDeployment_*,PostDeployment_*}/SQLData.xml'
+    transform: >-
+      {
+        "sql": file.content,
+        "name": file.path.split("/")[1].split("Deployment_")[1],
+        "phase": file.path.split("/")[1].startsWith("Pre") ? "pre" : "post",
+        "labels": {
+          "country": file.path.split("/")[1].startsWith("Post")
+            ? file.path.find(r"(_(BW|MW|ZW|UG|SZ|KE))+/SQLData\.xml$").trimSuffix("/SQLData.xml").split("_").filter(code, code != "")
+            : []
+        }
+      }

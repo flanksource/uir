@@ -16,7 +16,9 @@ import (
 	"github.com/flanksource/sqlglot-go/database/migrate/workflow"
 )
 
-// SourceMapping selects source files and configures their producer.
+// SourceMapping selects source files and configures their producer. An entry
+// with Project instead takes its file mapping from a .sqlglot-go.yaml project,
+// so it sets only Dialect and DefaultSchema beside it.
 type SourceMapping struct {
 	Match         string `yaml:"match,omitempty"`
 	MatchRegex    string `yaml:"match_regex,omitempty"`
@@ -24,11 +26,16 @@ type SourceMapping struct {
 	Dialect       string `yaml:"dialect,omitempty"`
 	DefaultSchema string `yaml:"default_schema,omitempty"`
 	Transform     string `yaml:"transform,omitempty"`
-	regex         *regexp.Regexp
+	// Project is the path of a sqlglot project file, relative to the project root.
+	Project string `yaml:"project,omitempty"`
+	regex   *regexp.Regexp
 }
 
 func (m SourceMapping) selector() string {
-	if m.MatchRegex != "" {
+	switch {
+	case m.Project != "":
+		return "project:" + m.Project
+	case m.MatchRegex != "":
 		return "regex:" + m.MatchRegex
 	}
 	return "glob:" + m.Match
@@ -50,6 +57,9 @@ func validateSources(sources []SourceMapping) error {
 }
 
 func (m *SourceMapping) compile() error {
+	if m.Project != "" {
+		return m.compileProject()
+	}
 	if (m.Match == "") == (m.MatchRegex == "") {
 		return errors.New("specify one of match or match_regex")
 	}
@@ -112,8 +122,18 @@ func readMappedSources(directory string, mappings []SourceMapping) (_ []mappedSo
 		return nil, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, root.Close()) }()
+	projects, err := readProjectSources(root.FS(), mappings)
+	if err != nil {
+		return nil, err
+	}
 	var files []mappedSource
 	filenames := map[string]string{}
+	for _, source := range projects.sources {
+		if previous, exists := filenames[source.Filename]; exists {
+			return nil, fmt.Errorf("%s and %s both map to %s", previous, source.Inputs[0], source.Filename)
+		}
+		filenames[source.Filename] = source.Inputs[0]
+	}
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil || name == "." {
 			return err
@@ -127,6 +147,9 @@ func readMappedSources(directory string, mappings []SourceMapping) (_ []mappedSo
 		var selected *SourceMapping
 		var captures map[string]string
 		for _, mapping := range mappings {
+			if mapping.Project != "" {
+				continue
+			}
 			if values, ok := mapping.capture(name); ok {
 				if selected != nil {
 					return fmt.Errorf("%s matches %s and %s", name, selected.selector(), mapping.selector())
@@ -136,6 +159,9 @@ func readMappedSources(directory string, mappings []SourceMapping) (_ []mappedSo
 		}
 		if selected == nil {
 			return nil
+		}
+		if owner, claimed := projects.claimed[name]; claimed {
+			return fmt.Errorf("%s matches %s and %s", name, selected.selector(), owner)
 		}
 		file, err := selected.resolve(root.FS(), name, captures)
 		if err != nil {
@@ -148,7 +174,7 @@ func readMappedSources(directory string, mappings []SourceMapping) (_ []mappedSo
 		files = append(files, file)
 		return nil
 	})
-	return files, err
+	return append(files, projects.sources...), err
 }
 
 func (m SourceMapping) resolve(fsys fs.FS, name string, captures map[string]string) (mappedSource, error) {

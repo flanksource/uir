@@ -44,16 +44,24 @@ func publishSQL(ctx context.Context, database *gorm.DB, workDir string, sources 
 		},
 		symbols: map[string]indexer.PublishedSymbol{}, files: map[string]mappedSource{},
 	}
+	var declarations []mappedSource
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
 			return pub, "", err
 		}
-		if source.Producer != "sql" {
+		switch source.Producer {
+		case "sql":
+			if err := pub.addSource(source); err != nil {
+				return pub, "", err
+			}
+		case "hcl":
+			declarations = append(declarations, source)
+		default:
 			return pub, "", fmt.Errorf("%s: no mapped source producer %q", source.Filename, source.Producer)
 		}
-		if err := pub.addSource(source); err != nil {
-			return pub, "", err
-		}
+	}
+	if err := pub.addHCL(declarations); err != nil {
+		return pub, "", err
 	}
 	if len(pub.Documents) == 0 {
 		return pub, "", nil
@@ -132,10 +140,7 @@ func (pub *sqlPublication) declare(doc *storage.DocumentContent, fact declaratio
 }
 
 func (pub *sqlPublication) addAccess(doc *storage.DocumentContent, source mappedSource, position sqlPosition, operation access.Access, script string) {
-	name, schema, kind := operation.Object.Name, operation.Object.Schema, operation.ObjectKind
-	if source.Dialect == "tsql" || source.Dialect == "sqlite" {
-		name, schema = strings.ToLower(name), strings.ToLower(schema)
-	}
+	name, schema, kind := normalizedIdentifier(source.Dialect, operation.Object.Name), normalizedIdentifier(source.Dialect, operation.Object.Schema), operation.ObjectKind
 	if kind == "function" {
 		kind = "sql.function"
 	}

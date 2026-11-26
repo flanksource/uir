@@ -1,14 +1,12 @@
 package migrate
 
-import (
-	model "github.com/flanksource/sqlglot-go/migrate"
-	"github.com/flanksource/sqlglot-go/migrate/sqlserver"
-)
+import "github.com/flanksource/sqlglot-go/migrate/engine"
 
-func BuildArtifact(request Request) (model.Artifact, error) {
-	input, err := Select(request)
-	if err != nil {
-		return model.Artifact{}, err
-	}
-	return sqlserver.BuildArtifact(model.ArtifactRequest{Schemas: request.Target.SQLCatalog.Schemas, Request: input})
+// BuildArtifact plans the selected migration offline and returns the reviewed
+// artifact: the changes, the dependents they force to be rebuilt, the ordered
+// units of SQL and the hash binding them to the target and the selected desired
+// schema. Dependents come from the target catalogue.
+func BuildArtifact(request Request) (engine.Artifact, error) {
+	_, artifact, err := plan(request)
+	return artifact, err
 }

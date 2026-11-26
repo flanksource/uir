@@ -3477,6 +3477,10 @@
           "description": "The package or database scheme the node belongs to",
           "type": "string"
         },
+        "partial": {
+          "description": "Partial marks a table of a declared catalogue (an HCL declaration) that names only some of its members. A planner keeps the target's members it does not name instead of dropping them. A catalogue read from a database never sets it.",
+          "type": "boolean"
+        },
         "primaryKey": {
           "type": "array",
           "items": {
@@ -3766,10 +3770,13 @@
       "additionalProperties": false
     },
     "SQLCatalog": {
-      "description": "SQLCatalog records the inspection contract. A missing or older version cannot establish that absent database members are safe to remove.",
+      "description": "SQLCatalog records the inspection contract. A missing or older version cannot establish that absent database members are safe to remove. Complete says the catalogue holds every object of its schemas; Declared says it holds only the objects it names, as an HCL declaration does. A catalogue is one or the other, never both, and one that is neither is a partial inspection.",
       "type": "object",
       "properties": {
         "complete": {
+          "type": "boolean"
+        },
+        "declared": {
           "type": "boolean"
         },
         "dialect": {

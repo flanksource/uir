@@ -17,7 +17,7 @@ import (
 // ExternalIndexerVersion versions how Publish turns a publication into documents and hashes: it enters
 // the configuration hash of every external snapshot and is the indexer version of every external
 // document.
-const ExternalIndexerVersion = "external-v8"
+const ExternalIndexerVersion = "external-v9"
 
 const (
 	externalConfigurationVersion = "uir-external-configuration-v1"

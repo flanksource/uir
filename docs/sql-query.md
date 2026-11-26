@@ -105,6 +105,7 @@ Selector values can use double quotes, for example `func:"Premium Calc (Annual)"
 | `symbol.module`, `symbol.package` | string | The projected symbol's module key and package path. |
 | `symbol.owner`, `symbol.visibility` | string | Owning declaration's name and `exported` or `internal` visibility. |
 | `symbol.props`, `symbol.props.<field>` | object or schema type | Producer properties, including declared nested fields. |
+| `symbol.props.sql_type`, `symbol.props.field_type`, `symbol.props.nullable` | string, string, boolean | Builtin `column` symbols only: the SQL type name as declared, the portable UIR type, and whether the column accepts NULL. |
 | `symbol.type` | string | Resolved package-variable type; see [variable types](#resolved-variable-types). |
 | `symbol.metrics.param_count`, `symbol.metrics.body_lines` | integer | Callable measures; see [metrics](#stored-metrics). |
 | `symbol.metrics.<name>` | integer | A [producer metric](#producer-metrics) declared by a selected kind. |
@@ -115,6 +116,8 @@ Selector values can use double quotes, for example `func:"Premium Calc (Annual)"
 | `depth` | number | Recorded traversal hop distance. |
 | `relationship.kind`, `relationship.resolution` | string | Native kind and `static`, `dynamic`, `ambiguous`, or `unresolved` resolution. |
 | `relationship.props`, `relationship.props.<field>` | object or schema type | Native relationship properties, when present. |
+
+A `table` or `column` symbol declared by an HCL source is queried the same whether its table block sets `partial = true` or not: the flag says what a schema comparison does with the members the table omits (a complete table's are dropped, a partial one's are kept), not which symbols exist. See [lint](lint.md) and [selected SQL migrations](../sql/migrate/README.md).
 
 Symbol `SELECT *` includes the symbol, its identity/name/ownership/property fields, witness fields, and relationship fields. It does not automatically include variable types or metrics; request them explicitly. Missing optional facts are `NULL`; unavailable required type/metric capabilities fail as described below.
 

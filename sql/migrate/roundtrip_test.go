@@ -53,7 +53,7 @@ func fullSchema() model.Schema {
 var _ = Describe("Catalogue round trip", func() {
 	It("projects back every field the snapshot holds through persisted UIR JSON", func() {
 		snapshot := fullSchema()
-		document, err := migrate.Enrich(uir.UIR{}, snapshot, []string{"dbo"})
+		document, err := migrate.Enrich(uir.UIR{}, snapshot, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		encoded, err := json.Marshal(document)
 		Expect(err).NotTo(HaveOccurred())
@@ -74,7 +74,7 @@ var _ = Describe("Catalogue round trip", func() {
 		label.DefaultValue = &uir.TypedValue{Str: new("new")}
 		extracted.Columns = []uir.RecordColumn{label}
 
-		document, err := migrate.Enrich(uir.UIR{Tables: []uir.RecordTable{extracted}}, fullSchema(), []string{"dbo"})
+		document, err := migrate.Enrich(uir.UIR{Tables: []uir.RecordTable{extracted}}, fullSchema(), complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		orders := document.Tables[1]
 		Expect([]any{orders.Description, *orders.RowCount, orders.Comments}).To(Equal([]any{extracted.Description, int64(42), extracted.Comments}))

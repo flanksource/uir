@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,6 +38,7 @@ func LoadDomainCatalog(ctx context.Context, database *gorm.DB) (DomainCatalog, e
 	for _, row := range symbols {
 		catalog.Symbols[row.Name] = row.Schema
 	}
+	maps.Copy(catalog.Symbols, builtinPropertySchemas)
 	var relationships []RelationshipKind
 	if err := database.WithContext(ctx).Order("name").Find(&relationships).Error; err != nil {
 		return catalog, fmt.Errorf("load relationship kinds: %w", err)
@@ -50,6 +52,9 @@ func LoadDomainCatalog(ctx context.Context, database *gorm.DB) (DomainCatalog, e
 func RegisterDomainCatalog(ctx context.Context, database *gorm.DB, catalog DomainCatalog) error {
 	return database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for name, schema := range catalog.Symbols {
+			if _, builtin := builtinPropertySchemas[name]; builtin {
+				continue
+			}
 			if _, err := KindCode(ctx, tx, name); err != nil {
 				return err
 			}
