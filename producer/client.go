@@ -205,7 +205,6 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 		return nil, c.failure("%s answered with non-JSON on stdout: %v (%.200q)", method, err, reply)
 	}
 	if decoded.Error != nil {
-		c.Close()
 		return nil, c.failure("%s: %w", method, decoded.Error)
 	}
 	if decoded.ID == nil || *decoded.ID != c.nextID {
@@ -223,12 +222,13 @@ func (c *Client) readLine(ctx context.Context, method string) ([]byte, error) {
 		c.Close()
 		return nil, fmt.Errorf("producer %s: %s interrupted: %w", c.binary.Path, method, ctx.Err())
 	}
-	c.Close()
 	return nil, c.failure("producer exited before answering %s: %v", method, err)
 }
 
-// failure reports a producer problem with the tail of its stderr, which holds its own diagnosis.
+// failure stops the producer, then reports the problem with the tail of its stderr, which holds its
+// own diagnosis. Stopping first waits for the stderr copy to finish, so the tail is complete.
 func (c *Client) failure(format string, args ...any) error {
+	c.Close()
 	err := fmt.Errorf("producer %s: "+format, append([]any{c.binary.Path}, args...)...)
 	if tail := strings.TrimSpace(c.stderr.String()); tail != "" {
 		return fmt.Errorf("%w\nproducer stderr (tail):\n%s", err, tail)

@@ -39,9 +39,11 @@ func main() {
 		case "initialize":
 			protocol := "uir-producer/1"
 			if mode == "wrong-protocol" {
+				fmt.Fprintln(os.Stderr, "stub: built against uir-producer/0")
 				protocol = "uir-producer/0"
 			}
 			if mode == "garbage" {
+				fmt.Fprintln(os.Stderr, "stub: debug logging is writing to stdout")
 				fmt.Println("this is not json")
 				continue
 			}
