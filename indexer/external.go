@@ -53,11 +53,11 @@ func publishExternal(ctx context.Context, database *gorm.DB, publication Publica
 			return ModuleResult{}, fmt.Errorf("%w: %w", ErrInvalidPublication, err)
 		}
 	}
-	catalog, err := storage.LoadDomainCatalog(ctx, database)
+	registeredCatalog, err := storage.LoadDomainCatalog(ctx, database)
 	if err != nil {
 		return ModuleResult{}, err
 	}
-	catalog, err = publication.domainCatalog(catalog)
+	declared, err := publication.domainCatalog(registeredCatalog)
 	if err != nil {
 		return ModuleResult{}, fmt.Errorf("%w: %w", ErrInvalidPublication, err)
 	}
@@ -68,7 +68,7 @@ func publishExternal(ctx context.Context, database *gorm.DB, publication Publica
 				return err
 			}
 		}
-		if err := storage.RegisterDomainCatalog(ctx, transaction, catalog); err != nil {
+		if err := storage.RegisterDomainCatalog(ctx, transaction, publication.Options.Producer, declared); err != nil {
 			return err
 		}
 		var publishErr error
