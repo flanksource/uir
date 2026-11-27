@@ -33,7 +33,8 @@ func (m *SourceMapping) compileProject() error {
 }
 
 // projectSources are the sources every project entry maps, and the owner of
-// each project file, so a hand-written mapping cannot claim it too.
+// each file they read, a mapped file or a companion, so a hand-written mapping
+// or another project cannot claim it too.
 type projectSources struct {
 	sources []mappedSource
 	claimed map[string]string
@@ -50,11 +51,12 @@ func readProjectSources(root fs.FS, mappings []SourceMapping) (projectSources, e
 			return out, fmt.Errorf("project %s: %w", mapping.Project, err)
 		}
 		for _, source := range sources {
-			name := source.Inputs[0]
-			if owner, taken := out.claimed[name]; taken {
-				return out, fmt.Errorf("%s is mapped by %s and %s", name, owner, mapping.selector())
+			for _, name := range source.Inputs {
+				if owner, taken := out.claimed[name]; taken && owner != mapping.selector() {
+					return out, fmt.Errorf("%s is mapped by %s and %s", name, owner, mapping.selector())
+				}
+				out.claimed[name] = mapping.selector()
 			}
-			out.claimed[name] = mapping.selector()
 		}
 		out.sources = append(out.sources, sources...)
 	}

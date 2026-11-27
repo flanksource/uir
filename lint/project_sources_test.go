@@ -128,4 +128,15 @@ var _ = Describe("Sources taken from a sqlglot project", func() {
 		_, err := readMappedSources(root, []SourceMapping{{Project: ".sqlglot-go.yaml", Dialect: "tsql"}, {Match: "sql/*.sql", Dialect: "tsql"}})
 		Expect(err).To(MatchError(ContainSubstring("sql/a.sql matches glob:sql/*.sql and project:.sqlglot-go.yaml")))
 	})
+
+	It("refuses a hand-written mapping of a companion file a project source reads", func() {
+		root := GinkgoT().TempDir()
+		writeTree(root, map[string]string{
+			".sqlglot-go.yaml":      "version: 1\nmappings:\n  - match: 'scripts/*/data.xml'\n    transform: '{\"sql\": read(xmlpath(file.content, \"/root/entry[@name=\\\"SQLDATA\\\"]/@file\")), \"name\": \"Seed\"}'\n",
+			"scripts/a/data.xml":    "<root><entry name=\"SQLDATA\" file=\"SQLData.xml\"/></root>",
+			"scripts/a/SQLData.xml": "SELECT 1;\n",
+		})
+		_, err := readMappedSources(root, []SourceMapping{{Project: ".sqlglot-go.yaml", Dialect: "tsql"}, {Match: "scripts/*/SQLData.xml", Dialect: "tsql"}})
+		Expect(err).To(MatchError(ContainSubstring("scripts/a/SQLData.xml matches glob:scripts/*/SQLData.xml and project:.sqlglot-go.yaml")))
+	})
 })
