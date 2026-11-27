@@ -152,6 +152,7 @@ Globs are anchored to the whole string. `*` matches within one slash segment, `?
 | Function | Result and options |
 | --- | --- |
 | `files()` | Non-excluded indexed files, including files with zero definitions. Standalone source; `include_excluded => TRUE` also includes build-excluded snapshot members. |
+| `package_imports()` | One row per non-test package of each selected Go snapshot, with the size of its third-party [import budget](#package-import-budgets). Standalone source; no options. |
 | `definitions(s)` | Declaration witnesses, projecting the declared symbol. No options. |
 | `callers(s)` | Incoming witnesses to callables, projecting the enclosing caller; `depth` defaults to 1. |
 | `callees(s)` | Outgoing call witnesses, projecting the callee; `depth` defaults to 1. |
@@ -236,6 +237,42 @@ uir query "SELECT path, file.build_constraint FROM files(include_excluded => TRU
 The field reads hash-verified source bytes belonging to the immutable snapshot through the existing checkout/stored-blob/pinned-Git recovery path. No schema migration or reindex is required when those bytes remain available. Unavailable or corrupt source bytes and malformed or duplicate recognized directives are execution errors with source and snapshot context. Exact analysis fails explicitly beyond 65,536 decision nodes or on cancellation.
 
 Ordinary file and metric queries perform no additional source reads. Constraint queries recover source bytes on cache misses and reuse a bounded, per-pipeline cache of parsed headers keyed by content hash. Cold queries can read all selected Go source candidates before WHERE filtering; LIMIT limits returned rows, not this work. Querying historical snapshots never silently substitutes current checkout content.
+
+## Package import budgets
+
+`package_imports()` charges each package of a typed Go snapshot for the third-party code it pulls in, so a lint rule can cap how heavy one package may become:
+
+```sql
+SELECT path, file, package, count, direct, largest FROM package_imports() WHERE count >= 500 ORDER BY count DESC
+```
+
+| Field | Catalog type | Meaning |
+| --- | --- | --- |
+| `path` | string | The package directory relative to the checkout (`.` for the root package). |
+| `file` | string | The package's representative non-test Go file relative to the checkout: `doc.go` when present, else the first by name. Lint findings are reported against this file rather than the directory, so gavel's include globs, file scoping and nested `.gavel.yaml` `lint.ignore` entries (for example `{rule: dep-budget-package, source: uir}` in the package's own directory, or `{file: <dir>/**, ...}`) apply to the package. |
+| `package` | string | The package's import path. |
+| `module`, `snapshot` | string | The root key and snapshot ID, as for `files()`. |
+| `count` | integer | The number of distinct third-party packages in the transitive import closure of the package's own direct third-party imports, each direct import included. |
+| `direct` | integer | How many third-party packages the package imports directly. |
+| `largest` | string | Up to three direct imports with the biggest closures, largest first, as `import/path (closure size)`, for example `cloud.google.com/go/storage (455), k8s.io/client-go/kubernetes (352)`. Empty without direct third-party imports. |
+
+A package is third party when it is neither standard library nor in the counted package's own module. Weight reachable only through another package of the counted package's module is charged to that package, never to the importer: if `p` imports in-module `q` and `q` imports a large SDK, `q` carries the SDK and `p` does not, whereas a direct import of the SDK charges `p` its whole closure. Test files and test-only imports are not counted, and the walk never re-enters the package's own module. Build tags, `GOOS` and `GOARCH` are those of the snapshot's indexed build variant. A workspace sibling module (`go.work` or a local `replace`) is third party to its importers.
+
+`SELECT *` returns every field. `FROM package_imports() AS i` supports `i.count`, `i.direct` and `i.largest`. The source is standalone: it cannot feed symbol navigation.
+
+The import graph is recorded at index time, from the typed Go load of each snapshot, in `snapshot_import_graphs` ([`25_import_graphs.hcl`](../storage/migrations/25_import_graphs.hcl)): every non-standard-library package reachable from the root's non-test packages, with its module and its imports. Queries read that record and never run `go list`. `IndexerVersion` `go-types-v16` introduced it, so a checkout indexed earlier reindexes, and a snapshot with no recorded graph, such as one from a syntax-only analysis or an external producer, fails the query with reindex guidance. Changing `go.mod`, or the sources of a locally replaced module, produces a new snapshot with a fresh graph through the usual head-reuse checks.
+
+A lint rule that enforces a budget reads like any other query rule; `{{.count}}` and `{{.largest}}` are the projected columns:
+
+```yaml
+- id: dep-budget-package
+  severity: error
+  message: "{{.package}} imports {{.count}} third-party packages (budget 500); largest: {{.largest}}"
+  query: |
+    SELECT path, package, count, largest
+    FROM package_imports()
+    WHERE count >= 500
+```
 
 ## Stored metrics
 
@@ -343,7 +380,7 @@ The relevant response fields below show why `total` differs from the returned ro
 
 SQL CLI JSON and YAML retain this result envelope, including pre-limit totals and source witnesses. Human-readable output renders projected values, paths, or graphs. Compact CLI JSON retains its existing row format.
 
-`GET /api/v1/modules/query-catalog` supplies functions, registered kinds, fields, and property schemas for completion. `GET /api/v1/modules/suggest-selectors?...&language=sql` completes registered selector prefixes. The Query page persists language in its URL, renders projected columns, paths, and graphs, and opens witnesses in Source. The Query page and Cmd+K share SQL completion and positioned diagnostics. Ctrl/Cmd+Space requests suggestions; Ctrl/Cmd+Enter runs the query.
+`GET /api/v1/modules/query-catalog` supplies functions, registered kinds, the fields of a symbol source, the fields of each table function (`tables`, keyed `files` and `package_imports`), and property schemas for completion. `GET /api/v1/modules/suggest-selectors?...&language=sql` completes registered selector prefixes. The Query page persists language in its URL, renders projected columns, paths, and graphs, and opens witnesses in Source. The Query page and Cmd+K share SQL completion and positioned diagnostics. Ctrl/Cmd+Space requests suggestions; Ctrl/Cmd+Enter runs the query.
 
 Run the executable verification fixture with `gavel fixtures fixtures/sql-query.md`. It checks parser and query behavior, API integration, frontend models, and the runnable CLI publication.
 

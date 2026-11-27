@@ -38,6 +38,8 @@ type typedLoad struct {
 	parsed      map[string]string
 	loadFailure string
 	errors      []packages.Error
+	// importGraph is the load's package import graph; nil after a historical load failure.
+	importGraph *storage.ImportGraph
 }
 
 type packageLoadError struct{ err error }
@@ -106,6 +108,11 @@ func loadTyped(ctx context.Context, loadPackages packageLoader, root discoveredR
 			return typedLoad{}, fmt.Errorf("source %q of root %q changed: %w", file.PathKey, root.RootKey, ErrIndexInputsChanged)
 		}
 	}
+	graph, err := buildImportGraph(root, roots)
+	if err != nil {
+		return typedLoad{}, err
+	}
+	load.importGraph = &graph
 	return load, nil
 }
 

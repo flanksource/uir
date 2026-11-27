@@ -40,6 +40,10 @@ func (plan prunePlan) apply(ctx context.Context, tx *gorm.DB, result *PruneResul
 	if err := deleteOrphanSymbols(ctx, tx, sortedSet(candidates), result); err != nil {
 		return err
 	}
+	unused := "NOT EXISTS (SELECT 1 FROM snapshot_import_graphs WHERE snapshot_import_graphs.graph_hash = import_graph_blobs.graph_hash)"
+	if err := tx.WithContext(ctx).Where(unused).Delete(&ImportGraphBlob{}).Error; err != nil {
+		return fmt.Errorf("delete unused import graphs: %w", err)
+	}
 	return advancePruneEpoch(ctx, tx)
 }
 

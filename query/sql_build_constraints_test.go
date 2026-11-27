@@ -138,7 +138,7 @@ var _ = Describe("SQL build constraints", func() {
 		Expect(runQuery(ctx, pipeline, "SELECT * FROM files()", scope).Columns).To(HaveLen(8))
 		catalog, err := pipeline.QueryCatalog(ctx)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(catalog.Fields).To(HaveKeyWithValue("file.build_constraint", "string"))
+		Expect(catalog.Tables["files"]).To(HaveKeyWithValue("file.build_constraint", "string"))
 		Expect(catalog.Functions).To(ContainElement(And(HaveField("Name", "files"), HaveField("Options", ContainElement("include_excluded")))))
 	}, Entry("SQLite", "sqlite"), Entry("PostgreSQL", "postgres"))
 

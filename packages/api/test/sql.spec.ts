@@ -63,7 +63,7 @@ it("posts SQL with its selected language and preserves projected rows and witnes
 });
 
 it("loads the function, kind and property catalog for SQL completion", async () => {
-  const catalog = { functions: [], kinds: [], fields: {}, domains: { symbols: {}, relationships: {} } };
+  const catalog = { functions: [], kinds: [], fields: {}, tables: {}, domains: { symbols: {}, relationships: {} } };
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(catalog)));
   vi.stubGlobal("fetch", fetcher);
   await expect(getQueryCatalog()).resolves.toEqual(catalog);

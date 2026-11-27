@@ -95,7 +95,7 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 	if err != nil {
 		return ModuleQueryResult{}, err
 	}
-	rows := sqlRows{fields: fields, fileSource: source.function.Name == "files", visit: visit}
+	rows := sqlRows{fields: fields, table: sqlTableName(source), visit: visit}
 	if err := rows.bind(parsed); err != nil {
 		return ModuleQueryResult{}, err
 	}
@@ -125,20 +125,16 @@ func (pipeline *Pipeline) executeSQL(ctx context.Context, input string, options 
 		if requirements.Mode != storage.AnalysisSyntax {
 			return result, errors.New("query requires typed facts; selected snapshot contains syntax analysis")
 		}
-		if !rows.fileSource {
+		if rows.table == "" {
 			return session.sqlSyntaxRows(ctx, parsed, selection.scopes, rows, limit, result)
 		}
 	}
-	if rows.fileSource {
+	if rows.table != "" {
 		rows.predicate, err = rows.bindPredicate(ctx, nil, parsed.Where)
 		if err != nil {
 			return ModuleQueryResult{}, err
 		}
-		records, err := session.sqlFileRecords(ctx, sqlFileOptions{
-			scopes: selection.scopes, lines: rows.required["file.lines"], includeExcluded: source.options.includeExcluded,
-			declarations:    rows.required["file.functions"] || rows.required["file.structs"],
-			buildConstraint: rows.required["file.build_constraint"], buildTags: sortedKeys(rows.buildTags),
-		})
+		records, err := session.sqlTableRecords(ctx, source, rows, selection.scopes)
 		if err != nil {
 			return ModuleQueryResult{}, err
 		}

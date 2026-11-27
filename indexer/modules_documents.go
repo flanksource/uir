@@ -75,6 +75,15 @@ func createSiblingShapes(ctx context.Context, database *gorm.DB, snapshot storag
 	return nil
 }
 
+// createImportGraph records the import graph the snapshot's typed load read, refreshing a previous
+// record for the same reason createSiblingShapes does. A producer that read no Go load has none.
+func createImportGraph(ctx context.Context, database *gorm.DB, snapshot storage.ModuleSnapshot, graph *storage.ImportGraph) error {
+	if graph == nil {
+		return nil
+	}
+	return storage.SaveSnapshotImportGraph(ctx, database, snapshot.ID, *graph)
+}
+
 // createPostings writes a new document's postings under its ordinal, its root's ordinal, and each
 // symbol's handle.
 func createPostings(ctx context.Context, database *gorm.DB, document storage.Document, rootOrdinal int32, postings []extractedPosting, handles map[string]int64) error {

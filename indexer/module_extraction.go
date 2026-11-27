@@ -43,6 +43,8 @@ type moduleExtraction struct {
 	// shape a direct import presented and the digest of its sources; the map is nil when one import
 	// path presented two shapes, so the snapshot records none.
 	siblingShapes map[string]siblingRecord
+	// importGraph is the package import graph the load read; nil when the producer read no Go load.
+	importGraph *storage.ImportGraph
 	// implements are the snapshot's implements facts; a producer without types has none.
 	implements []implementsFact
 	// baseActive is the active documents of snapshot baseActiveOf, read while extracting a delta, so
@@ -167,6 +169,7 @@ func extractTypedLoad(ctx context.Context, load *typedLoad, base map[string]base
 	resolver := newSymbolResolver(load.origins)
 	extraction := moduleExtraction{
 		root: root, indexerVersion: IndexerVersion, indexStartedAt: startedAt, documents: map[string]extractedDocument{}, siblingShapes: map[string]siblingRecord{},
+		importGraph: load.importGraph,
 	}
 	extractor := &packageExtraction{
 		load: load, shapes: newExportShapes(resolver, load), builder: newDocumentBuilder(resolver), extraction: &extraction, base: base, inputHashes: map[string]string{},
