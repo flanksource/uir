@@ -92,6 +92,6 @@ var _ = Describe("Selected migrations", func() {
 		u := document(20)
 		u.SQLCatalog = nil
 		_, err := migrate.Schema(u)
-		Expect(err).To(MatchError(ContainSubstring("requires a complete SQL Server catalogue")))
+		Expect(err).To(MatchError(ContainSubstring("document has no SQL catalogue")))
 	})
 })

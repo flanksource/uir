@@ -36,6 +36,6 @@ var _ = Describe("Selected migration artifacts", func() {
 		target := document(20)
 		target.SQLCatalog = nil
 		_, err := migrate.BuildArtifact(migrate.Request{Reference: document(100), Target: target})
-		Expect(err).To(MatchError(ContainSubstring("requires a complete SQL Server catalogue")))
+		Expect(err).To(MatchError(ContainSubstring("document has no SQL catalogue")))
 	})
 })

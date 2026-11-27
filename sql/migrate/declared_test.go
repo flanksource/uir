@@ -2,6 +2,7 @@ package migrate_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -181,12 +182,25 @@ var _ = Describe("Declared reference catalogues", func() {
 		partial := reference()
 		partial.SQLCatalog.Declared = false
 		_, err := migrate.Select(migrate.Request{Reference: partial, Target: target()})
-		Expect(err).To(MatchError(ContainSubstring("reference: migration requires a complete SQL Server catalogue")))
+		Expect(err).To(MatchError(ContainSubstring("reference: SQL catalogue is neither complete nor declared")))
 		both := reference()
 		both.SQLCatalog.Complete = true
 		_, err = migrate.Select(migrate.Request{Reference: both, Target: target()})
 		Expect(err).To(MatchError(ContainSubstring("both complete and declared")))
 	})
+
+	DescribeTable("names why it refuses an invalid declared catalogue",
+		func(mutate func(*uir.SQLCatalog), message string) {
+			catalogue := reference()
+			mutate(catalogue.SQLCatalog)
+			_, err := migrate.Schema(catalogue)
+			Expect(err).To(MatchError(message))
+		},
+		Entry("another version", func(catalog *uir.SQLCatalog) { catalog.Version = migrate.CatalogVersion + 1 },
+			fmt.Sprintf("SQL catalogue is at version %d; migration reads version %d", migrate.CatalogVersion+1, migrate.CatalogVersion)),
+		Entry("another dialect", func(catalog *uir.SQLCatalog) { catalog.Dialect = "postgres" }, `SQL catalogue dialect is "postgres"; migration reads only SQL Server (tsql)`),
+		Entry("no schema", func(catalog *uir.SQLCatalog) { catalog.Schemas = nil }, "SQL catalogue covers no schema"),
+	)
 
 	It("refuses a declared target, which is not a baseline", func() {
 		_, err := migrate.Select(migrate.Request{Reference: reference(), Target: reference()})

@@ -17,18 +17,8 @@ import (
 // refused.
 func Schema(document uir.UIR) (model.Schema, error) {
 	catalog := document.SQLCatalog
-	if catalog == nil || (!catalog.Complete && !catalog.Declared) || catalog.Version != CatalogVersion || catalog.Dialect != "tsql" || len(catalog.Schemas) == 0 {
-		return model.Schema{}, fmt.Errorf("migration requires a complete SQL Server catalogue at version %d", CatalogVersion)
-	}
-	if catalog.Complete && catalog.Declared {
-		return model.Schema{}, fmt.Errorf("SQL catalogue is both complete and declared; it is one or the other")
-	}
-	seen := map[string]bool{}
-	for _, scope := range catalog.Schemas {
-		if strings.TrimSpace(scope) == "" || seen[scope] {
-			return model.Schema{}, fmt.Errorf("catalogue scope contains an empty or duplicate schema %q", scope)
-		}
-		seen[scope] = true
+	if err := checkCatalog(catalog); err != nil {
+		return model.Schema{}, err
 	}
 	if len(document.Modules)+len(document.Packages)+len(document.Types)+len(document.Records)+len(document.Endpoints)+len(document.Warnings) != 0 {
 		return model.Schema{}, fmt.Errorf("migration catalogue contains unsupported or discarded UIR nodes")
@@ -93,6 +83,32 @@ func Schema(document uir.UIR) (model.Schema, error) {
 	slices.SortFunc(out.TableTypes, func(a, b model.TableType) int { return compareNames(a.Name, b.Name) })
 	slices.SortFunc(out.Sequences, func(a, b model.Sequence) int { return compareNames(a.Name, b.Name) })
 	return out, validate(out, catalog)
+}
+
+// checkCatalog refuses a catalogue migration cannot read, naming why.
+func checkCatalog(catalog *uir.SQLCatalog) error {
+	switch {
+	case catalog == nil:
+		return fmt.Errorf("migration requires a complete or declared SQL Server catalogue; the document has no SQL catalogue")
+	case catalog.Complete && catalog.Declared:
+		return fmt.Errorf("SQL catalogue is both complete and declared; it is one or the other")
+	case !catalog.Complete && !catalog.Declared:
+		return fmt.Errorf("SQL catalogue is neither complete nor declared, as a partial inspection is; migration reads only one or the other")
+	case catalog.Version != CatalogVersion:
+		return fmt.Errorf("SQL catalogue is at version %d; migration reads version %d", catalog.Version, CatalogVersion)
+	case catalog.Dialect != "tsql":
+		return fmt.Errorf("SQL catalogue dialect is %q; migration reads only SQL Server (tsql)", catalog.Dialect)
+	case len(catalog.Schemas) == 0:
+		return fmt.Errorf("SQL catalogue covers no schema")
+	}
+	seen := map[string]bool{}
+	for _, scope := range catalog.Schemas {
+		if strings.TrimSpace(scope) == "" || seen[scope] {
+			return fmt.Errorf("catalogue scope contains an empty or duplicate schema %q", scope)
+		}
+		seen[scope] = true
+	}
+	return nil
 }
 
 // validate plans the schema against itself, which fails when the dialect
