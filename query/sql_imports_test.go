@@ -87,18 +87,32 @@ var _ = Describe("package_imports", func() {
 		Expect(result.Rows).To(Equal([]map[string]any{{"count": 5}}))
 	})
 
-	It("refuses a snapshot that recorded no import graph", func(ctx SpecContext) {
+	It("takes no rows from an external publication, which reads no Go load", func(ctx SpecContext) {
 		database := openQueryDatabase(ctx, "sqlite")
 		const root = "example.org/published-imports"
 		published := publishedText("package sample\n")
-		indexed, err := indexer.Publish(ctx, database, indexer.Publication{RootKey: root, Name: "imports", Location: indexer.ExternalLocation{URI: "test://imports"},
+		_, err := indexer.Publish(ctx, database, indexer.Publication{RootKey: root, Name: "imports", Location: indexer.ExternalLocation{URI: "test://imports"},
 			Documents: []indexer.PublishedDocument{published.document("a.go", root, []storage.DocumentSymbol{}, nil)}})
 		Expect(err).ToNot(HaveOccurred())
+		indexImports(ctx, database, importsWorkspace())
 		pipeline, err := query.NewPipeline(database)
 		Expect(err).ToNot(HaveOccurred())
 
-		_, err = pipeline.RunModules(ctx, columns, query.ModuleScopeOptions{SnapshotID: indexed.SnapshotID})
+		result := runQuery(ctx, pipeline, "SELECT module, path FROM package_imports() WHERE path = '.' ORDER BY module", query.ModuleScopeOptions{})
 
-		Expect(err).To(MatchError(And(ContainSubstring(indexed.SnapshotID), ContainSubstring("import graph"), ContainSubstring("reindex"))))
+		Expect(result.Rows).To(ContainElement(map[string]any{"module": importsRoot, "path": "."}))
+		Expect(result.Rows).ToNot(ContainElement(HaveKeyWithValue("module", root)))
+	})
+
+	It("refuses a Go snapshot that predates import graphs", func(ctx SpecContext) {
+		database := openQueryDatabase(ctx, "sqlite")
+		snapshot := indexImports(ctx, database, importsWorkspace())
+		Expect(database.Where("snapshot_id = ?", snapshot).Delete(&storage.SnapshotImportGraph{}).Error).To(Succeed())
+		pipeline, err := query.NewPipeline(database)
+		Expect(err).ToNot(HaveOccurred())
+
+		_, err = pipeline.RunModules(ctx, columns, query.ModuleScopeOptions{SnapshotID: snapshot})
+
+		Expect(err).To(MatchError(And(ContainSubstring(snapshot), ContainSubstring("import graph"), ContainSubstring("reindex"))))
 	})
 })

@@ -118,9 +118,15 @@ func (closure importClosures) largest(direct []int, module int) string {
 	return strings.Join(listed, ", ")
 }
 
+// sqlImportRecords are the package_imports() rows of every scope whose producer read a Go load. An
+// external publication (indexer.Publish) reads none, so it records no import graph and has no row; a
+// Go snapshot without one predates import graphs and is refused.
 func (pipeline *Pipeline) sqlImportRecords(ctx context.Context, scopes []moduleScope) ([]sqlRecord, error) {
 	var records []sqlRecord
 	for _, scope := range scopes {
+		if scope.location.Kind == storage.LocationExternal {
+			continue
+		}
 		graph, err := storage.LoadSnapshotImportGraph(ctx, pipeline.database, scope.snapshot.ID)
 		if err != nil {
 			return nil, err
