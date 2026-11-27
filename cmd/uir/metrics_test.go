@@ -57,7 +57,9 @@ var _ = Describe("SQL metrics API", func() {
 		var catalog query.SQLCatalog
 		Expect(json.Unmarshal(response.Body.Bytes(), &catalog)).To(Succeed())
 		Expect(catalog.Functions).To(ContainElement(And(HaveField("Name", "files"), HaveField("Arguments", 0))))
-		Expect(catalog.Fields).To(HaveKeyWithValue("file.lines", "integer"))
 		Expect(catalog.Fields).To(HaveKeyWithValue("symbol.metrics.param_count", "integer"))
+		Expect(catalog.Fields).ToNot(Or(HaveKey("file.lines"), HaveKey("count")), "a table's fields are listed under that table only")
+		Expect(catalog.Tables["files"]).To(And(HaveKeyWithValue("file.lines", "integer"), Not(HaveKey("count"))))
+		Expect(catalog.Tables["package_imports"]).To(And(HaveKeyWithValue("count", "integer"), HaveKeyWithValue("largest", "string"), Not(HaveKey("file.lines"))))
 	})
 })

@@ -189,6 +189,7 @@ export type QueryCatalog = {
   functions: { name: string; arguments: number; options: string[] | null; terminal: boolean; depth?: number }[];
   kinds: { name: string; category: string }[];
   fields: Record<string, string>;
+  tables: Record<string, Record<string, string>>;
   domains: { symbols: Record<string, unknown>; relationships: Record<string, { name: string; type: string; schema?: unknown }> };
 };
 export type ModuleGraphDirection = "callees" | "callers" | "both";

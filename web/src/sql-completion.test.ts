@@ -5,7 +5,11 @@ import { isSQL, sqlCompletions } from "./sql-completion";
 const catalog: QueryCatalog = {
   functions: [{ name: "traverse", arguments: 1, options: ["via", "direction", "depth"], terminal: false }, { name: "files", arguments: 0, options: ["include_excluded"], terminal: false }],
   kinds: [{ name: "http.route", category: "member" }],
-  fields: { "symbol.name": "string", "symbol.type": "string", "symbol.props.method": "string", "symbol.metrics.param_count": "integer", "symbol.metrics.body_lines": "integer", "file.lines": "integer", "file.definitions": "integer", "file.build_constraint": "string", path: "string" },
+  fields: { "symbol.name": "string", "symbol.type": "string", "symbol.props.method": "string", "symbol.metrics.param_count": "integer", "symbol.metrics.body_lines": "integer", path: "string" },
+  tables: {
+    files: { path: "string", "file.lines": "integer", "file.definitions": "integer", "file.build_constraint": "string" },
+    package_imports: { path: "string", file: "string", count: "integer", direct: "integer", largest: "string" },
+  },
   domains: { symbols: {}, relationships: { "http.handled_by": { name: "http.handled_by", type: "reference" } } },
 };
 const complete = (text: string) => sqlCompletions(text, text.length, catalog);
@@ -30,6 +34,13 @@ describe("SQL completion", () => {
     expect(complete("SELECT * FROM files() WHERE symbol.").choices).toEqual([]);
     expect(complete("SELECT * FROM func:* WHERE file.").choices).toEqual([]);
     expect(complete("SELECT * FROM func:* WHERE symbol.metrics.pa").choices).toContainEqual(expect.objectContaining({ label: "symbol.metrics.param_count" }));
+  });
+  it("completes only the fields of the table function a query reads", () => {
+    const labels = (text: string) => complete(text).choices.map((choice) => choice.label);
+    expect(labels("SELECT * FROM package_imports() AS p WHERE p.c")).toEqual(["p.count"]);
+    expect(labels("SELECT * FROM package_imports() WHERE fi")).toEqual(["file"]);
+    expect(labels("SELECT * FROM files() WHERE co")).toEqual([]);
+    expect(labels("SELECT * FROM func:* WHERE la")).toEqual([]);
   });
   it("detects the SELECT token and explicit language without consuming compact names", () => {
     expect(["SELECT *", " select", "SELECT1", '"SELECT"', "func:SELECT"].map((s) => isSQL(s))).toEqual([true, true, false, false, false]);

@@ -28,13 +28,12 @@ export function sqlCompletions(expression: string, offset: number, catalog: Quer
     fn?.options?.forEach((option) => add(option, "Named option", `${option} => `));
   } else {
     const alias = /\bFROM\s+[\s\S]*?\bAS\s+([\p{L}_][\p{L}\p{N}_]*)\s*(?:WHERE|ORDER|LIMIT|$)/iu.exec(expression)?.[1];
-    const files = /\bFROM\s+files\s*\(/i.test(expression);
-    Object.entries(catalog.fields).forEach(([field, type]) => {
-      if (files && !field.startsWith("file.") && !["path", "module", "package", "snapshot"].includes(field)) return;
-      if (!files && field.startsWith("file.")) return;
+    const called = /\bFROM\s+([\p{L}_][\p{L}\p{N}_]*)\s*\(/iu.exec(expression)?.[1].toLowerCase() ?? "";
+    const table = Object.hasOwn(catalog.tables, called) ? catalog.tables[called] : undefined;
+    Object.entries(table ?? catalog.fields).forEach(([field, type]) => {
       add(field, type);
-      if (alias && field.startsWith("symbol.props.")) add(`${alias}.${field.slice("symbol.props.".length)}`, type);
-      if (alias && files) add(`${alias}.${field.replace(/^file\./, "")}`, type);
+      if (alias && !table && field.startsWith("symbol.props.")) add(`${alias}.${field.slice("symbol.props.".length)}`, type);
+      if (alias && table) add(`${alias}.${field.replace(/^file\./, "")}`, type);
     });
   }
   ["SELECT", "FROM", "AS", "WHERE", "ORDER BY", "LIMIT", "MATCH", "IMATCH", "REQUIRES", "IN", "NOT", "AND", "OR", "IS NULL", "IS NOT NULL", "ASC", "DESC"].forEach((word) => add(word, "SQL keyword", `${word} `));

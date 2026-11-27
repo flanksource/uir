@@ -380,7 +380,7 @@ The relevant response fields below show why `total` differs from the returned ro
 
 SQL CLI JSON and YAML retain this result envelope, including pre-limit totals and source witnesses. Human-readable output renders projected values, paths, or graphs. Compact CLI JSON retains its existing row format.
 
-`GET /api/v1/modules/query-catalog` supplies functions, registered kinds, fields, and property schemas for completion. `GET /api/v1/modules/suggest-selectors?...&language=sql` completes registered selector prefixes. The Query page persists language in its URL, renders projected columns, paths, and graphs, and opens witnesses in Source. The Query page and Cmd+K share SQL completion and positioned diagnostics. Ctrl/Cmd+Space requests suggestions; Ctrl/Cmd+Enter runs the query.
+`GET /api/v1/modules/query-catalog` supplies functions, registered kinds, the fields of a symbol source, the fields of each table function (`tables`, keyed `files` and `package_imports`), and property schemas for completion. `GET /api/v1/modules/suggest-selectors?...&language=sql` completes registered selector prefixes. The Query page persists language in its URL, renders projected columns, paths, and graphs, and opens witnesses in Source. The Query page and Cmd+K share SQL completion and positioned diagnostics. Ctrl/Cmd+Space requests suggestions; Ctrl/Cmd+Enter runs the query.
 
 Run the executable verification fixture with `gavel fixtures fixtures/sql-query.md`. It checks parser and query behavior, API integration, frontend models, and the runnable CLI publication.
 
