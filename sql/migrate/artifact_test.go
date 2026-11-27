@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
-	planner "github.com/flanksource/sqlglot-go/migrate/sqlserver"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/uir/sql/migrate"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -20,21 +20,22 @@ var _ = Describe("Selected migration artifacts", func() {
 		}
 		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: reference, Target: target, Selections: selections})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(planner.ValidateArtifact(artifact)).To(Succeed())
-		Expect(artifact.Request.Desired.Tables[0].Checks).To(BeEmpty())
-		Expect(artifact.Request.Desired.Tables[0].Indexes).To(ConsistOf(artifact.Request.Current.Tables[0].Indexes))
+		Expect(engine.Validate(artifact)).To(Succeed())
+		Expect(artifact.Scope.Mode).To(Equal(engine.ScopeComplete))
+		Expect(artifact.Desired.Tables[0].Checks).To(BeEmpty())
+		Expect(artifact.Desired.Tables[0].Indexes).To(ConsistOf(artifact.Baseline.Tables[0].Indexes))
 		slices.Reverse(selections)
 		again, err := migrate.BuildArtifact(migrate.Request{Reference: reference, Target: target, Selections: selections})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(again.Hash).To(Equal(artifact.Hash))
 		*target.Tables[0].Columns[2].MaxLength = 30
-		Expect(planner.ValidateArtifact(artifact)).To(Succeed())
+		Expect(engine.Validate(artifact)).To(Succeed())
 	})
 
 	It("refuses incomplete snapshots before compiling an artifact", func() {
 		target := document(20)
 		target.SQLCatalog = nil
 		_, err := migrate.BuildArtifact(migrate.Request{Reference: document(100), Target: target})
-		Expect(err).To(MatchError(ContainSubstring("complete SQL Server catalogue")))
+		Expect(err).To(MatchError(ContainSubstring("document has no SQL catalogue")))
 	})
 })

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/uir"
 	"github.com/flanksource/uir/sql/migrate"
 	. "github.com/onsi/ginkgo/v2"
@@ -31,6 +32,26 @@ func document(width int) uir.UIR {
 	return uir.UIR{SQLCatalog: &uir.SQLCatalog{Version: migrate.CatalogVersion, Dialect: "tsql", Schemas: []string{"dbo"}, Complete: true}, Tables: []uir.RecordTable{table}}
 }
 
+func complete(schemas ...string) engine.Scope {
+	return engine.Scope{Mode: engine.ScopeComplete, Schemas: schemas}
+}
+
+func declared(schemas ...string) engine.Scope {
+	return engine.Scope{Mode: engine.ScopeDeclared, Schemas: schemas}
+}
+
+func statements(artifact engine.Artifact) []string {
+	var out []string
+	for _, unit := range artifact.Units {
+		for _, op := range unit.Ops {
+			for _, statement := range op.Statements {
+				out = append(out, statement.SQL)
+			}
+		}
+	}
+	return out
+}
+
 var _ = Describe("Selected migrations", func() {
 	orders := model.Name{Schema: "dbo", Name: "orders"}
 	It("changes one selected column and preserves unselected target members", func() {
@@ -43,13 +64,9 @@ var _ = Describe("Selected migrations", func() {
 		Expect(input.Desired.Tables[0].Indexes).To(Equal(input.Current.Tables[0].Indexes))
 		Expect(input.Desired.Tables[0].Checks).To(Equal(input.Current.Tables[0].Checks))
 		Expect(*target.Tables[0].Columns[2].MaxLength).To(Equal(20))
-		plan, err := migrate.Plan(migrate.Request{Reference: reference, Target: target, Selections: []migrate.Selection{{Kind: "column", Object: orders, Member: "label"}}})
+		artifact, err := migrate.BuildArtifact(migrate.Request{Reference: reference, Target: target, Selections: []migrate.Selection{{Kind: "column", Object: orders, Member: "label"}}})
 		Expect(err).NotTo(HaveOccurred())
-		var statements []string
-		for _, step := range plan.Steps {
-			statements = append(statements, step.SQL)
-		}
-		Expect(statements).To(Equal([]string{
+		Expect(statements(artifact)).To(Equal([]string{
 			"ALTER TABLE [dbo].[orders] DROP CONSTRAINT [DF_label]",
 			"ALTER TABLE [dbo].[orders] ALTER COLUMN [label] nvarchar(100) COLLATE Latin1_General_CI_AS NOT NULL",
 			"ALTER TABLE [dbo].[orders] ADD CONSTRAINT [DF_label] DEFAULT (N'pending') FOR [label]",
@@ -75,6 +92,6 @@ var _ = Describe("Selected migrations", func() {
 		u := document(20)
 		u.SQLCatalog = nil
 		_, err := migrate.Schema(u)
-		Expect(err).To(MatchError(ContainSubstring("complete SQL Server catalogue")))
+		Expect(err).To(MatchError(ContainSubstring("document has no SQL catalogue")))
 	})
 })

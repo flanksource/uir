@@ -1,0 +1,15 @@
+version: 1
+sources:
+  - project: .sqlglot-go.yaml
+    dialect: tsql
+lint:
+  compatibility_level: 130
+  rules:
+    - id: no-ledger-writes
+      query: 'finance.ledger ~w'
+      message: 'Migration writes to {{.symbol}}'
+    - id: no-mask-pan-calls
+      query: >-
+        SELECT symbol.name AS name FROM references(sql.function:mask_pan)
+        WHERE role = 'call' AND symbol.package = 'dbo'
+      message: 'Migration calls dbo.{{.name}}'

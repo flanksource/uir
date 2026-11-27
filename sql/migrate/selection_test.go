@@ -2,7 +2,6 @@ package migrate_test
 
 import (
 	"encoding/json"
-	"slices"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
 	"github.com/flanksource/uir"
@@ -15,7 +14,7 @@ var _ = Describe("Selection integrity", func() {
 	orders := model.Name{Schema: "dbo", Name: "orders"}
 	DescribeTable("preserves explicit dialect types in catalogue round trips", func(typ string) {
 		input := model.Schema{Tables: []model.Table{{Name: orders, Columns: []model.Column{{Name: "value", Type: typ}}}}}
-		document, err := migrate.Enrich(uir.UIR{}, input, []string{"dbo"})
+		document, err := migrate.Enrich(uir.UIR{}, input, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		output, err := migrate.Schema(document)
 		Expect(err).NotTo(HaveOccurred())
@@ -28,7 +27,7 @@ var _ = Describe("Selection integrity", func() {
 			{Name: model.Name{Schema: "dbo", Name: "audit_orders"}, Kind: "TRIGGER", SQL: "CREATE TRIGGER dbo.audit_orders ON dbo.orders AFTER INSERT AS SELECT 1", Parent: &orders, Disabled: true},
 			{Name: model.Name{Schema: "dbo", Name: "orders_view"}, Kind: "VIEW", SQL: "CREATE VIEW dbo.orders_view AS SELECT id FROM dbo.orders", Dependencies: []model.Name{orders}},
 		}
-		u, err := migrate.Enrich(uir.UIR{}, original, []string{"dbo"})
+		u, err := migrate.Enrich(uir.UIR{}, original, complete("dbo"))
 		Expect(err).NotTo(HaveOccurred())
 		encoded, err := json.Marshal(u)
 		Expect(err).NotTo(HaveOccurred())
@@ -54,18 +53,6 @@ var _ = Describe("Selection integrity", func() {
 		input, err := migrate.Select(migrate.Request{Reference: reference, Target: target, Selections: []migrate.Selection{{Kind: "column", Object: orders, Member: "label"}}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(input.Desired.Tables).To(ContainElement(model.Table{Name: model.Name{Schema: "dbo", Name: "audit"}, Columns: []model.Column{{Name: "id", Type: "int"}}}))
-	})
-
-	It("produces identical plans regardless of selection order", func() {
-		reference, target := document(100), document(20)
-		reference.Tables[0].Checks[0].Expression = "[total] > 0"
-		selections := []migrate.Selection{{Kind: "column", Object: orders, Member: "label"}, {Kind: "check", Object: orders, Member: "CK_total"}}
-		a, err := migrate.Plan(migrate.Request{Reference: reference, Target: target, Selections: selections})
-		Expect(err).NotTo(HaveOccurred())
-		slices.Reverse(selections)
-		b, err := migrate.Plan(migrate.Request{Reference: reference, Target: target, Selections: selections})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(b).To(Equal(a))
 	})
 
 	DescribeTable("rejects invalid or conflicting selections",

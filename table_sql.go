@@ -1,12 +1,16 @@
 package uir
 
 // SQLCatalog records the inspection contract. A missing or older version cannot
-// establish that absent database members are safe to remove.
+// establish that absent database members are safe to remove. Complete says the
+// catalogue holds every object of its schemas; Declared says it holds only the
+// objects it names, as an HCL declaration does. A catalogue is one or the other,
+// never both, and one that is neither is a partial inspection.
 type SQLCatalog struct {
 	Version    int            `json:"version"`
 	Dialect    string         `json:"dialect"`
 	Schemas    []string       `json:"schemas"`
 	Complete   bool           `json:"complete"`
+	Declared   bool           `json:"declared,omitempty"`
 	TableTypes []SQLTableType `json:"tableTypes,omitempty"`
 	Sequences  []SQLSequence  `json:"sequences,omitempty"`
 }

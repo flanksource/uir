@@ -231,6 +231,20 @@ func (writer *sourceWriter) content(packagePath string) (storage.DocumentContent
 	return content, nil
 }
 
+// columnProperties are the properties of a builtin column symbol that
+// storage.BuiltinColumnProperties describes. An unknown SQL or portable type is
+// left out rather than written empty.
+func columnProperties(column uir.RecordColumn) map[string]any {
+	props := map[string]any{"nullable": column.Nullable}
+	if column.SQLType != "" {
+		props["sql_type"] = column.SQLType
+	}
+	if column.FieldType != "" {
+		props["field_type"] = string(column.FieldType)
+	}
+	return props
+}
+
 func (written writtenSymbol) documentSymbol(lines syntax.LineIndex) (storage.DocumentSymbol, error) {
 	node, symbol := written.symbol.node, written.symbol
 	prints := uir.Fingerprint(node)
@@ -254,6 +268,9 @@ func (written writtenSymbol) documentSymbol(lines syntax.LineIndex) (storage.Doc
 		Name: lines.RangeOf(written.name), NameBytes: written.name, Extent: lines.RangeOf(written.extent), ExtentBytes: written.extent,
 		Identifier: node.GetIdentifier(), ParentKey: symbol.parentKey, ChildSlot: symbol.slot, Ordinal: symbol.ordinal,
 		Payload: storage.JSON(payload), SemanticHash: node.Hash(),
+	}
+	if column, isColumn := node.(uir.RecordColumn); isColumn {
+		declared.Props = columnProperties(column)
 	}
 	if declared.Kind == symbolhandle.KindType.String() {
 		if declared.TypeForm, err = storage.ClassifyTypeShape(declared); err != nil {

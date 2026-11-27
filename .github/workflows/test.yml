@@ -103,6 +103,11 @@ jobs:
       - name: Build browser assets
         run: make web-build
 
+      # The spec starts the server with go run inside a 120s hook; a cold module
+      # and build cache (any go.sum change) otherwise spends that on compiling.
+      - name: Compile API server
+        run: go build -o /dev/null ./cmd/uir
+
       - name: Test API client
         run: pnpm --dir packages/api run test
 

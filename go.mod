@@ -5,12 +5,12 @@ go 1.27.4
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/flanksource/clicky v1.21.100
-	github.com/flanksource/commons v1.64.2
-	github.com/flanksource/commons-db v0.1.88
-	github.com/flanksource/commons-db/cmd/query v0.1.88
-	github.com/flanksource/gavel v0.0.80-0.20261124164458-8d9e762ca8ee
-	github.com/flanksource/sqlglot-go v1.3.7
+	github.com/flanksource/clicky v1.21.101
+	github.com/flanksource/commons v1.65.0
+	github.com/flanksource/commons-db v0.1.91
+	github.com/flanksource/commons-db/cmd/query v0.1.91
+	github.com/flanksource/gavel v0.0.103
+	github.com/flanksource/sqlglot-go v1.6.1
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3
@@ -105,7 +105,6 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bluekeyes/go-gitdiff v0.8.1 // indirect
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
@@ -148,10 +147,9 @@ require (
 	github.com/flanksource/captain v0.0.92 // indirect
 	github.com/flanksource/clicky/aichat v1.21.100 // indirect
 	github.com/flanksource/clicky/valkey v1.21.94 // indirect
-	github.com/flanksource/commons-db/recordstore v0.1.88 // indirect
-	github.com/flanksource/commons-db/tracing v0.1.88 // indirect
-	github.com/flanksource/gavel/sdk v0.1.0 // indirect
-	github.com/flanksource/gomplate/v4 v4.0.3 // indirect
+	github.com/flanksource/commons-db/recordstore v0.1.91 // indirect
+	github.com/flanksource/commons-db/tracing v0.1.91 // indirect
+	github.com/flanksource/gomplate/v4 v4.0.4 // indirect
 	github.com/flanksource/is-healthy v1.0.93 // indirect
 	github.com/flanksource/kubectl-neat v1.0.4 // indirect
 	github.com/flanksource/repomap v0.4.1 // indirect
@@ -218,7 +216,6 @@ require (
 	github.com/henvic/httpretty v0.1.4 // indirect
 	github.com/hexops/gotextdiff v1.0.3 // indirect
 	github.com/hirochachacha/go-smb2 v1.1.0 // indirect
-	github.com/hmarr/codeowners v1.2.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/itchyny/gojq v0.12.19 // indirect
@@ -281,7 +278,6 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
-	github.com/pgplex/pgparser v0.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect

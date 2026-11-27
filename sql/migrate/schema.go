@@ -6,21 +6,19 @@ import (
 	"strings"
 
 	model "github.com/flanksource/sqlglot-go/migrate"
-	"github.com/flanksource/sqlglot-go/migrate/sqlserver"
+	"github.com/flanksource/sqlglot-go/migrate/engine"
 	"github.com/flanksource/uir"
 )
 
+// Schema projects a catalogue document into the neutral schema the planner
+// reads. A complete catalogue (SQLCatalog.Complete) holds every object of its
+// schemas; a declared one (SQLCatalog.Declared) holds only the objects it
+// names. A catalogue that is neither, such as a partial inspection, or both is
+// refused.
 func Schema(document uir.UIR) (model.Schema, error) {
 	catalog := document.SQLCatalog
-	if catalog == nil || !catalog.Complete || catalog.Version != CatalogVersion || catalog.Dialect != "tsql" || len(catalog.Schemas) == 0 {
-		return model.Schema{}, fmt.Errorf("migration requires a complete SQL Server catalogue at version %d", CatalogVersion)
-	}
-	seen := map[string]bool{}
-	for _, scope := range catalog.Schemas {
-		if strings.TrimSpace(scope) == "" || seen[scope] {
-			return model.Schema{}, fmt.Errorf("catalogue scope contains an empty or duplicate schema %q", scope)
-		}
-		seen[scope] = true
+	if err := checkCatalog(catalog); err != nil {
+		return model.Schema{}, err
 	}
 	if len(document.Modules)+len(document.Packages)+len(document.Types)+len(document.Records)+len(document.Endpoints)+len(document.Warnings) != 0 {
 		return model.Schema{}, fmt.Errorf("migration catalogue contains unsupported or discarded UIR nodes")
@@ -33,7 +31,10 @@ func Schema(document uir.UIR) (model.Schema, error) {
 		name := model.Name{Schema: table.Package, Name: table.Type}
 		switch table.RecordType {
 		case uir.RecordTypeTable:
-			t, err := tableSchema(table)
+			if table.Partial && catalog.Complete {
+				return out, partialInComplete(name)
+			}
+			t, err := tableSchema(table, catalog.Complete)
 			if err != nil {
 				return out, fmt.Errorf("table %s.%s: %w", name.Schema, name.Name, err)
 			}
@@ -81,10 +82,47 @@ func Schema(document uir.UIR) (model.Schema, error) {
 	slices.SortFunc(out.Definitions, func(a, b model.Definition) int { return compareNames(a.Name, b.Name) })
 	slices.SortFunc(out.TableTypes, func(a, b model.TableType) int { return compareNames(a.Name, b.Name) })
 	slices.SortFunc(out.Sequences, func(a, b model.Sequence) int { return compareNames(a.Name, b.Name) })
-	if _, err := sqlserver.Plan(model.Request{Current: out, Desired: out}); err != nil {
-		return out, err
+	return out, validate(out, catalog)
+}
+
+// checkCatalog refuses a catalogue migration cannot read, naming why.
+func checkCatalog(catalog *uir.SQLCatalog) error {
+	switch {
+	case catalog == nil:
+		return fmt.Errorf("migration requires a complete or declared SQL Server catalogue; the document has no SQL catalogue")
+	case catalog.Complete && catalog.Declared:
+		return fmt.Errorf("SQL catalogue is both complete and declared; it is one or the other")
+	case !catalog.Complete && !catalog.Declared:
+		return fmt.Errorf("SQL catalogue is neither complete nor declared, as a partial inspection is; migration reads only one or the other")
+	case catalog.Version != CatalogVersion:
+		return fmt.Errorf("SQL catalogue is at version %d; migration reads version %d", catalog.Version, CatalogVersion)
+	case catalog.Dialect != "tsql":
+		return fmt.Errorf("SQL catalogue dialect is %q; migration reads only SQL Server (tsql)", catalog.Dialect)
+	case len(catalog.Schemas) == 0:
+		return fmt.Errorf("SQL catalogue covers no schema")
 	}
-	return out, nil
+	seen := map[string]bool{}
+	for _, scope := range catalog.Schemas {
+		if strings.TrimSpace(scope) == "" || seen[scope] {
+			return fmt.Errorf("catalogue scope contains an empty or duplicate schema %q", scope)
+		}
+		seen[scope] = true
+	}
+	return nil
+}
+
+// validate plans the schema against itself, which fails when the dialect
+// cannot read it.
+func validate(schema model.Schema, catalog *uir.SQLCatalog) error {
+	scope := engine.Scope{Mode: engine.ScopeComplete, Schemas: catalog.Schemas}
+	if !catalog.Complete {
+		scope = engine.Scope{Mode: engine.ScopeDeclared, Schemas: catalog.Schemas, Objects: objectNames(schema)}
+		if len(scope.Objects) == 0 {
+			return fmt.Errorf("a declared catalogue must declare at least one object")
+		}
+	}
+	_, err := engine.Plan(engine.PlanRequest{Dialect: dialect, Scope: scope, Current: schema, Desired: schema})
+	return err
 }
 
 func compareNames(a, b model.Name) int {
@@ -94,8 +132,11 @@ func compareNames(a, b model.Name) int {
 	return strings.Compare(a.Name, b.Name)
 }
 
-func tableSchema(table uir.RecordTable) (model.Table, error) {
-	out := model.Table{Name: model.Name{Schema: table.Package, Name: table.Type}}
+// tableSchema projects a table. An inspected (complete) catalogue names every
+// default constraint, since a drop needs the name; a declared one may leave a
+// default unnamed and let the server name it.
+func tableSchema(table uir.RecordTable, complete bool) (model.Table, error) {
+	out := model.Table{Name: model.Name{Schema: table.Package, Name: table.Type}, Partial: table.Partial}
 	for _, column := range table.Columns {
 		c, err := columnSchema(column)
 		if err != nil {
@@ -104,7 +145,7 @@ func tableSchema(table uir.RecordTable) (model.Table, error) {
 		out.Columns = append(out.Columns, c)
 	}
 	for _, column := range out.Columns {
-		if column.Default != nil && column.Default.Name == "" {
+		if complete && column.Default != nil && column.Default.Name == "" {
 			return out, fmt.Errorf("column %s: default constraint name is missing", column.Name)
 		}
 	}
@@ -273,14 +314,4 @@ func objectNames(schema model.Schema) []model.Name {
 		out = append(out, s.Name)
 	}
 	return out
-}
-
-func sameScopes(a, b *uir.SQLCatalog) error {
-	x, y := slices.Clone(a.Schemas), slices.Clone(b.Schemas)
-	slices.Sort(x)
-	slices.Sort(y)
-	if !slices.Equal(x, y) {
-		return fmt.Errorf("reference and target catalogue scopes differ")
-	}
-	return nil
 }

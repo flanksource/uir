@@ -9,12 +9,17 @@ import (
 // tableLayers: the public layer is the record type and the output columns as a
 // set; the private layer adds column order and private column facts, the primary
 // key, indexes, foreign keys and trigger declarations; the content layer is the
-// view definition and the trigger bodies. RowCount is in no layer.
+// view definition and the trigger bodies. A declared table's partial marker is
+// private: it changes what a planner does with the members the table omits, not
+// its shape. RowCount is in no layer.
 func tableLayers(t RecordTable) layers {
 	var c composition
 	c.add(NodesOf(t.Columns), orderedPrivately, false)
 	if len(t.PrimaryKey) > 0 {
 		c.private = append(c.private, "primary key ("+strings.Join(t.PrimaryKey, ", ")+")")
+	}
+	if t.Partial {
+		c.private = append(c.private, "partial")
 	}
 	c.add(NodesOf(t.Indexes), unordered, true)
 	c.add(NodesOf(t.ForeignKeys), unordered, true)

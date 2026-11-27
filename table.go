@@ -24,13 +24,17 @@ type RecordTable struct {
 	nodeBase
 	Description string `json:"description,omitempty"`
 	// RecordTypeTable or RecordTypeView.
-	RecordType      RecordType         `json:"recordType,omitempty"`
-	Columns         []RecordColumn     `json:"columns,omitempty"`
-	PrimaryKey      []string           `json:"primaryKey,omitempty"`
-	Indexes         []RecordIndex      `json:"indexes,omitempty"`
-	ForeignKeys     []RecordForeignKey `json:"foreignKeys,omitempty"`
-	Checks          []SQLCheck         `json:"checks,omitempty"`
-	SQLDependencies []SQLDependency    `json:"sqlDependencies,omitempty"`
+	RecordType  RecordType         `json:"recordType,omitempty"`
+	Columns     []RecordColumn     `json:"columns,omitempty"`
+	PrimaryKey  []string           `json:"primaryKey,omitempty"`
+	Indexes     []RecordIndex      `json:"indexes,omitempty"`
+	ForeignKeys []RecordForeignKey `json:"foreignKeys,omitempty"`
+	Checks      []SQLCheck         `json:"checks,omitempty"`
+	// Partial marks a table of a declared catalogue (an HCL declaration) that names
+	// only some of its members. A planner keeps the target's members it does not
+	// name instead of dropping them. A catalogue read from a database never sets it.
+	Partial         bool            `json:"partial,omitempty"`
+	SQLDependencies []SQLDependency `json:"sqlDependencies,omitempty"`
 	// SQLRuntimeDependencies and SQLQuotedIdentifierOff describe a view's module.
 	SQLRuntimeDependencies []SQLRuntimeDependency `json:"sqlRuntimeDependencies,omitempty"`
 	SQLQuotedIdentifierOff bool                   `json:"sqlQuotedIdentifierOff,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,6 +38,7 @@ func LoadDomainCatalog(ctx context.Context, database *gorm.DB) (DomainCatalog, e
 	for _, row := range symbols {
 		catalog.Symbols[row.Name] = row.Schema
 	}
+	maps.Copy(catalog.Symbols, builtinPropertySchemas)
 	var relationships []RelationshipKind
 	if err := database.WithContext(ctx).Order("name").Find(&relationships).Error; err != nil {
 		return catalog, fmt.Errorf("load relationship kinds: %w", err)
@@ -47,7 +49,14 @@ func LoadDomainCatalog(ctx context.Context, database *gorm.DB) (DomainCatalog, e
 	return catalog, nil
 }
 
-func RegisterDomainCatalog(ctx context.Context, database *gorm.DB, catalog DomainCatalog) error {
+// RegisterDomainCatalog stores what producer declares beyond kind names. A property schema for a
+// builtin kind is refused: builtin kinds carry their own, which LoadDomainCatalog always reports.
+func RegisterDomainCatalog(ctx context.Context, database *gorm.DB, producer string, catalog DomainCatalog) error {
+	for name := range catalog.Symbols {
+		if _, builtin := builtinPropertySchemas[name]; builtin {
+			return fmt.Errorf("producer %q registers a property schema for builtin kind %q; builtin kinds carry their own", producer, name)
+		}
+	}
 	return database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for name, schema := range catalog.Symbols {
 			if _, err := KindCode(ctx, tx, name); err != nil {
