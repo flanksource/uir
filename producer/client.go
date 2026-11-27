@@ -205,6 +205,7 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 		return nil, c.failure("%s answered with non-JSON on stdout: %v (%.200q)", method, err, reply)
 	}
 	if decoded.Error != nil {
+		c.Close()
 		return nil, c.failure("%s: %w", method, decoded.Error)
 	}
 	if decoded.ID == nil || *decoded.ID != c.nextID {
