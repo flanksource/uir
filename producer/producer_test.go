@@ -57,10 +57,10 @@ var _ = Describe("producer client", func() {
 			Expect(err.Error()).To(ContainSubstring(fragment))
 		}
 	},
-		Entry("a producer on another protocol version", "wrong-protocol", `protocol "uir-producer/0"`, "upgrade"),
+		Entry("a producer on another protocol version", "wrong-protocol", `protocol "uir-producer/0"`, "upgrade", "built against uir-producer/0"),
 		Entry("a JSON-RPC error", "rpc-error", "security scan failed", "set GITHUB_TOKEN", "GITHUB_TOKEN is not set"),
 		Entry("a child that exits mid-request", "crash", "exited before answering publication", "boom while scanning"),
-		Entry("non-JSON on stdout", "garbage", "non-JSON on stdout"),
+		Entry("non-JSON on stdout", "garbage", "non-JSON on stdout", "debug logging is writing to stdout"),
 	)
 
 	It("kills the child when the context is cancelled", func() {
